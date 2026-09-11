@@ -44,16 +44,33 @@ Ces chiffres suffisent à décider, pas à servir de référence avant et après
 | Décision | Choix |
 |---|---|
 | Introspection de l'arbre | méthode C++ `inspect_tree`, avec recompilation |
+| Instrumentation | compteurs C++ d'inférences et de succès de table |
 | Chemins mesurés | `mcts_search` **et** `step_analysis` |
 | Barrière qualité | deux niveaux, 250 puzzles en rapide, 2500 avant fusion |
 | Benchmark cassé | supprimé |
+| Race `parse_position` | **corrigée ici**, en première tâche |
+
+### La race `parse_position` fait partie de ce chantier
+
+Elle était jusqu'ici rangée en préalable implicite du batching (`docs/backlog.md` §3). Elle
+devient la première tâche de ce pipeline, pour deux raisons.
+
+`parse_position` (`uci.py:97`) appelle `mcts.update_root()` et reconstruit `self.board` sans
+arrêter le fil de recherche, alors que `stop_search()` existe déjà (`uci.py:245`) et joint
+proprement le fil. Le correctif tient en une ligne au début de la méthode.
+
+Aujourd'hui c'est un bug latent qui se manifeste rarement. Avec le batching, la boucle
+détiendra des `MCTSNode*` bruts pendant plusieurs millisecondes d'appel GPU, et `update_root`
+détruit l'arbre sous ces pointeurs : cela deviendrait une écriture en mémoire libérée. La
+corriger maintenant, pendant qu'on touche déjà à ce code et qu'aucune pression de
+performance ne s'exerce, coûte moins cher que de la corriger en plein chantier de batching.
 
 ## 4. Architecture
 
-### Côté C++, une seule addition
+### Côté C++, deux additions
 
-`MCTS::inspect_tree() const` parcourt l'arbre d'analyse et renvoie un `TreeReport`, sur le
-modèle exact de `PerftReport` déjà en place :
+**1. L'introspection de l'arbre.** `MCTS::inspect_tree() const` parcourt l'arbre d'analyse et
+renvoie un `TreeReport`, sur le modèle exact de `PerftReport` déjà en place :
 
 ```cpp
 struct TreeReport {
@@ -63,6 +80,43 @@ struct TreeReport {
     std::vector<std::string> messages; // tronque, comme MAX_PERFT_MESSAGES
 };
 ```
+
+**2. Des compteurs, sans lesquels deux des trois grandeurs annoncées seraient
+inobservables.** Le moteur n'a aujourd'hui **aucune instrumentation** : ni compteur d'appels
+au réseau, ni compteur de succès de table. Le nombre d'inférences par seconde et le taux de
+succès de la table ne peuvent donc pas être déduits de l'extérieur.
+
+```cpp
+struct SearchCounters {          // membres de MCTS, en std::atomic (voir ci-dessous)
+    uint64_t nn_calls = 0;      // appels reels a m_evaluator->evaluate
+    uint64_t tt_hits = 0;       // consultations de table reussies
+    uint64_t tt_misses = 0;     // consultations echouees
+    uint64_t terminal_hits = 0; // simulations arretees sur un noeud terminal
+};
+```
+
+**Les compteurs doivent être des `std::atomic<uint64_t>` en `memory_order_relaxed`.** Le
+self-play appelle `m_shared_mcts->advance_to_leaf` depuis une région OpenMP à 8 fils
+(`selfplay_manager.cpp:376-387`) sur une instance de `MCTS` partagée. Des entiers simples y
+seraient une course de données, donc un comportement indéfini et des comptes perdus.
+
+Le coût est négligeable : un incrément atomique relâché vaut quelques dizaines de cycles,
+face à une inférence de 2,7 ms. `get_counters()` renvoie une copie non atomique, un instantané
+suffisant pour un rapport.
+
+Avec `MCTS::get_counters() const` et `MCTS::reset_counters()`. Les compteurs sont de simples
+incréments sur des chemins déjà existants, aux quatre sites suivants :
+
+| Site | Compteur |
+|---|---|
+| `select_leaf:88`, expansion paresseuse, branche de succès | `tt_hits` |
+| `expand_node_single:163`, branche de succès | `tt_hits` |
+| `expand_node_single:176`, appel à `evaluate` | `nn_calls`, et `tt_misses` sur la branche |
+| `advance_to_leaf:460`, chemin batché du self-play | `tt_hits` ou `tt_misses` |
+
+Il y a bien **trois** sites de consultation de la table et non deux, l'expansion paresseuse
+de `select_leaf` étant facile à oublier. Les compter tous les trois est nécessaire pour que
+le taux affiché soit celui de la recherche et non d'une partie d'elle.
 
 Aucune modification du code de recherche existant. Le parcours reste là où vit l'arbre, et
 le côté Python se réduit à une assertion sur `violations`.
@@ -105,10 +159,15 @@ seconde, la recherche tourne à 375 simulations par seconde, et confondre les de
 erreur d'un facteur 4000.
 
 - **simulations par seconde** : le débit de la recherche ;
-- **inférences par seconde** : le nombre d'appels réels au réseau ;
-- **taux de succès de la table de transposition** : la part des simulations qui évitent le
-  réseau. C'est la grandeur que le batching déplacera le plus, puisqu'il change le rapport
-  entre descentes et évaluations.
+- **inférences par seconde** : le nombre d'appels réels au réseau, lu dans `nn_calls` ;
+- **taux de succès de la table de transposition** : `tt_hits / (tt_hits + tt_misses)`, soit
+  la part des descentes qui évitent le réseau. C'est la grandeur que le batching déplacera
+  le plus, puisqu'il change le rapport entre descentes et évaluations.
+
+Les deux dernières viennent des compteurs ajoutés en section 4. Elles ne se déduisent pas du
+nombre de simulations : une simulation peut se terminer sur un nœud terminal ou sur un succès
+de table, auquel cas elle ne coûte aucune inférence. C'est exactement ce rapport que le
+batching va modifier, donc le mesurer avant est indispensable.
 
 **La variance.** Chaque configuration est mesurée sur plusieurs passages, avec médiane et
 étendue. Sans cela, un gain de 5 pour cent serait indistinguable du bruit.
@@ -189,9 +248,14 @@ la qualité.
 
 ## 10. Risques
 
-**La recompilation devient obligatoire.** Ajouter `inspect_tree` impose de reconstruire le
-module avant de pouvoir lancer le harnais. Le `.pyd` est suivi par git, donc il doit être
-commité avec la source pour que les deux ne se désynchronisent jamais.
+**La recompilation devient obligatoire.** `inspect_tree` et les compteurs imposent de
+reconstruire le module avant de pouvoir lancer le harnais. Le `.pyd` est suivi par git, donc
+il doit être commité avec la source pour que les deux ne se désynchronisent jamais.
+
+**Les compteurs touchent un chemin partagé.** Ils sont incrémentés depuis `select_leaf` et
+`advance_to_leaf`, donc aussi pendant le self-play, en parallèle. D'où le choix d'atomiques
+relâchés. Il faut vérifier après coup que le débit de self-play n'a pas bougé, sinon
+l'instrumentation aurait dégradé ce qu'elle mesure.
 
 **Le coût du parcours.** `inspect_tree` visite tout l'arbre, donc son coût croît avec le
 nombre de simulations. Il ne doit jamais être appelé dans la boucle de mesure de débit, sous
