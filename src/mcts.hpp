@@ -9,6 +9,8 @@
 #include <mutex>
 #include <array>
 #include <random>
+#include <atomic>
+#include <string>
 
 #include "onnx_evaluator.hpp"
 
@@ -48,6 +50,26 @@ struct MoveStats {
     float prior;
 };
 
+
+// Instrumentation de la recherche. Sans elle, le nombre d'inferences et le taux
+// de succes de la table ne sont pas observables de l'exterieur.
+struct SearchCounters {
+    uint64_t nn_calls = 0;
+    uint64_t tt_hits = 0;
+    uint64_t tt_misses = 0;
+    uint64_t terminal_hits = 0;
+};
+
+
+// Rapport de parcours de l'arbre, sur le modele de PerftReport.
+struct TreeReport {
+    uint64_t nodes = 0;
+    uint64_t max_depth = 0;
+    uint64_t violations = 0;
+    std::vector<std::string> messages;
+};
+
+
 class MCTS {
 private:
     Ort::AllocatorWithDefaultOptions allocator;
@@ -61,6 +83,16 @@ private:
     ONNXEvaluator* m_evaluator;
     std::mt19937 m_noise_rng;
 
+    // Atomiques parce que le self-play appelle advance_to_leaf depuis une region
+    // OpenMP a 8 fils sur une instance de MCTS partagee
+    // (selfplay_manager.cpp:376-387). L'ordre relache suffit : on ne lit ces
+    // compteurs qu'apres la recherche, et un incremente relache coute quelques
+    // dizaines de cycles contre 2,7 ms d'inference.
+    std::atomic<uint64_t> m_nn_calls{ 0 };
+    std::atomic<uint64_t> m_tt_hits{ 0 };
+    std::atomic<uint64_t> m_tt_misses{ 0 };
+    std::atomic<uint64_t> m_terminal_hits{ 0 };
+
 public:
     MCTS(ONNXEvaluator* evaluator, size_t tt_size = DEFAULT_TT_SIZE);
 
@@ -73,6 +105,11 @@ public:
     float expand_node_single(MCTSNode* node, Chessboard& board);
     bool apply_move_by_index(Chessboard& board, int idx);
     void add_dirichlet_noise(MCTSNode* root, float epsilon);
+
+    // Observabilite, definie dans mcts_observe.cpp.
+    SearchCounters get_counters() const;
+    void reset_counters();
+    TreeReport inspect_tree() const;
 
     // recherche mcts asynchrone
     MCTSNode* advance_to_leaf(MCTSNode* root, Chessboard& board, float c_puct, int& moves_played);

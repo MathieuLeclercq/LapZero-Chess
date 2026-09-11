@@ -23,10 +23,14 @@ NB_FAST_PLIES_OPENING = 10
 #                     MOTEUR UCI
 # ============================================================
 class UCIEngine:
-    def __init__(self):
+    def __init__(self, evaluator=None, mcts=None):
         self.board = chess_engine.Chessboard()
-        self.evaluator = chess_engine.ONNXEvaluator(MODEL_PATH)
-        self.mcts = chess_engine.MCTS(self.evaluator, tt_size=4_000_000)
+        # Injection pour les tests : sans elle, construire un UCIEngine exige un
+        # modele ONNX, et MODEL_PATH pointe vers une autre machine.
+        self.evaluator = (evaluator if evaluator is not None
+                          else chess_engine.ONNXEvaluator(MODEL_PATH))
+        self.mcts = (mcts if mcts is not None
+                     else chess_engine.MCTS(self.evaluator, tt_size=4_000_000))
         self.search_thread = None
 
         self.stop_event = threading.Event()
@@ -95,6 +99,12 @@ class UCIEngine:
                 break
 
     def parse_position(self, tokens):
+        # La recherche doit etre arretee AVANT toute modification de l'arbre ou
+        # du plateau. update_root detruit le reste de l'arbre par unique_ptr, et
+        # le fil de recherche y descend encore. Voir
+        # docs/superpowers/specs/2026-09-11-search-bench-design.md section 3.
+        self.stop_search()
+
         moves_idx = -1
         if len(tokens) > 0 and tokens[0] == "startpos":
             moves_idx = 2 if len(tokens) > 1 and tokens[1] == "moves" else -1

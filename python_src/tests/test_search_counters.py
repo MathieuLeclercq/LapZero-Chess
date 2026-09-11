@@ -1,0 +1,127 @@
+"""Les compteurs d'instrumentation de la recherche.
+
+Sans eux, le nombre d'inferences par seconde et le taux de succes de la table
+ne sont pas observables de l'exterieur : le moteur n'avait aucune
+instrumentation.
+"""
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+RACINE = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(RACINE / "python_src"))
+os.add_dll_directory(str(RACINE / "python_src"))
+
+import chess_engine
+
+CHECKPOINT = (RACINE / "python_src" / "checkpoints"
+              / "2026_04_23_23h25_iter316_unsupervised.pt")
+
+pytestmark = pytest.mark.skipif(not CHECKPOINT.exists(),
+                                reason="checkpoint absent")
+
+TAILLE_TT = 8192
+
+
+@pytest.fixture(scope="module")
+def evaluateur(tmp_path_factory):
+    import puzzle_bench
+
+    chemin, _ = puzzle_bench.resoudre_modele(
+        CHECKPOINT, tmp_path_factory.mktemp("onnx"))
+    return chess_engine.ONNXEvaluator(str(chemin), False)
+
+
+def _plateau():
+    board = chess_engine.Chessboard()
+    board.set_startup_pieces()
+    return board
+
+
+def test_les_compteurs_partent_a_zero(evaluateur):
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+
+    c = mcts.get_counters()
+
+    assert c.nn_calls == 0
+    assert c.tt_hits == 0
+    assert c.tt_misses == 0
+    assert c.terminal_hits == 0
+
+
+def test_une_recherche_declenche_des_inferences(evaluateur):
+    """Sur un arbre neuf, nn_calls vaut simulations + 1.
+
+    Le + 1 est l'expansion de la racine, que step_analysis fait hors de la
+    boucle de simulations (mcts.cpp:374-377). Chaque simulation coute ensuite
+    au plus une inference : moins si elle s'arrete sur un noeud terminal ou sur
+    un succes de table.
+    """
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    mcts.step_analysis(_plateau(), 50, 1.4)
+
+    c = mcts.get_counters()
+
+    assert c.nn_calls > 0, "aucune inference comptee"
+    assert c.nn_calls <= 51, f"plus d'inferences que de simulations : {c.nn_calls}"
+
+
+def test_chaque_defaut_de_table_declenche_exactement_une_inference(evaluateur):
+    """Par construction : expand_node_single compte un defaut puis appelle le
+    reseau sur le meme chemin. Si les deux divergeaient, un des compteurs
+    serait mal place."""
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    mcts.step_analysis(_plateau(), 200, 1.4)
+
+    c = mcts.get_counters()
+
+    assert c.tt_misses == c.nn_calls, (
+        f"defauts {c.tt_misses} contre inferences {c.nn_calls}")
+
+
+def test_les_succes_de_table_ne_sont_pas_comptes_deux_fois(evaluateur):
+    """select_leaf consulte la table, et sur echec fait break ; l'appelant
+    enchaine alors sur expand_node_single qui refait la meme consultation sur
+    la meme position. L'echec n'est donc compte que dans expand_node_single.
+    Si les deux le comptaient, tt_misses depasserait nn_calls."""
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    mcts.step_analysis(_plateau(), 200, 1.4)
+
+    c = mcts.get_counters()
+
+    assert c.tt_misses <= c.nn_calls, "defauts comptes deux fois"
+
+
+def test_les_consultations_de_table_sont_comptees(evaluateur):
+    """Sur 400 simulations depuis la position de depart, l'arbre revisite
+    forcement des positions, donc la table sert."""
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    mcts.step_analysis(_plateau(), 400, 1.4)
+
+    c = mcts.get_counters()
+
+    assert c.tt_hits + c.tt_misses > 0
+    assert 0.0 <= c.tt_hits / (c.tt_hits + c.tt_misses) <= 1.0
+
+
+def test_reset_counters_remet_tout_a_zero(evaluateur):
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    mcts.step_analysis(_plateau(), 20, 1.4)
+    assert mcts.get_counters().nn_calls > 0
+
+    mcts.reset_counters()
+
+    c = mcts.get_counters()
+    assert (c.nn_calls, c.tt_hits, c.tt_misses, c.terminal_hits) == (0, 0, 0, 0)
+
+
+def test_les_compteurs_sont_par_instance(evaluateur):
+    a = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    b = chess_engine.MCTS(evaluateur, TAILLE_TT)
+
+    a.step_analysis(_plateau(), 20, 1.4)
+
+    assert a.get_counters().nn_calls > 0
+    assert b.get_counters().nn_calls == 0
