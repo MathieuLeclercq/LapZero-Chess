@@ -137,6 +137,7 @@ PYBIND11_MODULE(chess_engine, m) {
         .def_readonly("nodes", &TreeReport::nodes)
         .def_readonly("max_depth", &TreeReport::max_depth)
         .def_readonly("violations", &TreeReport::violations)
+        .def_readonly("en_vol", &TreeReport::en_vol)
         .def_readonly("messages", &TreeReport::messages);
 
     py::class_<ONNXEvaluator>(m, "ONNXEvaluator")

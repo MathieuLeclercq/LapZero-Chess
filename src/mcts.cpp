@@ -12,14 +12,14 @@
 
 MCTSNode::MCTSNode(float prior, int move_idx, MCTSNode* parent)
     : prior(prior), move_idx(move_idx), parent(parent),
-    visit_count(0), total_value(0.0f), is_terminal(false) {
+    visit_count(0), total_value(0.0f), is_terminal(false), n_in_flight(0) {
 }
 
 float MCTSNode::ucb_score(float exploration_factor, float parent_q, float fpu_reduction) const {
     // Implémentation du FPU de LeelaChess0
     // Si noeud pas visité, on ne met pas sa Q value à 0,
     // mais on utilise celle du parent.
-    float u = exploration_factor * prior / (1.0f + visit_count);
+    float u = exploration_factor * prior / (1.0f + visit_count + n_in_flight);
     float exploitation = (visit_count == 0) ? (parent_q - fpu_reduction) : -q_value();
     return exploitation + u;
 }
@@ -81,6 +81,12 @@ std::pair<MCTSNode*, int> MCTS::select_leaf(MCTSNode* root, Chessboard& board, f
 
         // --- 1. EXPANSION PARESSEUSE ---
         if (node->children.empty()) {
+            // Collision : cette feuille est deja collectee par une descente
+            // precedente du meme lot. Sans cette garde, l'expansion paresseuse
+            // ci-dessous lui creerait des enfants, et le backup du lot lui en
+            // creerait un second jeu. L'arbre serait corrompu en silence.
+            if (node->n_in_flight > 0) break;
+
             uint64_t hash = board.getZobristHash();
             size_t tt_idx = hash % m_tt_size;
             const TTEntry& entry = transposition_table[tt_idx];

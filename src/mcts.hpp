@@ -21,6 +21,12 @@ struct MCTSNode {
     float prior;
     float total_value;
 
+    // Virtual loss, approche LC0 : nombre de descentes en cours passant par ce
+    // noeud. N'entre QUE dans le denominateur du terme U de ucb_score, jamais
+    // dans q_value(), sans quoi Q se diluerait vers zero et avantagerait les
+    // noeuds perdants.
+    uint32_t n_in_flight;
+
     MCTSNode* parent;
     std::vector<std::pair<int, std::unique_ptr<MCTSNode>>> children;
 
@@ -66,6 +72,7 @@ struct TreeReport {
     uint64_t nodes = 0;
     uint64_t max_depth = 0;
     uint64_t violations = 0;
+    uint64_t en_vol = 0;   // noeuds dont n_in_flight != 0 apres la recherche
     std::vector<std::string> messages;
 };
 

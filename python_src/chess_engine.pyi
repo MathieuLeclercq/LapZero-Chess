@@ -300,6 +300,9 @@ class Square:
         ...
 class TreeReport:
     @property
+    def en_vol(self) -> int:
+        ...
+    @property
     def max_depth(self) -> int:
         ...
     @property

@@ -38,6 +38,7 @@ static void ajouter_violation(TreeReport& rapport, const std::string& message) {
 
 static void visiter(const MCTSNode* node, uint64_t profondeur, TreeReport& rapport) {
     rapport.nodes++;
+    if (node->n_in_flight != 0) rapport.en_vol++;
     rapport.max_depth = std::max(rapport.max_depth, profondeur);
 
     // Un noeud terminal n'est jamais developpe.
