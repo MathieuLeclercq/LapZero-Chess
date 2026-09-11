@@ -75,3 +75,76 @@ def test_agreger_donne_mediane_et_etendue():
 
 def test_agreger_supporte_une_liste_vide():
     assert agreger([]) == {}
+
+
+from search_bench import format_report
+
+CONTEXTE = {
+    "modele": "iter316.onnx",
+    "iteration": 316,
+    "global_step": 19415,
+    "passages": 5,
+    "simulations": 400,
+    "c_puct": 1.4,
+}
+
+
+def _agr():
+    return agreger([_m(duree_s=1.0), _m(duree_s=1.1)])
+
+
+def test_format_report_contient_le_contexte():
+    texte = format_report(_agr(), CONTEXTE, [])
+
+    assert "iter316.onnx" in texte
+    assert "19415" in texte
+    assert "simulations par seconde" in texte
+
+
+def test_format_report_n_ecrit_jamais_noeuds_par_seconde():
+    """Le perft mesure 1,6 million de noeuds par seconde, la recherche 295
+    simulations par seconde : confondre les deux serait une erreur d'un facteur
+    5000."""
+    texte = format_report(_agr(), CONTEXTE, []).lower()
+
+    assert "noeuds par seconde" not in texte
+    assert "nps" not in texte
+
+
+def test_format_report_ne_contient_pas_de_tiret_cadratin():
+    assert "—" not in format_report(_agr(), CONTEXTE, [])
+
+
+def test_format_report_signale_les_violations():
+    invariants = [("depart", 120, 5, 3, ["enfant duplique, move_idx 42"])]
+
+    texte = format_report(_agr(), CONTEXTE, invariants)
+
+    assert "enfant duplique" in texte
+    assert "3" in texte
+
+
+def test_format_report_est_muet_quand_aucune_violation():
+    invariants = [("depart", 120, 5, 0, [])]
+
+    texte = format_report(_agr(), CONTEXTE, invariants)
+
+    assert "enfant duplique" not in texte
+    assert "aucune violation" in texte.lower()
+
+
+def test_format_report_produit_des_tables_markdown_valides():
+    """Garde fou repris du banc de puzzles : un separateur dont le nombre de
+    cellules ne correspond pas a l'en-tete casse le rendu en silence."""
+    lignes = format_report(_agr(), CONTEXTE, []).split("\n")
+    separateurs = [i for i, l in enumerate(lignes)
+                   if set(l) <= set("|-") and "-" in l]
+
+    assert separateurs
+    for i in separateurs:
+        cols = lignes[i].count("|") - 1
+        assert lignes[i - 1].count("|") - 1 == cols, lignes[i - 1]
+        j = i + 1
+        while j < len(lignes) and lignes[j].startswith("|"):
+            assert lignes[j].count("|") - 1 == cols, lignes[j]
+            j += 1

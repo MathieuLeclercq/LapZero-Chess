@@ -132,3 +132,163 @@ def agreger(mesures: list) -> dict:
                 m.terminal_hits for m in lot),
         }
     return resultat
+
+
+_EN_TETE = (
+    "| Position | Chemin | passages | sims/s (med) | sims/s (min a max) "
+    "| inferences/s (med) | taux table |\n"
+    "|---|---|---|---|---|---|---|"
+)
+
+
+def format_report(agr: dict, contexte: dict, invariants: list) -> str:
+    """Rapport markdown.
+
+    Le mot « noeuds par seconde » est proscrit : le perft mesure la generation
+    de coups a plus de 1,6 million de noeuds par seconde, la recherche tourne a
+    environ 295 simulations par seconde.
+    """
+    lignes = [
+        "# Banc de recherche : resultats",
+        "",
+        f"Modele : `{contexte['modele']}`, iteration {contexte['iteration']}, "
+        f"global_step {contexte['global_step']}",
+        f"Protocole : {contexte['passages']} passages, "
+        f"{contexte['simulations']} simulations, c_puct {contexte['c_puct']}, "
+        "CPU, un seul processus",
+        "",
+        "Trois grandeurs distinctes. Les **simulations par seconde** mesurent le",
+        "debit de la recherche. Les **inferences par seconde** comptent les appels",
+        "reels au reseau : une simulation qui s'arrete sur un noeud terminal ou",
+        "sur un succes de table n'en coute aucune. Le **taux de table** est la",
+        "part des consultations reussies.",
+        "",
+        "## Debit",
+        "",
+        _EN_TETE,
+    ]
+
+    for cle in sorted(agr):
+        position, chemin = cle
+        a = agr[cle]
+        lignes.append(
+            f"| {position} | {chemin} | {a['passages']} "
+            f"| {a['sims_par_seconde_median']:.1f} "
+            f"| {a['sims_par_seconde_min']:.1f} a {a['sims_par_seconde_max']:.1f} "
+            f"| {a['inferences_par_seconde_median']:.1f} "
+            f"| {100 * a['taux_table_median']:.1f} % |"
+        )
+
+    lignes += ["", "## Invariants d'arbre", ""]
+    if not invariants:
+        lignes.append("Non verifies lors de ce passage.")
+    else:
+        lignes += [
+            "| Position | noeuds | profondeur max | violations |",
+            "|---|---|---|---|",
+        ]
+        total = 0
+        for (position, nodes, max_depth, violations, _messages) in invariants:
+            total += violations
+            lignes.append(
+                f"| {position} | {nodes} | {max_depth} | {violations} |")
+        lignes.append("")
+        if total == 0:
+            lignes.append("Aucune violation.")
+        else:
+            lignes.append(f"**{total} violations.** Premiers messages :")
+            lignes.append("")
+            for (position, _n, _d, _v, messages) in invariants:
+                for message in messages:
+                    lignes.append(f"- `{position}` : {message}")
+
+    return "\n".join(lignes) + "\n"
+
+
+def main() -> int:
+    import argparse
+
+    import puzzle_bench
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model", type=Path, required=True,
+                        help="checkpoint .pt ou modele .onnx")
+    parser.add_argument("--dossier-onnx", type=Path,
+                        default=Path("checkpoints_onnx"))
+    parser.add_argument("--simulations", type=int, default=400)
+    parser.add_argument("--passages", type=int, default=5)
+    parser.add_argument("--c-puct", type=float, default=1.4)
+    parser.add_argument("--invariants", action="store_true",
+                        help="verifie les invariants d'arbre, sans mesurer le debit")
+    parser.add_argument("--out-rapport", type=Path, default=None)
+    args = parser.parse_args()
+
+    onnx, meta = puzzle_bench.resoudre_modele(args.model, args.dossier_onnx)
+    if not Path(onnx).exists():
+        print(f"modele ONNX introuvable : {onnx}", file=sys.stderr)
+        return 2
+
+    evaluateur = chess_engine.ONNXEvaluator(str(onnx), False)
+
+    # Rodage : la premiere inference initialise la session.
+    chauffe = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    chauffe.mcts_search(charger_position(POSITIONS[0][1]), 8, args.c_puct, False)
+
+    invariants = []
+    mesures = []
+
+    if args.invariants:
+        # inspect_tree n'est jamais appele dans la boucle de mesure de debit :
+        # son cout croit avec la taille de l'arbre et fausserait la mesure
+        # qu'il protege. Les deux jambes sont donc exclusives.
+        for nom, fen in POSITIONS:
+            mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+            mcts.step_analysis(charger_position(fen), args.simulations,
+                               args.c_puct)
+            r = mcts.inspect_tree()
+            invariants.append((nom, r.nodes, r.max_depth, r.violations,
+                               list(r.messages)))
+            etat = "OK" if r.violations == 0 else f"{r.violations} VIOLATIONS"
+            print(f"  {nom:10} : {r.nodes} noeuds, profondeur {r.max_depth}, {etat}")
+    else:
+        for passage in range(args.passages):
+            for nom, fen in POSITIONS:
+                mesures.append(mesurer_mcts_search(
+                    evaluateur, fen, nom, args.simulations, args.c_puct))
+                mesures.append(mesurer_step_analysis(
+                    evaluateur, fen, nom, args.simulations, args.c_puct))
+            print(f"  passage {passage + 1}/{args.passages}", flush=True)
+
+    agr = agreger(mesures)
+    for cle in sorted(agr):
+        a = agr[cle]
+        print(f"  {cle[0]:10} {cle[1]:14} : "
+              f"{a['sims_par_seconde_median']:7.1f} sims/s, "
+              f"{a['inferences_par_seconde_median']:7.1f} inferences/s, "
+              f"table {100 * a['taux_table_median']:.1f} %")
+
+    contexte = {
+        "modele": Path(onnx).name,
+        "iteration": meta.get("iteration"),
+        "global_step": meta.get("global_step"),
+        "passages": args.passages if not args.invariants else 1,
+        "simulations": args.simulations,
+        "c_puct": args.c_puct,
+    }
+
+    sortie = args.out_rapport or Path(
+        f"../docs/superpowers/specs/{time.strftime('%Y-%m-%d')}"
+        "-search-bench-resultats.md")
+    sortie.parent.mkdir(parents=True, exist_ok=True)
+    sortie.write_text(format_report(agr, contexte, invariants), encoding="utf-8")
+    print(f"\nRapport : {sortie}")
+
+    total_violations = sum(v for (_, _, _, v, _) in invariants)
+    if total_violations:
+        print(f"{total_violations} violations d'invariants", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
