@@ -71,3 +71,68 @@ def test_la_recherche_reste_deterministe(evaluateur):
     pi_b = chess_engine.MCTS(evaluateur, TAILLE_TT).mcts_search(board_b, 200, 1.4, False)
 
     assert list(pi_a) == list(pi_b)
+
+
+POSITIONS = [
+    ("depart", DEPART),
+    ("ouverture",
+     "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4"),
+    ("milieu",
+     "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"),
+    ("finale", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1"),
+]
+
+
+@pytest.mark.parametrize("nom,fen", POSITIONS)
+def test_aucun_noeud_en_vol_sur_differentes_positions(evaluateur, nom, fen):
+    """Verifie l'absence de noeuds en vol et la coherence des invariants
+    sur des topologies d'arbres variees."""
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    mcts.step_analysis(_plateau(fen), 200, 1.4)
+
+    rapport = mcts.inspect_tree()
+    assert rapport.en_vol == 0, f"{nom} : noeuds en vol = {rapport.en_vol}"
+    assert rapport.violations == 0, f"{nom} : {list(rapport.messages)}"
+
+
+def test_root_shifting_ne_laisse_aucun_noeud_en_vol(evaluateur):
+    """En jeu reel, la racine est deplacee vers le coup joue : verifie
+    qu'aucun noeud en vol ne subsiste apres extract_child ni lors du cumul."""
+    from lib import decode_move_index
+
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    board = _plateau()
+    mcts.step_analysis(board, 100, 1.4)
+
+    stats = mcts.get_analysis_results()
+    assert len(stats) > 0
+    best_move = stats[0].move_idx
+
+    mcts.update_root(best_move)
+    is_black = (board.turn == chess_engine.Color.BLACK)
+    o_f, o_r, d_f, d_r, promo = decode_move_index(board, best_move, is_black)
+    board.move_piece(o_f, o_r, d_f, d_r, promo)
+
+    rapport_apres_shift = mcts.inspect_tree()
+    assert rapport_apres_shift.en_vol == 0
+    assert rapport_apres_shift.violations == 0
+
+    mcts.step_analysis(board, 100, 1.4)
+    rapport_apres_cumul = mcts.inspect_tree()
+    assert rapport_apres_cumul.en_vol == 0
+    assert rapport_apres_cumul.violations == 0
+
+
+def test_position_de_mat_ne_laisse_aucun_noeud_en_vol(evaluateur):
+    """Sur une position deja en echec et mat, la racine est terminale des le
+    depart : elle ne doit developper aucun enfant ni laisser de noeud en vol."""
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    # Mat du berger termine (les Noirs sont echec et mat)
+    board = _plateau("r1bqkb1r/pppp1Qpp/2n5/4p3/2B1n3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4")
+    mcts.step_analysis(board, 50, 1.4)
+
+    rapport = mcts.inspect_tree()
+    assert rapport.en_vol == 0
+    assert rapport.violations == 0
+    assert rapport.nodes == 1
+
