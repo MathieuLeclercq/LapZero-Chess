@@ -86,6 +86,7 @@ std::pair<MCTSNode*, int> MCTS::select_leaf(MCTSNode* root, Chessboard& board, f
             const TTEntry& entry = transposition_table[tt_idx];
 
             if (entry.hash == hash && entry.policy_size > 0) {
+                m_tt_hits.fetch_add(1, std::memory_order_relaxed);
                 int size = entry.policy_size;
                 float sum_legal = 0.0f;
                 for (int k = 0; k < size; ++k) sum_legal += entry.legal_policy[k].second;
@@ -161,10 +162,12 @@ float MCTS::expand_node_single(MCTSNode* node, Chessboard& board) {
 
     // Cache hit
     if (transposition_table[tt_idx].hash == hash && transposition_table[tt_idx].policy_size > 0) {
+        m_tt_hits.fetch_add(1, std::memory_order_relaxed);
         return transposition_table[tt_idx].value;
     }
 
     // Cache miss
+    m_tt_misses.fetch_add(1, std::memory_order_relaxed);
     std::vector<int> legal_indices = board.getLegalMoveIndices();
     if (legal_indices.empty()) {
         node->is_terminal = true;
@@ -173,6 +176,7 @@ float MCTS::expand_node_single(MCTSNode* node, Chessboard& board) {
 
     board.getAlphaZeroTensor(m_eval_tensor);
     float value;
+    m_nn_calls.fetch_add(1, std::memory_order_relaxed);
     m_evaluator->evaluate(m_eval_tensor, m_eval_policy, value);
 
     // Stockage dans la TT (taille fixe, pas d'allocation)
@@ -245,6 +249,7 @@ std::vector<float> MCTS::mcts_search(Chessboard& board, int num_simulations, flo
         auto [node, moves_played] = select_leaf(root.get(), board, c_puct);
 
         if (node->is_terminal) {
+            m_terminal_hits.fetch_add(1, std::memory_order_relaxed);
             float value = 0.0f;
             if (board.checkThreefoldRepetition() ||
                 board.getHalfMoveClock() >= 100 ||
@@ -383,6 +388,7 @@ void MCTS::step_analysis(Chessboard& board, int num_simulations, float c_puct) {
         auto [node, moves_played] = select_leaf(m_analysis_root.get(), board, c_puct);
 
         if (node->is_terminal) {
+            m_terminal_hits.fetch_add(1, std::memory_order_relaxed);
             float value = 0.0f;
             if (board.checkThreefoldRepetition() ||
                 board.getHalfMoveClock() >= 100 ||
@@ -458,11 +464,13 @@ MCTSNode* MCTS::advance_to_leaf(MCTSNode* root, Chessboard& board, float c_puct,
     size_t tt_idx = hash % m_tt_size;
 
     if (transposition_table[tt_idx].hash == hash && transposition_table[tt_idx].policy_size > 0) {
+        m_tt_hits.fetch_add(1, std::memory_order_relaxed);
         backup(node, transposition_table[tt_idx].value);
         for (int i = 0; i < moves_played; i++) board.undoMove();
         return nullptr;
     }
 
+    m_tt_misses.fetch_add(1, std::memory_order_relaxed);
     return node;
 }
 
