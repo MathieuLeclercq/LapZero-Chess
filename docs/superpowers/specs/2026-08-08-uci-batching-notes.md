@@ -20,6 +20,15 @@ Le bot qui joue sur lichess fait donc **une inférence GPU par simulation**. Le
 `step_analysis(board, 20, 1.4)`, qui fait 20 simulations séquentielles, chacune avec sa
 propre inférence de batch 1. Le nom est trompeur et devrait changer.
 
+**Reserve sur l'ampleur du gain, ajoutee le 2026-09-11.** Le taux de succes de la
+table mesure par le banc de recherche, 2,7 a 10,7 pour cent, porte sur un arbre neuf.
+En partie reelle `update_root` conserve le sous-arbre du coup joue, donc la recherche
+suivante demarre chaude et le taux est plus eleve, particulierement en finale. Par la
+loi d'Amdahl, le batching n'accelere que la fraction des simulations qui appellent
+reellement le reseau : le gain reel sera donc inferieur a ce que laisse croire le
+calcul ci-dessous. La direction ne change pas, seule l'ampleur. Voir la section
+« Reserve sur le cas froid » de `2026-09-11-search-bench-resultats.md`.
+
 Ordre de grandeur du gain : une inférence batch 1 sur un ResNet 10x128 est dominée par la
 latence de lancement des noyaux, quelques millisecondes. À batch 32 ou 64, le coût par
 position s'effondre. Attendre un facteur 10 à 40 sur le nombre de simulations à temps

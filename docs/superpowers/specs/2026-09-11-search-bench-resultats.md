@@ -56,8 +56,9 @@ par la latence d'inference a batch 1 : ni le nombre de coups legaux (14 en
 finale, 48 au milieu) ni la profondeur de l'arbre n'y changent grand chose.
 
 Le taux de succes de la table est faible, de 2,7 a 10,7 pour cent. Presque
-chaque simulation paie une inference complete, donc il n'existe pas de reservoir
-de simulations gratuites derriere lequel un gain de batching pourrait se diluer.
+chaque simulation paie une inference complete. Attention toutefois a ne pas en
+conclure que le gain du batching se transmettra integralement : ce banc mesure
+le cas froid, et la section suivante explique pourquoi le cas reel differe.
 
 ## Reserve sur la taille de table, a revoir apres le batching
 
@@ -88,4 +89,37 @@ A noter aussi que `uci.py` demande `tt_size = 4_000_000` : le bot reel tourne
 deja avec une table bien plus grande que ce banc. Sans consequence sur cette
 reference, le taux saturant des 65 536 a 400 simulations, mais a garder en tete
 quand on comparera le banc au comportement en partie.
+
+## Reserve sur le cas froid, non mesuree
+
+Ce banc mesure une recherche qui part d'un arbre neuf : `mesurer_step_analysis`
+fait `reset_analysis()` puis une seule recherche, et n'appelle jamais
+`update_root`. C'est un ecart a la section 5 de la spec, qui prevoyait de mesurer
+`step_analysis` suivi de `update_root`. Le symptome est visible dans le tableau :
+les deux chemins donnent 286 a 299 sims/s, quasiment identiques, precisement
+parce qu'ils sont tous deux mesures a froid.
+
+En partie reelle, `update_root` conserve le sous-arbre du coup joue, avec ses
+visites, ses enfants et toutes ses positions deja presentes dans la table. La
+recherche suivante demarre donc chaude. L'effet est particulierement marque en
+finale, ou le branchement est faible et l'arbre converge : a nombre de noeuds
+fixe le bot repond presque instantanement, et a temps fixe il evalue des
+milliers de noeuds.
+
+**Consequence sur l'estimation du gain, par la loi d'Amdahl.** Si une fraction p
+des simulations evite deja le reseau, le batching n'accelere que la fraction
+restante. A 3 pour cent de succes de table le gain se transmet presque
+integralement ; a 50 pour cent il serait divise par deux. La vraie valeur en
+partie n'est pas mesuree.
+
+Mesurer ce cas chaud demanderait de jouer une sequence de coups avec reutilisation
+d'arbre, ce qui est long. Decision prise de ne pas le faire : la conclusion
+principale ne change pas. Le debit est plat a 2 pour cent pres entre une finale a
+14 coups legaux et un milieu a 48, et entre des arbres de profondeur 15 et 19.
+Cette insensibilite totale a la forme de l'arbre reste la preuve d'un cout domine
+par la latence d'inference a batch 1, et donc que le batching attaque le bon
+goulot. Seule l'ampleur du gain reste incertaine, pas sa direction.
+
+A rouvrir si le gain mesure apres batching est nettement inferieur a l'attendu :
+ce serait la premiere explication a verifier.
 
