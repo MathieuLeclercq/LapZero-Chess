@@ -58,3 +58,34 @@ finale, 48 au milieu) ni la profondeur de l'arbre n'y changent grand chose.
 Le taux de succes de la table est faible, de 2,7 a 10,7 pour cent. Presque
 chaque simulation paie une inference complete, donc il n'existe pas de reservoir
 de simulations gratuites derriere lequel un gain de batching pourrait se diluer.
+
+## Reserve sur la taille de table, a revoir apres le batching
+
+Ces mesures utilisent `tt_size = 8192`. Mesure faite a part, sur la position de
+depart et 400 simulations :
+
+| `tt_size` | taux table | debit |
+|---|---|---|
+| 8 192 | 16,1 % | 298,0 sims/s |
+| 65 536 | 16,6 % | 309,2 sims/s |
+| 2 097 143 | 16,6 % | 313,9 sims/s |
+
+Grossir la table n'apporte donc presque rien ici, et sature des 65 536. L'ecart
+de debit de 5 pour cent tient dans le bruit, dont l'etendue mesuree est de
+12 pour cent.
+
+La raison n'est pas la taille de la table mais la structure de l'arbre : a 400
+simulations il ne contient au plus que 400 positions evaluees, donc 8192 entrees
+sont deja vingt fois trop. Le taux est faible parce que les transpositions sont
+rares a cette profondeur.
+
+**Cela changera apres le batching.** A 10 ou 40 fois plus de simulations, les
+chemins convergeront bien plus souvent sur les memes positions et 8192 entrees
+deviendront sous-dimensionnees. La taille de table est donc un parametre a
+rebalayer au moment de mesurer le moteur batche, et pas un reglage acquis.
+
+A noter aussi que `uci.py` demande `tt_size = 4_000_000` : le bot reel tourne
+deja avec une table bien plus grande que ce banc. Sans consequence sur cette
+reference, le taux saturant des 65 536 a 400 simulations, mais a garder en tete
+quand on comparera le banc au comportement en partie.
+
