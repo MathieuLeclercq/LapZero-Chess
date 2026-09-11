@@ -133,6 +133,12 @@ PYBIND11_MODULE(chess_engine, m) {
         .def_readonly("tt_misses", &SearchCounters::tt_misses)
         .def_readonly("terminal_hits", &SearchCounters::terminal_hits);
 
+    py::class_<TreeReport>(m, "TreeReport")
+        .def_readonly("nodes", &TreeReport::nodes)
+        .def_readonly("max_depth", &TreeReport::max_depth)
+        .def_readonly("violations", &TreeReport::violations)
+        .def_readonly("messages", &TreeReport::messages);
+
     py::class_<ONNXEvaluator>(m, "ONNXEvaluator")
         .def(py::init<const std::string&, bool>(), py::arg("model_path"), py::arg("use_gpu") = false);
 
@@ -152,7 +158,8 @@ PYBIND11_MODULE(chess_engine, m) {
         .def("get_root_q", &MCTS::get_root_q)
         .def("get_analysis_results", &MCTS::get_analysis_results)
         .def("get_counters", &MCTS::get_counters)
-        .def("reset_counters", &MCTS::reset_counters);
+        .def("reset_counters", &MCTS::reset_counters)
+        .def("inspect_tree", &MCTS::inspect_tree);
 
     py::class_<GameResult>(m, "GameResult")
         .def_property_readonly("state_tensors", [](py::object& self) {
