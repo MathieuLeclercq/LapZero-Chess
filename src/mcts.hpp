@@ -103,12 +103,14 @@ private:
 public:
     MCTS(ONNXEvaluator* evaluator, size_t tt_size = DEFAULT_TT_SIZE);
 
-    void step_analysis(Chessboard& board, int num_simulations, float c_puct);
+    void step_analysis(Chessboard& board, int num_simulations, float c_puct,
+                       int batch_size = 0);
     void reset_analysis();
     void update_root(int move_idx);
     float get_root_q() const;
     std::vector<MoveStats> get_analysis_results() const;
-    std::vector<float> mcts_search(Chessboard& board, int num_simulations, float c_puct, bool add_dirichlet);
+    std::vector<float> mcts_search(Chessboard& board, int num_simulations, float c_puct,
+                                   bool add_dirichlet, int batch_size = 0);
     float expand_node_single(MCTSNode* node, Chessboard& board);
     bool apply_move_by_index(Chessboard& board, int idx);
     void add_dirichlet_noise(MCTSNode* root, float epsilon);
@@ -125,6 +127,9 @@ public:
 private:
     void backup(MCTSNode* node, float value);
     std::pair<MCTSNode*, int> select_leaf(MCTSNode* root, Chessboard& board, float c_puct);
+    void expand_and_backup_prepared(MCTSNode* leaf_node,
+                                    const std::vector<int>& legal_indices,
+                                    uint64_t hash, const float* policy, float value);
 
     // Noyau unique de recherche, defini dans mcts_batch.cpp.
     // batch_size == 0 : boucle sequentielle historique, conservee telle quelle.

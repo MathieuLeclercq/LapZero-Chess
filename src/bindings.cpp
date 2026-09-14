@@ -148,12 +148,14 @@ PYBIND11_MODULE(chess_engine, m) {
             py::arg("evaluator"), py::arg("tt_size") = 2097143)
         .def("mcts_search", &MCTS::mcts_search,
             py::call_guard<py::gil_scoped_release>(),
-            py::arg("board"), py::arg("num_simulations"), py::arg("c_puct") = 1.4f, py::arg("add_dirichlet") = false)
+            py::arg("board"), py::arg("num_simulations"), py::arg("c_puct") = 1.4f,
+            py::arg("add_dirichlet") = false, py::arg("batch_size") = 0)
 
         // --- BINDINGS D'ANALYSE ---
         .def("step_analysis", &MCTS::step_analysis,
             py::call_guard<py::gil_scoped_release>(),
-            py::arg("board"), py::arg("num_simulations"), py::arg("c_puct") = 1.4f)
+            py::arg("board"), py::arg("num_simulations"), py::arg("c_puct") = 1.4f,
+            py::arg("batch_size") = 0)
         .def("reset_analysis", &MCTS::reset_analysis)
         .def("update_root", &MCTS::update_root, "Déplace la racine de l'arbre vers un coup spécifique")
         .def("get_root_q", &MCTS::get_root_q)

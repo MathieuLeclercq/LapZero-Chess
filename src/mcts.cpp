@@ -238,7 +238,8 @@ void MCTS::add_dirichlet_noise(MCTSNode* root, float epsilon) {
     }
 }
 
-std::vector<float> MCTS::mcts_search(Chessboard& board, int num_simulations, float c_puct, bool add_dirichlet) {
+std::vector<float> MCTS::mcts_search(Chessboard& board, int num_simulations, float c_puct,
+                                     bool add_dirichlet, int batch_size) {
 
     //if (board.getZobristHash() != board.computeZobristFromScratch()) {
     //    throw std::runtime_error("Erreur fatale : Desynchronisation du Zobrist Hash detectee !");
@@ -251,7 +252,7 @@ std::vector<float> MCTS::mcts_search(Chessboard& board, int num_simulations, flo
         add_dirichlet_noise(root.get(), 0.12f);
     }
 
-    run_search(root.get(), board, num_simulations, c_puct, 0);
+    run_search(root.get(), board, num_simulations, c_puct, batch_size);
 
     std::vector<float> pi(4672, 0.0f);
     float sum_visits = 0.0f;
@@ -350,7 +351,8 @@ float MCTS::get_root_q() const {
     return m_analysis_root->q_value();
 }
 
-void MCTS::step_analysis(Chessboard& board, int num_simulations, float c_puct) {
+void MCTS::step_analysis(Chessboard& board, int num_simulations, float c_puct,
+                         int batch_size) {
     // Le verrou couvre desormais toute la duree de l'appel, au lieu d'etre pris
     // et relache a chaque simulation. C'est necessaire pour la boucle batchee,
     // qui detiendra des MCTSNode* bruts pendant l'inference : relacher le verrou
@@ -364,7 +366,7 @@ void MCTS::step_analysis(Chessboard& board, int num_simulations, float c_puct) {
         expand_node_single(m_analysis_root.get(), board);
     }
 
-    run_search(m_analysis_root.get(), board, num_simulations, c_puct, 0);
+    run_search(m_analysis_root.get(), board, num_simulations, c_puct, batch_size);
 }
 
 std::vector<MoveStats> MCTS::get_analysis_results() const {
@@ -435,8 +437,14 @@ void MCTS::expand_and_backup(MCTSNode* leaf_node, Chessboard& board, const float
         return;
     }
 
-    // Stockage TT (taille fixe)
-    uint64_t hash = board.getZobristHash();
+    expand_and_backup_prepared(leaf_node, legal_indices, board.getZobristHash(), policy, value);
+}
+
+void MCTS::expand_and_backup_prepared(MCTSNode* leaf_node,
+                                      const std::vector<int>& legal_indices,
+                                      uint64_t hash, const float* policy, float value) {
+    // Les feuilles terminales sont traitees pendant la descente, jamais ici :
+    // legal_indices est donc non vide et le plateau n'est pas necessaire.
     size_t tt_idx = hash % m_tt_size;
     TTEntry& tt = transposition_table[tt_idx];
     tt.hash = hash;

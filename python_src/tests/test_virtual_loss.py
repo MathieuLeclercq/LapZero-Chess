@@ -136,3 +136,37 @@ def test_position_de_mat_ne_laisse_aucun_noeud_en_vol(evaluateur):
     assert rapport.violations == 0
     assert rapport.nodes == 1
 
+
+@pytest.mark.parametrize("taille", [1, 2, 8, 32])
+def test_la_boucle_batchee_respecte_les_invariants(evaluateur, taille):
+    """Chaque lot doit rendre un arbre coherent et annuler tous ses virtual
+    losses avant de rendre la main."""
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+
+    mcts.step_analysis(_plateau(), 400, 1.4, taille)
+
+    rapport = mcts.inspect_tree()
+    assert rapport.violations == 0, list(rapport.messages)
+    assert rapport.en_vol == 0, "virtual loss non annule"
+
+
+@pytest.mark.parametrize("taille", [1, 2, 8, 32])
+def test_la_boucle_batchee_compte_exactement_les_simulations(evaluateur, taille):
+    """Une simulation ne doit etre ni perdue lors d'une collision, ni comptee
+    deux fois lors du backup du lot."""
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+
+    mcts.step_analysis(_plateau(), 400, 1.4, taille)
+
+    assert sum(s.visits for s in mcts.get_analysis_results()) == 400
+
+
+def test_batch_1_est_identique_a_la_boucle_sequentielle(evaluateur):
+    """Avec un seul element, poser puis annuler le virtual loss ne doit rien
+    modifier : le chemin batche est la reference du chemin sequentiel."""
+    sequentiel = chess_engine.MCTS(evaluateur, TAILLE_TT).mcts_search(
+        _plateau(), 400, 1.4, False, 0)
+    batche = chess_engine.MCTS(evaluateur, TAILLE_TT).mcts_search(
+        _plateau(), 400, 1.4, False, 1)
+
+    assert list(sequentiel) == list(batche)
