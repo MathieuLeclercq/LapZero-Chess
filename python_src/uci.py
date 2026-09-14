@@ -14,9 +14,32 @@ from lib import parse_uci_to_coords, coords_to_uci, decode_move_index, encode_mo
 MODEL_PATH = (r"C:\Users\M47h1\Documents\chess_cpp\python_src"
               r"\checkpoints/2026_04_26_18h18_iter340_unsupervised.onnx")
 DEFAULT_SIMULATIONS = 1200
-BATCH_SIZE = 20
+# Pas de simulations entre deux controles d'horloge. Il plafonne aussi le lot
+# MCTS : un lot ne peut pas collecter plus de feuilles que le palier n'en
+# demande. A 400 simulations par seconde, 64 simulations valent 160 ms, ce qui
+# reste plus fin que SNAPSHOT_INTERVAL.
+BATCH_SIZE = 64
+
+# Taille de lot passee au MCTS, qui evalue plusieurs positions par inference
+# grace au virtual loss. Le gain sature vers 32 sur cette machine.
+MCTS_BATCH_SIZE = 32
 SNAPSHOT_INTERVAL = 0.1
 NB_FAST_PLIES_OPENING = 10
+
+
+def _construire_evaluateur():
+    """Le GPU d'abord, le CPU en repli.
+
+    Le batching ne rend vraiment que sur GPU : la meme recherche passe de 284 a
+    415 simulations par seconde. Mais le provider CUDA peut manquer sur la
+    machine qui heberge le bot, et AppendExecutionProvider_CUDA leve alors. Un
+    repli silencieux vaut mieux qu'un moteur qui refuse de demarrer.
+    """
+    try:
+        return chess_engine.ONNXEvaluator(MODEL_PATH, True)
+    except Exception as e:
+        print(f"info string GPU indisponible, repli sur le CPU : {e}", flush=True)
+        return chess_engine.ONNXEvaluator(MODEL_PATH, False)
 
 
 # ============================================================
@@ -28,7 +51,7 @@ class UCIEngine:
         # Injection pour les tests : sans elle, construire un UCIEngine exige un
         # modele ONNX, et MODEL_PATH pointe vers une autre machine.
         self.evaluator = (evaluator if evaluator is not None
-                          else chess_engine.ONNXEvaluator(MODEL_PATH))
+                          else _construire_evaluateur())
         self.mcts = (mcts if mcts is not None
                      else chess_engine.MCTS(self.evaluator, tt_size=4_000_000))
         self.search_thread = None
@@ -295,7 +318,7 @@ class UCIEngine:
             # 1b. Exécution des simulations
             if total_sims < max_sims:
                 sims_to_do = min(BATCH_SIZE, max_sims - total_sims)
-                self.mcts.step_analysis(self.board, sims_to_do, 1.4)
+                self.mcts.step_analysis(self.board, sims_to_do, 1.4, MCTS_BATCH_SIZE)
                 total_sims += sims_to_do
 
                 # Détermine ce qu'il faut faire avec les stats actuelles
