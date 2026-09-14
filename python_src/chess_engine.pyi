@@ -270,6 +270,9 @@ class PieceType:
         ...
 class SearchCounters:
     @property
+    def nn_batches(self) -> int:
+        ...
+    @property
     def nn_calls(self) -> int:
         ...
     @property

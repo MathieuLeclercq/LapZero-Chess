@@ -159,6 +159,7 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
 
         const int batch_count = static_cast<int>(batch.size());
         m_nn_calls.fetch_add(batch_count, std::memory_order_relaxed);
+        m_nn_batches.fetch_add(1, std::memory_order_relaxed);
         m_tt_misses.fetch_add(batch_count, std::memory_order_relaxed);
         m_evaluator->evaluate_batch(tensors, policies, values, batch_count);
 

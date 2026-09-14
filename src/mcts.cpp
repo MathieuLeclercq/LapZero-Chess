@@ -183,6 +183,7 @@ float MCTS::expand_node_single(MCTSNode* node, Chessboard& board) {
     board.getAlphaZeroTensor(m_eval_tensor);
     float value;
     m_nn_calls.fetch_add(1, std::memory_order_relaxed);
+    m_nn_batches.fetch_add(1, std::memory_order_relaxed);
     m_evaluator->evaluate(m_eval_tensor, m_eval_policy, value);
 
     // Stockage dans la TT (taille fixe, pas d'allocation)

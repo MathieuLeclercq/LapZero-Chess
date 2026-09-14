@@ -12,15 +12,18 @@ from search_bench import (
     Mesure,
     agreger,
     inferences_par_seconde,
+    remplissage_moyen,
     sims_par_seconde,
     taux_table,
 )
 
 
 def _m(position="depart", chemin="mcts_search", simulations=400, duree_s=1.0,
-       nn_calls=300, tt_hits=100, tt_misses=300, terminal_hits=0):
+       nn_calls=300, nn_batches=300, tt_hits=100, tt_misses=300,
+       terminal_hits=0, batch_size=0):
     return Mesure(position=position, chemin=chemin, simulations=simulations,
-                  duree_s=duree_s, nn_calls=nn_calls, tt_hits=tt_hits,
+                  batch_size=batch_size, duree_s=duree_s, nn_calls=nn_calls,
+                  nn_batches=nn_batches, tt_hits=tt_hits,
                   tt_misses=tt_misses, terminal_hits=terminal_hits)
 
 
@@ -46,6 +49,11 @@ def test_duree_nulle_ne_divise_pas_par_zero():
     assert inferences_par_seconde(m) == 0.0
 
 
+def test_remplissage_moyen_distingue_positions_et_appels_batch():
+    assert remplissage_moyen(_m(nn_calls=320, nn_batches=10)) == pytest.approx(32.0)
+    assert remplissage_moyen(_m(nn_calls=0, nn_batches=0)) == 0.0
+
+
 def test_agreger_groupe_par_position_et_chemin():
     mesures = [
         _m(position="depart", chemin="mcts_search", duree_s=1.0),
@@ -56,9 +64,25 @@ def test_agreger_groupe_par_position_et_chemin():
 
     agr = agreger(mesures)
 
-    assert set(agr) == {("depart", "mcts_search"), ("depart", "step_analysis"),
-                        ("finale", "mcts_search")}
-    assert agr[("depart", "mcts_search")]["passages"] == 2
+    assert set(agr) == {("depart", "mcts_search", 0),
+                        ("depart", "step_analysis", 0),
+                        ("finale", "mcts_search", 0)}
+    assert agr[("depart", "mcts_search", 0)]["passages"] == 2
+
+
+def test_agreger_groupe_aussi_par_taille_de_batch():
+    mesures = [
+        _m(batch_size=0, duree_s=4.0),
+        _m(batch_size=32, duree_s=1.0),
+        _m(batch_size=32, duree_s=1.0),
+    ]
+
+    agr = agreger(mesures)
+
+    assert set(agr) == {("depart", "mcts_search", 0),
+                        ("depart", "mcts_search", 32)}
+    assert agr[("depart", "mcts_search", 32)]["passages"] == 2
+    assert agr[("depart", "mcts_search", 32)]["sims_par_seconde_median"] == pytest.approx(400.0)
 
 
 def test_agreger_donne_mediane_et_etendue():
@@ -66,7 +90,7 @@ def test_agreger_donne_mediane_et_etendue():
     sait pas distinguer un gain de 5 pour cent d'un bruit de mesure."""
     mesures = [_m(duree_s=1.0), _m(duree_s=2.0), _m(duree_s=4.0)]
 
-    a = agreger(mesures)[("depart", "mcts_search")]
+    a = agreger(mesures)[("depart", "mcts_search", 0)]
 
     assert a["sims_par_seconde_median"] == pytest.approx(200.0)
     assert a["sims_par_seconde_min"] == pytest.approx(100.0)
@@ -101,6 +125,15 @@ def test_format_report_contient_le_contexte():
     assert "simulations par seconde" in texte
 
 
+def test_format_report_affiche_batch_et_remplissage():
+    texte = format_report(
+        agreger([_m(batch_size=32, nn_calls=320, nn_batches=10)]),
+        CONTEXTE, [])
+
+    assert "batch" in texte.lower()
+    assert "32.0" in texte
+
+
 def test_format_report_n_ecrit_jamais_noeuds_par_seconde():
     """Le perft mesure 1,6 million de noeuds par seconde, la recherche 295
     simulations par seconde : confondre les deux serait une erreur d'un facteur
@@ -116,7 +149,7 @@ def test_format_report_ne_contient_pas_de_tiret_cadratin():
 
 
 def test_format_report_signale_les_violations():
-    invariants = [("depart", 120, 5, 3, ["enfant duplique, move_idx 42"])]
+    invariants = [("depart", 0, 120, 5, 3, ["enfant duplique, move_idx 42"])]
 
     texte = format_report(_agr(), CONTEXTE, invariants)
 
@@ -124,8 +157,16 @@ def test_format_report_signale_les_violations():
     assert "3" in texte
 
 
+def test_format_report_associe_les_invariants_a_leur_batch():
+    invariants = [("depart", 32, 120, 5, 0, [])]
+
+    texte = format_report(_agr(), CONTEXTE, invariants)
+
+    assert "| depart | 32 | 120 | 5 | 0 |" in texte
+
+
 def test_format_report_est_muet_quand_aucune_violation():
-    invariants = [("depart", 120, 5, 0, [])]
+    invariants = [("depart", 0, 120, 5, 0, [])]
 
     texte = format_report(_agr(), CONTEXTE, invariants)
 

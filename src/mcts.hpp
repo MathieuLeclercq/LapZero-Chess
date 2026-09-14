@@ -57,10 +57,12 @@ struct MoveStats {
 };
 
 
-// Instrumentation de la recherche. Sans elle, le nombre d'inferences et le taux
-// de succes de la table ne sont pas observables de l'exterieur.
+// Instrumentation de la recherche. nn_calls compte les positions evaluees,
+// nn_batches les appels physiques a l'evaluateur. Leur ratio donne le
+// remplissage moyen des lots.
 struct SearchCounters {
     uint64_t nn_calls = 0;
+    uint64_t nn_batches = 0;
     uint64_t tt_hits = 0;
     uint64_t tt_misses = 0;
     uint64_t terminal_hits = 0;
@@ -96,6 +98,7 @@ private:
     // compteurs qu'apres la recherche, et un incremente relache coute quelques
     // dizaines de cycles contre 2,7 ms d'inference.
     std::atomic<uint64_t> m_nn_calls{ 0 };
+    std::atomic<uint64_t> m_nn_batches{ 0 };
     std::atomic<uint64_t> m_tt_hits{ 0 };
     std::atomic<uint64_t> m_tt_misses{ 0 };
     std::atomic<uint64_t> m_terminal_hits{ 0 };

@@ -129,6 +129,7 @@ PYBIND11_MODULE(chess_engine, m) {
     // --- Instrumentation de la recherche ---
     py::class_<SearchCounters>(m, "SearchCounters")
         .def_readonly("nn_calls", &SearchCounters::nn_calls)
+        .def_readonly("nn_batches", &SearchCounters::nn_batches)
         .def_readonly("tt_hits", &SearchCounters::tt_hits)
         .def_readonly("tt_misses", &SearchCounters::tt_misses)
         .def_readonly("terminal_hits", &SearchCounters::terminal_hits);

@@ -46,6 +46,7 @@ def test_les_compteurs_partent_a_zero(evaluateur):
     c = mcts.get_counters()
 
     assert c.nn_calls == 0
+    assert c.nn_batches == 0
     assert c.tt_hits == 0
     assert c.tt_misses == 0
     assert c.terminal_hits == 0
@@ -66,6 +67,8 @@ def test_une_recherche_declenche_des_inferences(evaluateur):
 
     assert c.nn_calls > 0, "aucune inference comptee"
     assert c.nn_calls <= 51, f"plus d'inferences que de simulations : {c.nn_calls}"
+    assert c.nn_batches == c.nn_calls, (
+        "le chemin sequentiel doit faire un appel par position evaluee")
 
 
 def test_chaque_defaut_de_table_declenche_exactement_une_inference(evaluateur):
@@ -114,7 +117,8 @@ def test_reset_counters_remet_tout_a_zero(evaluateur):
     mcts.reset_counters()
 
     c = mcts.get_counters()
-    assert (c.nn_calls, c.tt_hits, c.tt_misses, c.terminal_hits) == (0, 0, 0, 0)
+    assert (c.nn_calls, c.nn_batches, c.tt_hits, c.tt_misses,
+            c.terminal_hits) == (0, 0, 0, 0, 0)
 
 
 def test_les_compteurs_sont_par_instance(evaluateur):
