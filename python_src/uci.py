@@ -21,8 +21,9 @@ DEFAULT_SIMULATIONS = 1200
 BATCH_SIZE = 64
 
 # Taille de lot passee au MCTS, qui evalue plusieurs positions par inference
-# grace au virtual loss. Le gain sature vers 32 sur cette machine.
-MCTS_BATCH_SIZE = 32
+# grace au virtual loss. Le banc de puzzles valide 8, le meilleur compromis
+# entre debit et qualite sur les trois positions mesurees.
+MCTS_BATCH_SIZE = 8
 SNAPSHOT_INTERVAL = 0.1
 NB_FAST_PLIES_OPENING = 10
 

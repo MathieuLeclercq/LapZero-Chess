@@ -357,7 +357,8 @@ def format_report(stats: BenchStats, contexte: dict) -> str:
         f"global_step {contexte['global_step']}",
         f"Banc : `{contexte['fichier_banc']}`, bras {bras}",
         f"Recherche : {contexte['simulations']} simulations, "
-        f"c_puct {contexte['c_puct']}, {contexte['travailleurs']} travailleurs",
+        f"c_puct {contexte['c_puct']}, batch {contexte.get('batch_size', 0)}, "
+        f"{contexte['travailleurs']} travailleurs",
         f"Duree : {contexte['duree_totale_s'] / 60.0:.1f} min",
         "",
         "Seul le PREMIER coup est score, celui ou il y a une tactique a trouver.",

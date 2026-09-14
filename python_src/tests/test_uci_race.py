@@ -8,6 +8,7 @@ cela deviendra une ecriture en memoire liberee.
 """
 import os
 import sys
+from pathlib import Path
 
 RACINE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, RACINE)
@@ -15,6 +16,16 @@ os.add_dll_directory(RACINE)
 
 import chess_engine
 from uci import UCIEngine
+
+
+RACINE_PROJET = Path(__file__).resolve().parents[2]
+
+
+def test_les_trois_lanceurs_utilisent_le_batch_valide():
+    """Le batch 8 est le compromis valide par le banc appaire de puzzles."""
+    for nom in ("uci.py", "play_against_bot.py", "tournament_elo.py"):
+        source = (RACINE_PROJET / "python_src" / nom).read_text(encoding="utf-8")
+        assert "MCTS_BATCH_SIZE = 8" in source, nom
 
 
 class _FauxMCTS:

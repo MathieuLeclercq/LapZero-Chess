@@ -430,6 +430,7 @@ CONTEXTE = {
     "global_step": 19415,
     "simulations": 800,
     "c_puct": 1.4,
+    "batch_size": 8,
     "fichier_banc": "data/puzzles_bench.txt",
     "sans_historique": False,
     "duree_totale_s": 3600.0,
@@ -451,6 +452,7 @@ def test_format_report_contient_le_contexte_et_les_taux():
     assert "iter316_dynamic.onnx" in texte
     assert "19415" in texte
     assert "800" in texte
+    assert "batch 8" in texte
     assert "McNemar" in texte
     assert "1000-1449" in texte
     assert "avec historique" in texte

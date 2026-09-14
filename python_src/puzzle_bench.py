@@ -123,7 +123,8 @@ def faire_policy_fn(session):
     return policy_fn
 
 
-def faire_search_fn(evaluateur, simulations: int, c_puct: float):
+def faire_search_fn(evaluateur, simulations: int, c_puct: float,
+                    batch_size: int = 0):
     """Renvoie search_fn(board) -> distribution de visites sur 4672.
 
     Un MCTS neuf a chaque recherche : la table de transposition est indexee sur
@@ -133,7 +134,7 @@ def faire_search_fn(evaluateur, simulations: int, c_puct: float):
     """
     def search_fn(board):
         mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
-        return mcts.mcts_search(board, simulations, c_puct, False)
+        return mcts.mcts_search(board, simulations, c_puct, False, batch_size)
 
     return search_fn
 
@@ -151,7 +152,7 @@ _ETAT: dict = {}
 
 
 def initialiser_travailleur(onnx: str, simulations: int, c_puct: float,
-                            sans_historique: bool) -> None:
+                            sans_historique: bool, batch_size: int) -> None:
     import onnxruntime as ort
 
     options = ort.SessionOptions()
@@ -162,7 +163,7 @@ def initialiser_travailleur(onnx: str, simulations: int, c_puct: float,
 
     _ETAT["policy_fn"] = faire_policy_fn(session)
     _ETAT["search_fn"] = faire_search_fn(
-        chess_engine.ONNXEvaluator(onnx, False), simulations, c_puct)
+        chess_engine.ONNXEvaluator(onnx, False), simulations, c_puct, batch_size)
     _ETAT["sans_historique"] = sans_historique
 
 
@@ -239,6 +240,8 @@ def main() -> int:
     # Les deux valent a budget fixe, quel qu'il soit.
     parser.add_argument("--simulations", type=int, default=700)
     parser.add_argument("--c-puct", type=float, default=1.4)
+    parser.add_argument("--batch-size", type=int, default=0,
+                        help="taille du lot MCTS, 0 conserve la recherche sequentielle")
     parser.add_argument("--travailleurs", type=int, default=16)
     # 2500 sur les 5000 du fichier : la demi-largeur de Wilson globale passe
     # de 1,2 a 1,6 point seulement, et le passage tient en deux fois moins de
@@ -253,6 +256,9 @@ def main() -> int:
     parser.add_argument("--sans-historique", action="store_true",
                         help="presente les puzzles avec l'historique vide")
     args = parser.parse_args()
+
+    if args.batch_size < 0:
+        parser.error("--batch-size doit etre positif ou nul")
 
     if not args.banc.exists():
         print(f"fichier de banc introuvable : {args.banc}", file=sys.stderr)
@@ -277,14 +283,14 @@ def main() -> int:
     suffixe = " (sans historique)" if args.sans_historique else ""
     print(f"{len(lignes)} puzzles sur {total_fichier} du fichier, "
           f"{args.simulations} simulations, premier coup seul, "
-          f"{args.travailleurs} travailleurs{suffixe}")
+          f"batch {args.batch_size}, {args.travailleurs} travailleurs{suffixe}")
 
     debut = time.perf_counter()
     lots = _lots(lignes, 16)
     mesures: list = []
     with mp.Pool(args.travailleurs, initializer=initialiser_travailleur,
                  initargs=(str(onnx), args.simulations, args.c_puct,
-                           args.sans_historique)) as pool:
+                           args.sans_historique, args.batch_size)) as pool:
         for i, resultat in enumerate(pool.imap_unordered(traiter_lot, lots), 1):
             mesures.extend(resultat)
             if i % 10 == 0 or i == len(lots):
@@ -302,6 +308,7 @@ def main() -> int:
         "global_step": meta.get("global_step"),
         "simulations": args.simulations,
         "c_puct": args.c_puct,
+        "batch_size": args.batch_size,
         "fichier_banc": str(args.banc),
         "sans_historique": args.sans_historique,
         "duree_totale_s": duree,
@@ -309,10 +316,10 @@ def main() -> int:
     }
 
     out_csv = args.out_csv or Path(
-        f"../data/bench_results/{Path(onnx).stem}.csv")
+        f"../data/bench_results/{Path(onnx).stem}_batch{args.batch_size}.csv")
     out_rapport = args.out_rapport or Path(
         f"../docs/superpowers/specs/{time.strftime('%Y-%m-%d')}"
-        "-puzzle-bench-resultats.md")
+        f"-puzzle-bench-batch{args.batch_size}-resultats.md")
 
     ecrire_csv(mesures, out_csv)
     out_rapport.parent.mkdir(parents=True, exist_ok=True)

@@ -121,6 +121,28 @@ def test_la_recherche_renvoie_une_distribution_de_visites(modele):
     assert all(pi[i] == 0.0 for i in range(4672) if i not in legaux)
 
 
+def test_la_recherche_transmet_la_taille_de_batch(monkeypatch):
+    """Le banc doit exercer le chemin batche, pas seulement l'exposer en CLI."""
+    import puzzle_bench
+
+    appels = []
+
+    class FauxMCTS:
+        def __init__(self, evaluateur, taille_tt):
+            assert taille_tt == puzzle_bench.TAILLE_TT
+
+        def mcts_search(self, board, simulations, c_puct, bruit,
+                        batch_size):
+            appels.append((board, simulations, c_puct, bruit, batch_size))
+            return [1.0]
+
+    monkeypatch.setattr(puzzle_bench.chess_engine, "MCTS", FauxMCTS)
+    plateau = object()
+
+    assert puzzle_bench.faire_search_fn(object(), 700, 1.4, 8)(plateau) == [1.0]
+    assert appels == [(plateau, 700, 1.4, False, 8)]
+
+
 def test_la_taille_de_tt_reste_petite():
     """Au defaut de 2 097 143 entrees a 1040 octets, chaque MCTS reserverait
     2,03 Gio, soit 32,5 Gio a 16 travailleurs pour 31,4 Gio de RAM. Un MCTS

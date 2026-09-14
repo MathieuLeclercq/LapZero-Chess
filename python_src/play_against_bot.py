@@ -24,7 +24,7 @@ HUMAN_COLOR = chess_engine.Color.BLACK
 CHECKPOINT_PATH = "checkpoints/2026_03_21_10h36_iter136_unsupervised.onnx"
 
 # Nombre de positions evaluees par inference, grace au virtual loss.
-MCTS_BATCH_SIZE = 32
+MCTS_BATCH_SIZE = 8
 
 MCTS_PARAMS = {
     "num_sim": 1200,
