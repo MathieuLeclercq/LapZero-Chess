@@ -23,6 +23,9 @@ from lib import (move_to_san, print_pgn, decode_move_index, chose_move_idx)
 HUMAN_COLOR = chess_engine.Color.BLACK
 CHECKPOINT_PATH = "checkpoints/2026_03_21_10h36_iter136_unsupervised.onnx"
 
+# Nombre de positions evaluees par inference, grace au virtual loss.
+MCTS_BATCH_SIZE = 32
+
 MCTS_PARAMS = {
     "num_sim": 1200,
     "tau_first_move": 2,
@@ -232,7 +235,8 @@ class ChessGame:
 
         # 2. Lancement de la recherche C++ / ONNX
         pi_raw = self.mcts_engine.mcts_search(
-            temp_board, self.mcts_params.get("num_sim", 1200))
+            temp_board, self.mcts_params.get("num_sim", 1200),
+            batch_size=MCTS_BATCH_SIZE)
         pi = np.array(pi_raw, dtype=np.float32)
 
         # 3. Logique de température
@@ -335,7 +339,14 @@ class ChessGame:
 def main():
     print(f"Chargement du moteur MCTS avec {CHECKPOINT_PATH}...")
 
-    evaluator = chess_engine.ONNXEvaluator(CHECKPOINT_PATH)
+    # Processus unique et interactif : le GPU est un gain net ici, contrairement
+    # au tournoi qui fait tourner huit parties en parallele. Repli sur le CPU
+    # si le provider CUDA manque.
+    try:
+        evaluator = chess_engine.ONNXEvaluator(CHECKPOINT_PATH, True)
+    except Exception as e:
+        print(f"GPU indisponible, repli sur le CPU : {e}")
+        evaluator = chess_engine.ONNXEvaluator(CHECKPOINT_PATH, False)
     mcts_engine = chess_engine.MCTS(evaluator)
 
     board = chess_engine.Chessboard()

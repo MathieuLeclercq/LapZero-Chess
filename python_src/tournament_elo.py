@@ -22,6 +22,12 @@ CHECKPOINT_DIR = "checkpoints_onnx"
 SIMULATIONS_EVAL = 1000
 GAMES_PER_PAIR = 16
 MAX_WORKERS = 8  # Nombre de parties en parallèle
+
+# Positions evaluees par inference, grace au virtual loss. Mesure sur huit
+# processus : 1724 simulations par seconde cumulees sans batching, 2117 avec.
+# Le GPU n'est deliberement pas active ici, contrairement a uci.py : huit
+# processus se disputant la meme carte tombent a 1546, donc sous le CPU.
+MCTS_BATCH_SIZE = 32
 WHR_STATE_FILE = "tournament_data/tournament_state.whr"
 STATS_FILE = "tournament_data/tournament_stats.json"
 MODE = "default"  # Options : "default", "all", "x-y", ou "endless"
@@ -45,7 +51,7 @@ def play_game_between_two_bots(model_white, model_black, sims):
             move_uci = current_model.get_move(uci_moves)
             f_o, r_o, f_d, r_d, p = parse_uci_to_coords(move_uci)
         else:
-            pi_raw = current_model.mcts_search(board, sims, 1.4, False)
+            pi_raw = current_model.mcts_search(board, sims, 1.4, False, MCTS_BATCH_SIZE)
             pi = np.array(pi_raw, dtype=np.float32)
             move_count = len(san_moves)
             current_tau = 1.0 if move_count < 8 else 0.1
