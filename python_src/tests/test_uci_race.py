@@ -15,6 +15,7 @@ sys.path.insert(0, RACINE)
 os.add_dll_directory(RACINE)
 
 import chess_engine
+import uci
 from uci import UCIEngine
 
 
@@ -26,6 +27,12 @@ def test_les_trois_lanceurs_utilisent_le_batch_valide():
     for nom in ("uci.py", "play_against_bot.py", "tournament_elo.py"):
         source = (RACINE_PROJET / "python_src" / nom).read_text(encoding="utf-8")
         assert "MCTS_BATCH_SIZE = 8" in source, nom
+
+
+def test_le_modele_uci_configure_est_resolu_depuis_le_depot():
+    attendu = Path(uci.__file__).resolve().parent / "checkpoints_onnx"
+
+    assert Path(uci.MODEL_PATH).parent == attendu
 
 
 class _FauxMCTS:

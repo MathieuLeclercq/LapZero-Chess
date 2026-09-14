@@ -2,6 +2,7 @@ import sys
 import threading
 import time
 import math
+from pathlib import Path
 
 import chess_engine
 from lib import parse_uci_to_coords, coords_to_uci, decode_move_index, encode_move
@@ -11,8 +12,9 @@ from lib import parse_uci_to_coords, coords_to_uci, decode_move_index, encode_mo
 # ============================================================
 # MODEL_PATH = (r"C:\Users\M47h1\Documents\chess_cpp\python_src"
 #               r"\checkpoints_onnx/2026_04_23_13h52_iter254_avant_train_tactics.onnx")
-MODEL_PATH = (r"C:\Users\M47h1\Documents\chess_cpp\python_src"
-              r"\checkpoints/2026_04_26_18h18_iter340_unsupervised.onnx")
+MODEL_PATH = str(
+    Path(__file__).resolve().parent / "checkpoints_onnx"
+    / "2026_04_23_23h25_iter316_unsupervised.onnx")
 DEFAULT_SIMULATIONS = 1200
 # Pas de simulations entre deux controles d'horloge. Il plafonne aussi le lot
 # MCTS : un lot ne peut pas collecter plus de feuilles que le palier n'en
