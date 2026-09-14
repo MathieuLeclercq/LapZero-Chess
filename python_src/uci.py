@@ -14,7 +14,7 @@ from lib import parse_uci_to_coords, coords_to_uci, decode_move_index, encode_mo
 #               r"\checkpoints_onnx/2026_04_23_13h52_iter254_avant_train_tactics.onnx")
 MODEL_PATH = str(
     Path(__file__).resolve().parent / "checkpoints_onnx"
-    / "2026_04_23_23h25_iter316_unsupervised.onnx")
+    / "2026_04_30_09h53_iter436_unsupervised.onnx")
 DEFAULT_SIMULATIONS = 1200
 # Pas de simulations entre deux controles d'horloge. Il plafonne aussi le lot
 # MCTS : un lot ne peut pas collecter plus de feuilles que le palier n'en
