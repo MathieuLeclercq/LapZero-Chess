@@ -170,3 +170,17 @@ def test_batch_1_est_identique_a_la_boucle_sequentielle(evaluateur):
         _plateau(), 400, 1.4, False, 1)
 
     assert list(sequentiel) == list(batche)
+
+
+def test_batch_1_compte_les_terminaux_comme_le_chemin_sequentiel(evaluateur):
+    """La decouverte d'un mat sans coup legal est une TT miss. Elle ne devient
+    terminal_hits qu'aux simulations suivantes, une fois le noeud marque."""
+    fen_mat_en_un = "7k/8/5KQ1/8/8/8/8/8 w - - 0 1"
+
+    sequentiel = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    sequentiel.mcts_search(_plateau(fen_mat_en_un), 400, 1.4, False, 0)
+
+    batche = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    batche.mcts_search(_plateau(fen_mat_en_un), 400, 1.4, False, 1)
+
+    assert batche.get_counters().terminal_hits == sequentiel.get_counters().terminal_hits

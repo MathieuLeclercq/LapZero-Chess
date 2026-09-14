@@ -141,7 +141,6 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
             if (leaf.legal_moves.empty()) {
                 node->is_terminal = true;
                 m_tt_misses.fetch_add(1, std::memory_order_relaxed);
-                m_terminal_hits.fetch_add(1, std::memory_order_relaxed);
                 backup(node, board.isInCheck() ? -1.0f : 0.0f);
                 for (int i = 0; i < moves_played; i++) board.undoMove();
                 completed++;
