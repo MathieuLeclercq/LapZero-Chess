@@ -251,36 +251,7 @@ std::vector<float> MCTS::mcts_search(Chessboard& board, int num_simulations, flo
         add_dirichlet_noise(root.get(), 0.12f);
     }
 
-    for (int sim = 0; sim < num_simulations; sim++) {
-        auto [node, moves_played] = select_leaf(root.get(), board, c_puct);
-
-        if (node->is_terminal) {
-            m_terminal_hits.fetch_add(1, std::memory_order_relaxed);
-            float value = 0.0f;
-            if (board.checkThreefoldRepetition() ||
-                board.getHalfMoveClock() >= 100 ||
-                board.checkInsufficientMaterial()) {
-                value = 0.0f;
-            }
-            // Si pas nulle, c'est mat ou pat. On teste l'échec.
-            else {
-                value = board.isInCheck() ? -1.0f : 0.0f;
-            }
-
-            backup(node, value);
-            for (int i = 0; i < moves_played; i++) board.undoMove();
-            continue;
-        }
-
-        if (node->children.empty()) {
-            float value = expand_node_single(node, board);
-            backup(node, value);
-        }
-
-        for (int i = 0; i < moves_played; i++) {
-            board.undoMove();
-        }
-    }
+    run_search(root.get(), board, num_simulations, c_puct, 0);
 
     std::vector<float> pi(4672, 0.0f);
     float sum_visits = 0.0f;
@@ -380,45 +351,20 @@ float MCTS::get_root_q() const {
 }
 
 void MCTS::step_analysis(Chessboard& board, int num_simulations, float c_puct) {
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (!m_analysis_root) {
-            m_analysis_root = std::make_unique<MCTSNode>(0.0f);
-            expand_node_single(m_analysis_root.get(), board);
-        }
+    // Le verrou couvre desormais toute la duree de l'appel, au lieu d'etre pris
+    // et relache a chaque simulation. C'est necessaire pour la boucle batchee,
+    // qui detiendra des MCTSNode* bruts pendant l'inference : relacher le verrou
+    // en cours de lot laisserait update_root detruire l'arbre sous ces
+    // pointeurs. Sans consequence pratique depuis que parse_position appelle
+    // stop_search() avant toute modification de l'arbre (uci.py).
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    if (!m_analysis_root) {
+        m_analysis_root = std::make_unique<MCTSNode>(0.0f);
+        expand_node_single(m_analysis_root.get(), board);
     }
 
-    for (int sim = 0; sim < num_simulations; sim++) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-
-        auto [node, moves_played] = select_leaf(m_analysis_root.get(), board, c_puct);
-
-        if (node->is_terminal) {
-            m_terminal_hits.fetch_add(1, std::memory_order_relaxed);
-            float value = 0.0f;
-            if (board.checkThreefoldRepetition() ||
-                board.getHalfMoveClock() >= 100 ||
-                board.checkInsufficientMaterial()) {
-                value = 0.0f;
-            }
-            else {
-                value = board.isInCheck() ? -1.0f : 0.0f;
-            }
-
-            backup(node, value);
-            for (int i = 0; i < moves_played; i++) board.undoMove();
-            continue;
-        }
-
-        if (node->children.empty()) {
-            float value = expand_node_single(node, board);
-            backup(node, value);
-        }
-
-        for (int i = 0; i < moves_played; i++) {
-            board.undoMove();
-        }
-    }
+    run_search(m_analysis_root.get(), board, num_simulations, c_puct, 0);
 }
 
 std::vector<MoveStats> MCTS::get_analysis_results() const {

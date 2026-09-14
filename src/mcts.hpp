@@ -126,4 +126,10 @@ private:
     void backup(MCTSNode* node, float value);
     std::pair<MCTSNode*, int> select_leaf(MCTSNode* root, Chessboard& board, float c_puct);
 
+    // Noyau unique de recherche, defini dans mcts_batch.cpp.
+    // batch_size == 0 : boucle sequentielle historique, conservee telle quelle.
+    // batch_size >= 1 : boucle batchee avec virtual loss.
+    void run_search(MCTSNode* root, Chessboard& board, int simulations,
+                    float c_puct, int batch_size);
+
 };

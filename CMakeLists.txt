@@ -37,6 +37,7 @@ add_library(chess_core STATIC
     src/pgn_parser.cpp
     src/mcts.cpp 
     src/mcts_observe.cpp
+    src/mcts_batch.cpp
     src/zobrist.cpp
     src/onnx_evaluator.cpp
     src/selfplay_manager.cpp
