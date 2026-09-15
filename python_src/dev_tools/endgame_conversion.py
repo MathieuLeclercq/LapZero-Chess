@@ -6,6 +6,7 @@ Le choix des coups et la recherche restent ceux du moteur C++.
 
 import argparse
 import os
+import statistics
 import sys
 import time
 from dataclasses import dataclass
@@ -23,15 +24,47 @@ import chess_engine
 from lib import coords_to_uci, decode_move_index
 
 
+@dataclass(frozen=True)
+class PositionFinale:
+    nom: str
+    famille: str
+    fen: str
+
+
 POSITIONS = {
-    "tour": "8/8/8/8/8/2k5/8/R3K3 w - - 0 1",
-    "dame_pion_contre_fou": "8/8/8/3b4/6k1/8/6P1/5QK1 w - - 0 1",
+    position.nom: position for position in (
+        PositionFinale("tour_centre", "tour_contre_roi",
+                       "8/8/8/8/8/2k5/8/R3K3 w - - 0 1"),
+        PositionFinale("tour_bord", "tour_contre_roi",
+                       "k7/8/2K5/8/8/8/8/5R2 w - - 0 1"),
+        PositionFinale("tour_coin", "tour_contre_roi",
+                       "7k/8/5K2/8/8/8/8/R7 w - - 0 1"),
+        PositionFinale("tour_trait_noirs", "tour_contre_roi",
+                       "7k/8/2K5/8/8/8/8/R7 b - - 0 1"),
+        PositionFinale("dame_centre", "dame_contre_roi",
+                       "8/8/8/8/2k5/8/8/Q3K3 w - - 0 1"),
+        PositionFinale("dame_bord", "dame_contre_roi",
+                       "k7/8/2K5/8/8/8/8/5Q2 w - - 0 1"),
+        PositionFinale("dame_trait_noirs", "dame_contre_roi",
+                       "7k/8/2K5/8/8/8/8/1Q6 b - - 0 1"),
+        PositionFinale("deux_tours_bord", "deux_tours_contre_roi",
+                       "k7/8/2K5/8/8/8/8/5RR1 w - - 0 1"),
+        PositionFinale("deux_tours_coin", "deux_tours_contre_roi",
+                       "7k/8/5K2/8/8/8/8/RR6 w - - 0 1"),
+        PositionFinale("dame_pion_fou_1", "dame_pion_contre_fou",
+                       "8/8/8/3b4/6k1/8/6P1/5QK1 w - - 0 1"),
+        PositionFinale("dame_pion_fou_2", "dame_pion_contre_fou",
+                       "k1b5/8/5K2/8/8/8/6P1/4Q3 w - - 0 1"),
+        PositionFinale("deux_fous", "deux_fous_contre_roi",
+                       "7k/8/5K2/8/8/8/8/2BB4 w - - 0 1"),
+    )
 }
 
 
 @dataclass
 class Resultat:
     position: str
+    famille: str
     batch_size: int
     cache_history_depth: int
     plies: int
@@ -89,7 +122,7 @@ def nom_issue(board, oracle: chess.Board, max_plies_atteint: bool) -> str:
 
 def jouer(position: str, fen: str, evaluator, simulations: int,
           batch_size: int, max_plies: int, tree_mode: str,
-          cache_history_depth: int = 1) -> Resultat:
+          cache_history_depth: int = 1, famille: str = "") -> Resultat:
     board = chess_engine.Chessboard()
     board.load_fen(fen)
     oracle = chess.Board(fen)
@@ -142,6 +175,7 @@ def jouer(position: str, fen: str, evaluator, simulations: int,
 
     return Resultat(
         position=position,
+        famille=famille,
         batch_size=batch_size,
         cache_history_depth=cache_history_depth,
         plies=len(coups),
@@ -158,17 +192,47 @@ def jouer(position: str, fen: str, evaluator, simulations: int,
     )
 
 
+def resumer_resultats(resultats: list[Resultat]) -> list[dict]:
+    groupes = {}
+    for resultat in resultats:
+        politique = ("legacy" if resultat.cache_history_depth == -1
+                     else f"h{resultat.cache_history_depth}")
+        groupes.setdefault((politique, resultat.famille), []).append(resultat)
+
+    resumes = []
+    for (politique, famille), groupe in sorted(groupes.items()):
+        resumes.append({
+            "politique": politique,
+            "famille": famille,
+            "parties": len(groupe),
+            "mats": sum(r.issue == "mat" for r in groupe),
+            "nulles": sum(
+                r.issue.startswith("nulle_") or r.issue in {
+                    "pat", "materiel_insuffisant"} for r in groupe),
+            "plies_median": statistics.median(r.plies for r in groupe),
+            "plies_max": max(r.plies for r in groupe),
+            "duree_s": sum(r.duree_s for r in groupe),
+            "max_halfmove": max(r.max_halfmove for r in groupe),
+            "tt_hits": sum(r.tt_hits for r in groupe),
+            "tt_misses": sum(r.tt_misses for r in groupe),
+            "tt_rule50_rejects": sum(r.tt_rule50_rejects for r in groupe),
+            "tt_context_rejects": sum(r.tt_context_rejects for r in groupe),
+            "tt_history_rejects": sum(r.tt_history_rejects for r in groupe),
+        })
+    return resumes
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model", type=Path,
         default=PYTHON_SRC / "checkpoints_onnx"
         / "2026_04_23_23h25_iter316_unsupervised.onnx")
-    parser.add_argument("--simulations", type=int, default=200)
+    parser.add_argument("--simulations", type=int, default=700)
     parser.add_argument("--max-plies", type=int, default=110)
-    parser.add_argument("--batch-sizes", nargs="+", type=int, default=[0, 8])
+    parser.add_argument("--batch-sizes", nargs="+", type=int, default=[8])
     parser.add_argument("--cache-history-depths", nargs="+", type=int,
-                        default=[1])
+                        default=[-1, 0, 1, 7])
     parser.add_argument("--positions", nargs="+", choices=POSITIONS,
                         default=list(POSITIONS))
     parser.add_argument("--cpu", action="store_true")
@@ -183,13 +247,17 @@ def main() -> None:
 
     evaluator, provider = construire_evaluateur(args.model, not args.cpu)
     print(f"Modele : {args.model.name}, provider : {provider}")
+    resultats = []
 
     for name in args.positions:
+        position = POSITIONS[name]
         for depth in args.cache_history_depths:
             for batch_size in args.batch_sizes:
                 result = jouer(
-                    name, POSITIONS[name], evaluator, args.simulations,
-                    batch_size, args.max_plies, args.tree_mode, depth)
+                    name, position.fen, evaluator, args.simulations,
+                    batch_size, args.max_plies, args.tree_mode, depth,
+                    position.famille)
+                resultats.append(result)
                 policy = "legacy" if depth == -1 else f"h{depth}"
                 print(
                     f"{name:24} TT={policy:6} batch={batch_size:2} "
@@ -202,6 +270,17 @@ def main() -> None:
                     f"historique:{result.tt_history_rejects} "
                     f"duree={result.duree_s:.1f}s")
                 print("  " + " ".join(result.coups))
+
+    print("\nResume par politique et famille")
+    for resume in resumer_resultats(resultats):
+        print(
+            f"{resume['politique']:6} {resume['famille']:25} "
+            f"parties={resume['parties']:2} mats={resume['mats']:2} "
+            f"nulles={resume['nulles']:2} "
+            f"plies_mediane={resume['plies_median']:5.1f} "
+            f"plies_max={resume['plies_max']:3} "
+            f"max_halfmove={resume['max_halfmove']:3} "
+            f"duree={resume['duree_s']:.1f}s")
 
 
 if __name__ == "__main__":
