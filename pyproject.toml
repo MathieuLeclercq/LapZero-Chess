@@ -28,6 +28,8 @@ dependencies = [
     # Build : invoque par l'etape post-build de CMake pour generer les stubs .pyi
     "pybind11-stubgen>=2.5",
     "onnxruntime==1.24.3",
+    "backoff>=2.2.1",
+    "rich>=15.0.0",
 ]
 
 # ---------------------------------------------------------------------------
