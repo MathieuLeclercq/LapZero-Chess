@@ -41,7 +41,7 @@ struct MCTSNode {
 
 static constexpr int TT_MAX_MOVES = 128;
 static constexpr int LEGACY_CACHE_HISTORY_DEPTH = -1;
-static constexpr int DEFAULT_CACHE_HISTORY_DEPTH = 1;
+static constexpr int DEFAULT_CACHE_HISTORY_DEPTH = 0;
 
 enum class TTProbeStatus {
     HIT,

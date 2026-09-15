@@ -63,6 +63,11 @@ intuitivement : 0 et 1 sont les candidates principales, 3 et 7 servent de témoi
 benchmark mesurera séparément la perte de hits, les appels réseau, le débit, l'accord
 des coups et la conversion de la finale tour contre roi.
 
+**Mesuré le 2026-09-15 :** les quatre campagnes de 2 500 puzzles et les 48
+parties de finales sont terminées. `h0` est retenu comme défaut selon les
+critères prévus. Les résultats et leurs limites sont dans
+`superpowers/specs/2026-09-15-tt-key-benchmark-results.md`.
+
 Au passage, `TTEntry` réserve la place pour 128 coups (`std::array<std::pair<int,float>,
 128>`), soit 1040 octets par entrée, alors qu'une position en a environ 35 d'utiles.
 Avec `tt_size=4_000_000` en self-play, cela fait 4,16 Go alloués et initialisés à zéro.

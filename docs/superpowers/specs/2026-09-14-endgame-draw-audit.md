@@ -111,3 +111,9 @@ La correction devra être validée ainsi :
 Le script `python_src/dev_tools/endgame_conversion.py` reproduit les parties avec les
 modes `reuse`, `reset` et `fresh`. `python-chess` y sert seulement d'oracle de légalité
 et de synchronisation.
+
+Les 48 conversions de finales et la comparaison appariée des 2 500 puzzles
+sont consignées dans `2026-09-15-tt-key-endgame-results.md` et
+`2026-09-15-tt-key-benchmark-results.md`. Les trois politiques corrigées
+matent la position tour contre roi causale, tandis que `legacy` atteint la
+nulle des 50 coups.

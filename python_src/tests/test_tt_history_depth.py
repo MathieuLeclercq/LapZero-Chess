@@ -58,6 +58,17 @@ def test_h0_accepte_deux_historiques_differents(evaluator):
     assert c.tt_history_rejects == 0
 
 
+def test_profondeur_par_defaut_accepte_deux_historiques_differents(evaluator):
+    mcts = chess_engine.MCTS(evaluator, 8192)
+    remplir_racine(mcts, board_from_moves(ORDRE_A))
+    mcts.reset_counters()
+    remplir_racine(mcts, board_from_moves(ORDRE_B))
+
+    c = mcts.get_counters()
+    assert c.tt_hits == 1
+    assert c.tt_history_rejects == 0
+
+
 @pytest.mark.parametrize("depth", [1, 3, 7])
 def test_historique_recent_different_est_rejete(evaluator, depth):
     mcts = chess_engine.MCTS(evaluator, 8192, depth)

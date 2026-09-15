@@ -88,5 +88,5 @@ La finale deux fous contre roi n'est pas un test isolé de la clé TT. Le résea
 interprétée comme un test combiné du réseau, de la recherche et de la TT, pas
 comme une preuve que `h7` est globalement préférable.
 
-Les résultats puzzles sont nécessaires pour départager `h0` et `h1` sur le jeu
-réel. Ce rapport ne modifie pas encore le défaut du moteur.
+Les résultats appariés des 2 500 puzzles et la règle de décision complète
+figurent dans le [rapport global](2026-09-15-tt-key-benchmark-results.md).
