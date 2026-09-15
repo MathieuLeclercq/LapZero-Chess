@@ -49,6 +49,10 @@ def test_les_compteurs_partent_a_zero(evaluateur):
     assert c.nn_batches == 0
     assert c.tt_hits == 0
     assert c.tt_misses == 0
+    assert c.tt_position_matches == 0
+    assert c.tt_rule50_rejects == 0
+    assert c.tt_context_rejects == 0
+    assert c.tt_history_rejects == 0
     assert c.terminal_hits == 0
 
 
@@ -56,7 +60,7 @@ def test_une_recherche_declenche_des_inferences(evaluateur):
     """Sur un arbre neuf, nn_calls vaut simulations + 1.
 
     Le + 1 est l'expansion de la racine, que step_analysis fait hors de la
-    boucle de simulations (mcts.cpp:374-377). Chaque simulation coute ensuite
+    boucle de simulations. Chaque simulation coute ensuite
     au plus une inference : moins si elle s'arrete sur un noeud terminal ou sur
     un succes de table.
     """
@@ -71,17 +75,24 @@ def test_une_recherche_declenche_des_inferences(evaluateur):
         "le chemin sequentiel doit faire un appel par position evaluee")
 
 
-def test_chaque_defaut_de_table_declenche_exactement_une_inference(evaluateur):
-    """Par construction : expand_node_single compte un defaut puis appelle le
-    reseau sur le meme chemin. Si les deux divergeaient, un des compteurs
-    serait mal place."""
+@pytest.mark.parametrize("batch_size", [0, 8])
+def test_chaque_defaut_de_table_declenche_exactement_une_inference(
+        evaluateur, batch_size):
+    """Chaque chemin compte un défaut au même endroit que son inférence.
+
+    Le chemin séquentiel le fait dans expand_node_single, le chemin batché au
+    moment où la feuille est définitivement collectée.
+    """
     mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
-    mcts.step_analysis(_plateau(), 200, 1.4)
+    mcts.step_analysis(_plateau(), 200, 1.4, batch_size)
 
     c = mcts.get_counters()
 
     assert c.tt_misses == c.nn_calls, (
         f"defauts {c.tt_misses} contre inferences {c.nn_calls}")
+    assert c.tt_position_matches == (
+        c.tt_hits + c.tt_rule50_rejects
+        + c.tt_context_rejects + c.tt_history_rejects)
 
 
 def test_les_succes_de_table_ne_sont_pas_comptes_deux_fois(evaluateur):
@@ -118,7 +129,9 @@ def test_reset_counters_remet_tout_a_zero(evaluateur):
 
     c = mcts.get_counters()
     assert (c.nn_calls, c.nn_batches, c.tt_hits, c.tt_misses,
-            c.terminal_hits) == (0, 0, 0, 0, 0)
+            c.tt_position_matches, c.tt_rule50_rejects,
+            c.tt_context_rejects, c.tt_history_rejects,
+            c.terminal_hits) == (0, 0, 0, 0, 0, 0, 0, 0, 0)
 
 
 def test_les_compteurs_sont_par_instance(evaluateur):

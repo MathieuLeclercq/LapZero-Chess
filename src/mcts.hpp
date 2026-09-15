@@ -40,12 +40,31 @@ struct MCTSNode {
 
 
 static constexpr int TT_MAX_MOVES = 128;
+static constexpr int LEGACY_CACHE_HISTORY_DEPTH = -1;
+static constexpr int DEFAULT_CACHE_HISTORY_DEPTH = 1;
+
+enum class TTProbeStatus {
+    HIT,
+    MISS,
+    RULE50_REJECT,
+    CONTEXT_REJECT,
+    HISTORY_REJECT,
+};
 
 struct TTEntry {
     uint64_t hash = 0;
+    uint64_t evaluation_hash = 0;
+    uint64_t current_context_hash = 0;
+    uint64_t history_hash = 0;
+    uint16_t half_move_clock = 0;
     float value = 0.0f;
     int policy_size = 0;
     std::array<std::pair<int, float>, TT_MAX_MOVES> legal_policy;
+};
+
+struct TTProbe {
+    const TTEntry* entry = nullptr;
+    TTProbeStatus status = TTProbeStatus::MISS;
 };
 
 
@@ -65,6 +84,10 @@ struct SearchCounters {
     uint64_t nn_batches = 0;
     uint64_t tt_hits = 0;
     uint64_t tt_misses = 0;
+    uint64_t tt_position_matches = 0;
+    uint64_t tt_rule50_rejects = 0;
+    uint64_t tt_context_rejects = 0;
+    uint64_t tt_history_rejects = 0;
     uint64_t terminal_hits = 0;
 };
 
@@ -85,6 +108,7 @@ private:
     std::vector<TTEntry> transposition_table;
     static constexpr size_t DEFAULT_TT_SIZE = 2097143;
     size_t m_tt_size;
+    int m_cache_history_depth;
     std::vector<float> m_eval_tensor;
     std::vector<float> m_eval_policy;
     std::unique_ptr<MCTSNode> m_analysis_root;
@@ -101,10 +125,15 @@ private:
     std::atomic<uint64_t> m_nn_batches{ 0 };
     std::atomic<uint64_t> m_tt_hits{ 0 };
     std::atomic<uint64_t> m_tt_misses{ 0 };
+    std::atomic<uint64_t> m_tt_position_matches{ 0 };
+    std::atomic<uint64_t> m_tt_rule50_rejects{ 0 };
+    std::atomic<uint64_t> m_tt_context_rejects{ 0 };
+    std::atomic<uint64_t> m_tt_history_rejects{ 0 };
     std::atomic<uint64_t> m_terminal_hits{ 0 };
 
 public:
-    MCTS(ONNXEvaluator* evaluator, size_t tt_size = DEFAULT_TT_SIZE);
+    MCTS(ONNXEvaluator* evaluator, size_t tt_size = DEFAULT_TT_SIZE,
+         int cache_history_depth = DEFAULT_CACHE_HISTORY_DEPTH);
 
     void step_analysis(Chessboard& board, int num_simulations, float c_puct,
                        int batch_size = 0);
@@ -129,10 +158,17 @@ public:
 
 private:
     void backup(MCTSNode* node, float value);
+    EvaluationCacheKey make_cache_key(const Chessboard& board) const;
+    TTProbe probe_tt(const EvaluationCacheKey& key) const;
+    void record_tt_probe(TTProbeStatus status);
+    void store_tt(const EvaluationCacheKey& key,
+                  const std::vector<int>& legal_indices,
+                  const float* policy, float value);
     std::pair<MCTSNode*, int> select_leaf(MCTSNode* root, Chessboard& board, float c_puct);
     void expand_and_backup_prepared(MCTSNode* leaf_node,
                                     const std::vector<int>& legal_indices,
-                                    uint64_t hash, const float* policy, float value);
+                                    const EvaluationCacheKey& key,
+                                    const float* policy, float value);
 
     // Noyau unique de recherche, defini dans mcts_batch.cpp.
     // batch_size == 0 : boucle sequentielle historique, conservee telle quelle.

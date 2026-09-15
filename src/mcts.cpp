@@ -55,13 +55,100 @@ std::unique_ptr<MCTSNode> MCTSNode::extract_child(int idx) {
 // ============================================================
 //                     MCTS
 // ============================================================
-MCTS::MCTS(ONNXEvaluator* evaluator, size_t tt_size) : 
+MCTS::MCTS(ONNXEvaluator* evaluator, size_t tt_size,
+           int cache_history_depth) :
         m_evaluator(evaluator), 
         m_tt_size(tt_size),
+        m_cache_history_depth(cache_history_depth),
         m_noise_rng(std::random_device{}()) {
+    if (m_cache_history_depth < LEGACY_CACHE_HISTORY_DEPTH
+        || m_cache_history_depth > 7) {
+        throw std::invalid_argument(
+            "MCTS : cache_history_depth doit valoir -1 ou etre compris entre 0 et 7");
+    }
     transposition_table.resize(m_tt_size);
     m_eval_tensor.reserve(119 * 64);
     m_eval_policy.reserve(4672);
+}
+
+EvaluationCacheKey MCTS::make_cache_key(const Chessboard& board) const {
+    if (m_cache_history_depth != LEGACY_CACHE_HISTORY_DEPTH) {
+        return board.getEvaluationCacheKey(m_cache_history_depth);
+    }
+
+    EvaluationCacheKey key;
+    key.position_hash = board.getZobristHash();
+    key.current_context_hash = key.position_hash;
+    key.history_hash = key.position_hash;
+    key.combined_hash = key.position_hash;
+    return key;
+}
+
+TTProbe MCTS::probe_tt(const EvaluationCacheKey& key) const {
+    const TTEntry& entry = transposition_table[
+        key.position_hash % m_tt_size];
+    if (entry.hash != key.position_hash || entry.policy_size == 0) {
+        return { nullptr, TTProbeStatus::MISS };
+    }
+    if (m_cache_history_depth == LEGACY_CACHE_HISTORY_DEPTH) {
+        return { &entry, TTProbeStatus::HIT };
+    }
+    if (entry.half_move_clock != key.half_move_clock) {
+        return { nullptr, TTProbeStatus::RULE50_REJECT };
+    }
+    if (entry.current_context_hash != key.current_context_hash) {
+        return { nullptr, TTProbeStatus::CONTEXT_REJECT };
+    }
+    if (entry.history_hash != key.history_hash
+        || entry.evaluation_hash != key.combined_hash) {
+        return { nullptr, TTProbeStatus::HISTORY_REJECT };
+    }
+    return { &entry, TTProbeStatus::HIT };
+}
+
+void MCTS::record_tt_probe(TTProbeStatus status) {
+    if (status == TTProbeStatus::MISS) {
+        m_tt_misses.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+
+    m_tt_position_matches.fetch_add(1, std::memory_order_relaxed);
+    if (status == TTProbeStatus::HIT) {
+        m_tt_hits.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+
+    m_tt_misses.fetch_add(1, std::memory_order_relaxed);
+    if (status == TTProbeStatus::RULE50_REJECT) {
+        m_tt_rule50_rejects.fetch_add(1, std::memory_order_relaxed);
+    }
+    else if (status == TTProbeStatus::CONTEXT_REJECT) {
+        m_tt_context_rejects.fetch_add(1, std::memory_order_relaxed);
+    }
+    else {
+        m_tt_history_rejects.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+void MCTS::store_tt(const EvaluationCacheKey& key,
+                    const std::vector<int>& legal_indices,
+                    const float* policy, float value) {
+    TTEntry& entry = transposition_table[key.position_hash % m_tt_size];
+    entry.policy_size = 0;
+    entry.hash = key.position_hash;
+    entry.evaluation_hash = key.combined_hash;
+    entry.current_context_hash = key.current_context_hash;
+    entry.history_hash = key.history_hash;
+    entry.half_move_clock = key.half_move_clock;
+    entry.value = value;
+
+    const int policy_size = std::min(
+        static_cast<int>(legal_indices.size()), TT_MAX_MOVES);
+    for (int k = 0; k < policy_size; ++k) {
+        const int idx = legal_indices[k];
+        entry.legal_policy[k] = { idx, policy[idx] };
+    }
+    entry.policy_size = policy_size;
 }
 
 void MCTS::backup(MCTSNode* node, float value) {
@@ -87,12 +174,12 @@ std::pair<MCTSNode*, int> MCTS::select_leaf(MCTSNode* root, Chessboard& board, f
             // creerait un second jeu. L'arbre serait corrompu en silence.
             if (node->n_in_flight > 0) break;
 
-            uint64_t hash = board.getZobristHash();
-            size_t tt_idx = hash % m_tt_size;
-            const TTEntry& entry = transposition_table[tt_idx];
+            const EvaluationCacheKey key = make_cache_key(board);
+            const TTProbe probe = probe_tt(key);
 
-            if (entry.hash == hash && entry.policy_size > 0) {
-                m_tt_hits.fetch_add(1, std::memory_order_relaxed);
+            if (probe.status == TTProbeStatus::HIT) {
+                record_tt_probe(probe.status);
+                const TTEntry& entry = *probe.entry;
                 int size = entry.policy_size;
                 float sum_legal = 0.0f;
                 for (int k = 0; k < size; ++k) sum_legal += entry.legal_policy[k].second;
@@ -163,17 +250,14 @@ float MCTS::expand_node_single(MCTSNode* node, Chessboard& board) {
         return 0.0f;
     }
 
-    uint64_t hash = board.getZobristHash();
-    size_t tt_idx = hash % m_tt_size;
+    const EvaluationCacheKey key = make_cache_key(board);
+    const TTProbe probe = probe_tt(key);
+    record_tt_probe(probe.status);
 
-    // Cache hit
-    if (transposition_table[tt_idx].hash == hash && transposition_table[tt_idx].policy_size > 0) {
-        m_tt_hits.fetch_add(1, std::memory_order_relaxed);
-        return transposition_table[tt_idx].value;
+    if (probe.status == TTProbeStatus::HIT) {
+        return probe.entry->value;
     }
 
-    // Cache miss
-    m_tt_misses.fetch_add(1, std::memory_order_relaxed);
     std::vector<int> legal_indices = board.getLegalMoveIndices();
     if (legal_indices.empty()) {
         node->is_terminal = true;
@@ -186,35 +270,34 @@ float MCTS::expand_node_single(MCTSNode* node, Chessboard& board) {
     m_nn_batches.fetch_add(1, std::memory_order_relaxed);
     m_evaluator->evaluate(m_eval_tensor, m_eval_policy, value);
 
-    // Stockage dans la TT (taille fixe, pas d'allocation)
-    TTEntry& tt = transposition_table[tt_idx];
-    tt.hash = hash;
-    tt.value = value;
-    tt.policy_size = std::min((int)legal_indices.size(), TT_MAX_MOVES);
+    store_tt(key, legal_indices, m_eval_policy.data(), value);
 
+    const int policy_size = std::min(
+        static_cast<int>(legal_indices.size()), TT_MAX_MOVES);
     float sum_legal = 0.0f;
-    for (int k = 0; k < tt.policy_size; ++k) {
+    for (int k = 0; k < policy_size; ++k) {
         int idx = legal_indices[k];
         float prob = m_eval_policy[idx];
-        tt.legal_policy[k] = { idx, prob };
         sum_legal += prob;
     }
 
     // Création des enfants
-    node->children.reserve(tt.policy_size);
+    node->children.reserve(policy_size);
     if (sum_legal > 0.0f) {
-        for (int k = 0; k < tt.policy_size; ++k) {
+        for (int k = 0; k < policy_size; ++k) {
+            const int idx = legal_indices[k];
             node->children.emplace_back(
-                tt.legal_policy[k].first,
-                std::make_unique<MCTSNode>(tt.legal_policy[k].second / sum_legal, tt.legal_policy[k].first, node));
+                idx,
+                std::make_unique<MCTSNode>(m_eval_policy[idx] / sum_legal,
+                                           idx, node));
         }
     }
     else {
-        float uniform_prob = 1.0f / tt.policy_size;
-        for (int k = 0; k < tt.policy_size; ++k) {
+        float uniform_prob = 1.0f / policy_size;
+        for (int k = 0; k < policy_size; ++k) {
+            const int idx = legal_indices[k];
             node->children.emplace_back(
-                tt.legal_policy[k].first,
-                std::make_unique<MCTSNode>(uniform_prob, tt.legal_policy[k].first, node));
+                idx, std::make_unique<MCTSNode>(uniform_prob, idx, node));
         }
     }
 
@@ -415,17 +498,16 @@ MCTSNode* MCTS::advance_to_leaf(MCTSNode* root, Chessboard& board, float c_puct,
     }
 
     // Vérification TT avant GPU
-    uint64_t hash = board.getZobristHash();
-    size_t tt_idx = hash % m_tt_size;
+    const EvaluationCacheKey key = make_cache_key(board);
+    const TTProbe probe = probe_tt(key);
+    record_tt_probe(probe.status);
 
-    if (transposition_table[tt_idx].hash == hash && transposition_table[tt_idx].policy_size > 0) {
-        m_tt_hits.fetch_add(1, std::memory_order_relaxed);
-        backup(node, transposition_table[tt_idx].value);
+    if (probe.status == TTProbeStatus::HIT) {
+        backup(node, probe.entry->value);
         for (int i = 0; i < moves_played; i++) board.undoMove();
         return nullptr;
     }
 
-    m_tt_misses.fetch_add(1, std::memory_order_relaxed);
     return node;
 }
 
@@ -438,43 +520,44 @@ void MCTS::expand_and_backup(MCTSNode* leaf_node, Chessboard& board, const float
         return;
     }
 
-    expand_and_backup_prepared(leaf_node, legal_indices, board.getZobristHash(), policy, value);
+    expand_and_backup_prepared(
+        leaf_node, legal_indices, make_cache_key(board), policy, value);
 }
 
 void MCTS::expand_and_backup_prepared(MCTSNode* leaf_node,
                                       const std::vector<int>& legal_indices,
-                                      uint64_t hash, const float* policy, float value) {
+                                      const EvaluationCacheKey& key,
+                                      const float* policy, float value) {
     // Les feuilles terminales sont traitees pendant la descente, jamais ici :
     // legal_indices est donc non vide et le plateau n'est pas necessaire.
-    size_t tt_idx = hash % m_tt_size;
-    TTEntry& tt = transposition_table[tt_idx];
-    tt.hash = hash;
-    tt.value = value;
-    tt.policy_size = std::min((int)legal_indices.size(), TT_MAX_MOVES);
+    store_tt(key, legal_indices, policy, value);
 
+    const int policy_size = std::min(
+        static_cast<int>(legal_indices.size()), TT_MAX_MOVES);
     float sum_legal = 0.0f;
-    for (int k = 0; k < tt.policy_size; ++k) {
+    for (int k = 0; k < policy_size; ++k) {
         int idx = legal_indices[k];
         float prob = policy[idx];
-        tt.legal_policy[k] = { idx, prob };
         sum_legal += prob;
     }
 
     // Création des enfants
-    leaf_node->children.reserve(tt.policy_size);
+    leaf_node->children.reserve(policy_size);
     if (sum_legal > 0.0f) {
-        for (int k = 0; k < tt.policy_size; ++k) {
+        for (int k = 0; k < policy_size; ++k) {
+            const int idx = legal_indices[k];
             leaf_node->children.emplace_back(
-                tt.legal_policy[k].first,
-                std::make_unique<MCTSNode>(tt.legal_policy[k].second / sum_legal, tt.legal_policy[k].first, leaf_node));
+                idx,
+                std::make_unique<MCTSNode>(policy[idx] / sum_legal,
+                                           idx, leaf_node));
         }
     }
     else {
-        float uniform_prob = 1.0f / tt.policy_size;
-        for (int k = 0; k < tt.policy_size; ++k) {
+        float uniform_prob = 1.0f / policy_size;
+        for (int k = 0; k < policy_size; ++k) {
+            const int idx = legal_indices[k];
             leaf_node->children.emplace_back(
-                tt.legal_policy[k].first,
-                std::make_unique<MCTSNode>(uniform_prob, tt.legal_policy[k].first, leaf_node));
+                idx, std::make_unique<MCTSNode>(uniform_prob, idx, leaf_node));
         }
     }
 

@@ -145,6 +145,10 @@ PYBIND11_MODULE(chess_engine, m) {
         .def_readonly("nn_batches", &SearchCounters::nn_batches)
         .def_readonly("tt_hits", &SearchCounters::tt_hits)
         .def_readonly("tt_misses", &SearchCounters::tt_misses)
+        .def_readonly("tt_position_matches", &SearchCounters::tt_position_matches)
+        .def_readonly("tt_rule50_rejects", &SearchCounters::tt_rule50_rejects)
+        .def_readonly("tt_context_rejects", &SearchCounters::tt_context_rejects)
+        .def_readonly("tt_history_rejects", &SearchCounters::tt_history_rejects)
         .def_readonly("terminal_hits", &SearchCounters::terminal_hits);
 
     py::class_<TreeReport>(m, "TreeReport")
@@ -158,8 +162,9 @@ PYBIND11_MODULE(chess_engine, m) {
         .def(py::init<const std::string&, bool>(), py::arg("model_path"), py::arg("use_gpu") = false);
 
     py::class_<MCTS>(m, "MCTS")
-        .def(py::init<ONNXEvaluator*, size_t>(),
-            py::arg("evaluator"), py::arg("tt_size") = 2097143)
+        .def(py::init<ONNXEvaluator*, size_t, int>(),
+            py::arg("evaluator"), py::arg("tt_size") = 2097143,
+            py::arg("cache_history_depth") = DEFAULT_CACHE_HISTORY_DEPTH)
         .def("mcts_search", &MCTS::mcts_search,
             py::call_guard<py::gil_scoped_release>(),
             py::arg("board"), py::arg("num_simulations"), py::arg("c_puct") = 1.4f,
