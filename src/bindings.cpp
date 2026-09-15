@@ -41,6 +41,15 @@ PYBIND11_MODULE(chess_engine, m) {
         .export_values();
 
     // --- Classes ---
+    py::class_<EvaluationCacheKey>(m, "EvaluationCacheKey")
+        .def_readonly("position_hash", &EvaluationCacheKey::position_hash)
+        .def_readonly("current_context_hash", &EvaluationCacheKey::current_context_hash)
+        .def_readonly("history_hash", &EvaluationCacheKey::history_hash)
+        .def_readonly("combined_hash", &EvaluationCacheKey::combined_hash)
+        .def_readonly("half_move_clock", &EvaluationCacheKey::half_move_clock)
+        .def_readonly("repetition_category", &EvaluationCacheKey::repetition_category)
+        .def_readonly("total_moves_bucket", &EvaluationCacheKey::total_moves_bucket);
+
     py::class_<Piece>(m, "Piece")
         .def(py::init<>())
         .def(py::init<Color, PieceType>())
@@ -104,6 +113,10 @@ PYBIND11_MODULE(chess_engine, m) {
         .def("move_piece_uci", &Chessboard::movePieceUCI)
         .def("get_all_legal_moves", &Chessboard::getAllLegalMoves)
         .def("to_fen", &Chessboard::toFEN)
+        .def("get_evaluation_cache_key", &Chessboard::getEvaluationCacheKey,
+             py::arg("history_depth"))
+        .def("set_amnesia_mode", &Chessboard::setAmnesiaMode,
+             py::arg("amnesia"))
         .def("get_legal_move_indices", &Chessboard::getLegalMoveIndices)
         .def("get_board_history", static_cast<const std::vector<std::array<Square, 64>>&(Chessboard::*)() const>(&Chessboard::getBoardHistory))
         .def("get_last_move_data", [](const Chessboard& cb)

@@ -33,6 +33,16 @@ struct StateSnapshot {
     GameState current_state;
 };
 
+struct EvaluationCacheKey {
+    uint64_t position_hash = 0;
+    uint64_t current_context_hash = 0;
+    uint64_t history_hash = 0;
+    uint64_t combined_hash = 0;
+    uint16_t half_move_clock = 0;
+    uint8_t repetition_category = 0;
+    uint8_t total_moves_bucket = 0;
+};
+
 class Chessboard
 {
     private:
@@ -77,6 +87,7 @@ class Chessboard
         // getters
         uint64_t getZobristHash() const { return m_current_zobrist_hash; }
         uint64_t computeZobristFromScratch() const;
+        EvaluationCacheKey getEvaluationCacheKey(int history_depth) const;
         int getNumberOfOccupiedSquares() const;
         int getHalfMoveClock() const;
         int encodeMove(const Move& move) const;

@@ -30,7 +30,8 @@ set(ONNXRUNTIME_CUDA_DLL "${ONNX_GPU_DIR}/lib/onnxruntime_providers_cuda.dll")
 # 1. Création de la librairie core
 # ==========================================
 add_library(chess_core STATIC 
-    src/chessboard.cpp 
+    src/chessboard.cpp
+    src/evaluation_key.cpp
     src/square.cpp 
     src/piece.cpp 
     src/move.cpp 
