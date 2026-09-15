@@ -14,16 +14,17 @@ Date : 15 septembre 2026
 
 ## Résultats globaux
 
-| Politique | Mats | Nulles par les 50 coups | Parties | Durée murale |
+| Politique | Mats | Nulles par les 50 coups | Parties | Somme des durées des parties |
 |---|---:|---:|---:|---:|
-| `legacy` | 10 | 2 | 12 | 15,4 min |
-| `h0` | 11 | 1 | 12 | 20,9 min |
-| `h1` | 11 | 1 | 12 | 20,6 min |
-| `h7` | 12 | 0 | 12 | 15,7 min |
+| `legacy` | 10 | 2 | 12 | 158,9 s |
+| `h0` | 11 | 1 | 12 | 161,8 s |
+| `h1` | 11 | 1 | 12 | 142,8 s |
+| `h7` | 12 | 0 | 12 | 123,7 s |
 
-La durée murale correspond au temps de chaque passage complet. Les durées
-individuelles sont influencées par la longueur de la partie et par le nombre de
-réutilisations de la TT.
+Les durées sont la somme des douze temps affichés par le banc pour chaque
+politique. Elles ne comprennent pas l'initialisation du modèle et ne doivent pas
+être confondues avec les durées des passages puzzles. La durée d'une partie
+dépend aussi de sa longueur et du nombre de réutilisations de la TT.
 
 ## Résultats par famille
 
@@ -34,6 +35,32 @@ réutilisations de la TT.
 | Deux tours contre roi, 2 positions | 2 mats | 2 mats | 2 mats | 2 mats |
 | Dame+pion contre fou, 2 positions | 2 mats | 2 mats | 2 mats | 2 mats |
 | Deux fous contre roi, 1 position | 1 nulle | 1 nulle | 1 nulle | 1 mat |
+
+## Demi-coups pour chaque position
+
+Chaque cellule donne l'issue et le nombre de demi-coups joués avant le mat ou
+la nulle. Une nulle par les 50 coups survient ici au bout de 100 demi-coups.
+Ce nombre comprend les coups des deux camps ; 31 demi-coups correspondent à
+environ 15 coups complets et un dernier coup.
+
+| Position | `legacy` | `h0` | `h1` | `h7` |
+|---|---:|---:|---:|---:|
+| Tour contre roi, roi noir au centre (`tour_centre`) | nulle, 100 | mat, 31 | mat, 73 | mat, 55 |
+| Tour contre roi, roi noir au bord (`tour_bord`) | mat, 3 | mat, 3 | mat, 3 | mat, 3 |
+| Tour contre roi, roi noir au coin (`tour_coin`) | mat, 3 | mat, 3 | mat, 3 | mat, 3 |
+| Tour contre roi, trait aux noirs (`tour_trait_noirs`) | mat, 20 | mat, 52 | mat, 14 | mat, 54 |
+| Dame contre roi, roi noir au centre (`dame_centre`) | mat, 27 | mat, 11 | mat, 11 | mat, 11 |
+| Dame contre roi, roi noir au bord (`dame_bord`) | mat, 3 | mat, 3 | mat, 3 | mat, 3 |
+| Dame contre roi, trait aux noirs (`dame_trait_noirs`) | mat, 18 | mat, 38 | mat, 26 | mat, 36 |
+| Deux tours contre roi, roi noir au bord (`deux_tours_bord`) | mat, 3 | mat, 3 | mat, 3 | mat, 3 |
+| Deux tours contre roi, roi noir au coin (`deux_tours_coin`) | mat, 3 | mat, 3 | mat, 3 | mat, 3 |
+| Dame+pion contre fou, position 1 (`dame_pion_fou_1`) | mat, 15 | mat, 23 | mat, 31 | mat, 39 |
+| Dame+pion contre fou, position 2 (`dame_pion_fou_2`) | mat, 17 | mat, 97 | mat, 31 | mat, 39 |
+| Deux fous contre roi (`deux_fous`) | nulle, 100 | nulle, 100 | nulle, 100 | mat, 67 |
+
+Dans `dame_pion_fou_2`, `h0` finit par mater, mais seulement après 97
+demi-coups. Le compteur maximal y atteint 82, contre 16 pour `h1` et 24 pour
+`h7`. C'est l'autre trajectoire longue à considérer dans le choix final.
 
 ## Position causale tour contre roi
 
