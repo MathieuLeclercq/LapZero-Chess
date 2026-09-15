@@ -112,3 +112,16 @@ def test_inspect_tree_ne_voit_pas_l_arbre_de_mcts_search(evaluateur):
     mcts.mcts_search(_plateau(None), 100, 1.4, False)
 
     assert mcts.inspect_tree().nodes == 0
+
+
+@pytest.mark.parametrize("depth", [-1, 0, 1, 3, 7])
+@pytest.mark.parametrize("batch_size", [0, 8])
+def test_la_politique_tt_ne_corrompt_pas_l_arbre(
+        evaluateur, depth, batch_size):
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT, depth)
+    mcts.step_analysis(_plateau(None), 200, 1.4, batch_size)
+
+    rapport = mcts.inspect_tree()
+    assert rapport.violations == 0, list(rapport.messages)
+    assert rapport.en_vol == 0
+    assert sum(s.visits for s in mcts.get_analysis_results()) == 200

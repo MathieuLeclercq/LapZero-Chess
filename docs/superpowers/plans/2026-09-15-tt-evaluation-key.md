@@ -538,6 +538,8 @@ Importer les aides depuis `test_evaluation_cache_key.py` est interdit, pour que 
 
 Les recherches à zéro simulation ci-dessus ne prétendent pas exercer le noyau batché : elles testent uniquement le probe de racine. La couverture réelle des deux noyaux vient du test `tt_misses == nn_calls` de la tâche 2 et de la matrice d'invariants ci-dessous, qui effectue 200 simulations.
 
+Clarification issue de la revue : `h0` ignore uniquement les positions antérieures. Il doit accepter un hit lorsque le plateau, le compteur des 50 coups, la répétition courante et le plan du nombre total de coups sont identiques. Il doit encore rejeter deux plateaux identiques lorsque leur répétition courante ou leur plan du nombre de coups diffère. Ajouter un test où deux historiques de quatre demi-coups atteignent la position initiale avec le même compteur et le même bucket, mais où un seul historique constitue une répétition. Cela isole `repetition_category` sans la confondre avec `total_moves_bucket`.
+
 - [ ] **Step 2: Ajouter les contrôles d'invariants pour chaque profondeur**
 
 Paramétrer un test court dans `test_tree_invariants.py` :
@@ -558,7 +560,7 @@ def test_la_politique_tt_ne_corrompt_pas_l_arbre(
 
 - [ ] **Step 3: Vérifier que les tests détectent une politique mal câblée**
 
-Avant l'exécution finale, remplacer localement et temporairement `history_hash` par zéro lors du stockage. Recompiler et exécuter :
+Avant l'exécution finale, neutraliser localement et temporairement toute la condition `HISTORY_REJECT` dans `probe_tt`. Mettre seulement `history_hash` à zéro ne suffit pas, car `evaluation_hash` est volontairement un second garde-fou. Recompiler et exécuter :
 
 Run: `uv run pytest python_src/tests/test_tt_history_depth.py -q`
 
