@@ -57,6 +57,12 @@ des 50 coups et le flag amnésie. Le hash Zobrist ne contient **rien de tout ça
 peut donc renvoyer une policy et une value calculées sous un contexte différent, ce qui
 est du bruit permanent sur toutes les évaluations.
 
+**Design détaillé : `superpowers/specs/2026-09-15-tt-evaluation-key-design.md`.** Le
+compteur des 50 coups sera exact. La profondeur historique ne sera pas fixée
+intuitivement : 0 et 1 sont les candidates principales, 3 et 7 servent de témoins. Le
+benchmark mesurera séparément la perte de hits, les appels réseau, le débit, l'accord
+des coups et la conversion de la finale tour contre roi.
+
 Au passage, `TTEntry` réserve la place pour 128 coups (`std::array<std::pair<int,float>,
 128>`), soit 1040 octets par entrée, alors qu'une position en a environ 35 d'utiles.
 Avec `tt_size=4_000_000` en self-play, cela fait 4,16 Go alloués et initialisés à zéro.

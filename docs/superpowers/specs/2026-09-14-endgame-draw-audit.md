@@ -89,11 +89,16 @@ entrées sémantiquement périmées ayant exactement le même Zobrist.
 
 ## Correction recommandée
 
+La conception détaillée et les variantes de profondeur historique sont consignées dans
+`2026-09-15-tt-evaluation-key-design.md`. Elle affine la recommandation ci-dessous : le
+compteur des 50 coups doit être exact, tandis que l'étendue historique de la clé sera
+choisie par benchmark entre 0, 1, 3 et 7 positions antérieures.
+
 Conserver le Zobrist actuel pour les règles et ajouter une clé distincte pour le cache
 réseau. Cette clé doit représenter exactement les informations qui déterminent le
-tensor. Il ne suffit pas d'ajouter uniquement le compteur des 50 coups, car deux
-historiques différents peuvent produire le même plateau courant et des tensors
-différents.
+tensor dans son mode de référence. Des modes moins stricts sont volontairement testés,
+car deux historiques différents peuvent produire le même plateau courant et des tensors
+différents sans que cette différence soit nécessairement utile au niveau de jeu.
 
 La correction devra être validée ainsi :
 
