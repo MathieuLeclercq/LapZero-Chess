@@ -1,151 +1,160 @@
-#include <iostream>
-#include <filesystem>
-#include <vector>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 #include <string>
-#include <fstream> // NOUVEAU: Nécessaire pour lire tactics.txt
+#include <vector>
+
 #include "chessboard.hpp"
 #include "pgn_parser.hpp"
 
 namespace fs = std::filesystem;
 
-// Fonction utilitaire pour le stress test des FENs
-void test_fen_loading(const std::string& fen_filepath) {
-    std::cout << "========================================" << std::endl;
-    std::cout << "Debut du stress test FEN sur : " << fen_filepath << std::endl;
+namespace {
 
-    std::ifstream file(fen_filepath);
-    if (!file.is_open()) {
-        std::cerr << "Erreur : Impossible d'ouvrir le fichier " << fen_filepath << std::endl;
-        return;
-    }
-
-    std::string fen;
-    int success_count = 0;
-    Chessboard board; // On réutilise le même plateau pour tester la robustesse de clear()
-
-    auto t_start = std::chrono::high_resolution_clock::now();
-
-    // On lit le fichier ligne par ligne
-    while (std::getline(file, fen)) {
-        if (fen.empty()) continue;
-
-        // Si loadFEN contient un bug critique (accès hors limite, stoi sans try/catch),
-        // le programme crashera ici. S'il passe, c'est que le code est robuste.
-        board.loadFEN(fen);
-        success_count++;
-
-        // Petit affichage pour montrer que le programme ne freeze pas
-        if (success_count % 20000 == 0) {
-            std::cout << "-> " << success_count << " FENs charges..." << std::endl;
-        }
-    }
-
-    auto t_end = std::chrono::high_resolution_clock::now();
-    double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-
-    std::cout << "-> Succes total ! " << success_count << " positions chargees sans crash." << std::endl;
-    std::cout << "-> Temps total d'execution FEN : " << elapsed_time_ms << " ms" << std::endl;
-
-    if (success_count > 0) {
-        std::cout << "-> Vitesse moyenne : " << (elapsed_time_ms / success_count) << " ms par FEN ("
-            << (int)(1000.0 / (elapsed_time_ms / success_count)) << " FENs/sec)" << std::endl;
-    }
-    std::cout << "========================================\n" << std::endl;
+void usage(const char* programme) {
+    std::cout
+        << "Usage: " << programme << " [tests...]\n"
+        << "  --fen-file <fichier>  charge et verifie chaque FEN\n"
+        << "  --pgn <fichier|dossier>  rejoue les PGN avec le parseur C++\n";
 }
 
+bool verifier_roundtrip(const Chessboard& board, const std::string& contexte) {
+    Chessboard copie;
+    try {
+        copie.loadFEN(board.toFEN());
+    } catch (const std::exception& exc) {
+        std::cerr << "Echec du roundtrip " << contexte << " : "
+                  << exc.what() << '\n';
+        return false;
+    }
+    if (copie.getZobristHash() != board.getZobristHash()) {
+        std::cerr << "Hash different apres roundtrip " << contexte << "\n"
+                  << "avant=" << board.toFEN() << "\n"
+                  << "apres=" << copie.toFEN() << '\n';
+        return false;
+    }
+    return true;
+}
 
-int main() {
-    // ---------------------------------------------------------
-    // 1. TEST DE CHARGE FEN (Puzzles)
-    // ---------------------------------------------------------
-    // Remplace par le bon chemin vers ton fichier tactics.txt généré par Python
-    std::string fen_file_path = "C:/Users/M47h1/Documents/chess_cpp/training_data/tactics.txt";
-    test_fen_loading(fen_file_path);
-
-
-    // ---------------------------------------------------------
-    // 2. TEST DE LECTURE PGN (Simulation de parties)
-    // ---------------------------------------------------------
-    std::string folder_path = "C:/Users/M47h1/Documents/chess_cpp/docs/PGN";
-
-    int success_count = 0;
-    int error_count = 0;
-    int total_plies = 0;
-    std::vector<std::string> failed_files;
-
-    auto t_start = std::chrono::high_resolution_clock::now();
-
-    if (!fs::exists(folder_path) || !fs::is_directory(folder_path)) {
-        std::cerr << "Erreur : Le dossier " << folder_path << " n'existe pas." << std::endl;
-        return 1;
+bool tester_fens(const fs::path& chemin) {
+    std::ifstream fichier(chemin);
+    if (!fichier) {
+        std::cerr << "Impossible d'ouvrir le fichier FEN : " << chemin << '\n';
+        return false;
     }
 
-    std::cout << "Debut des tests PGN sur le dossier : " << folder_path << "\n" << std::endl;
+    Chessboard board;
+    std::string fen;
+    size_t ligne = 0;
+    size_t chargees = 0;
+    const auto debut = std::chrono::steady_clock::now();
+    while (std::getline(fichier, fen)) {
+        ++ligne;
+        if (fen.empty()) continue;
+        try {
+            board.loadFEN(fen);
+        } catch (const std::exception& exc) {
+            std::cerr << "FEN invalide ligne " << ligne << " : "
+                      << exc.what() << '\n';
+            return false;
+        }
+        if (!verifier_roundtrip(board, "FEN ligne " + std::to_string(ligne))) {
+            return false;
+        }
+        ++chargees;
+    }
 
-    for (const auto& entry : fs::directory_iterator(folder_path)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".pgn") {
-            std::string current_file = entry.path().filename().string();
-            std::cout << "--- Test du fichier : " << current_file << " ---" << std::endl;
+    if (chargees == 0) {
+        std::cerr << "Le fichier FEN est vide : " << chemin << '\n';
+        return false;
+    }
+    const double secondes = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - debut).count();
+    std::cout << "FEN : " << chargees << " positions verifiees en "
+              << secondes << " s\n";
+    return true;
+}
 
-            Chessboard chessboard;
-            chessboard.setStartupPieces();
-            PgnParser pgnParser;
+std::vector<fs::path> fichiers_pgn(const fs::path& chemin) {
+    if (fs::is_regular_file(chemin)) return {chemin};
+    if (!fs::is_directory(chemin)) return {};
 
-            if (!pgnParser.parseFiles(entry.path().string())) {
-                std::cerr << "-> Echec de la lecture du fichier." << std::endl;
-                error_count++;
-                failed_files.push_back(current_file);
-                continue;
-            }
-
-            std::vector<std::string> moves = pgnParser.extractMoves();
-            bool game_success = true;
-
-            for (size_t i = 0; i < moves.size(); i++) {
-                if (!chessboard.movePieceSAN(moves[i])) {
-                    std::cerr << "-> Erreur critique au ply " << i + 1 << " (coup lu : " << moves[i] << ")." << std::endl;
-                    game_success = false;
-                    break;
-                }
-                total_plies++;
-            }
-
-            if (game_success) {
-                std::cout << "-> Succes : " << moves.size() << " demi-coups simules." << std::endl;
-                success_count++;
-            }
-            else {
-                error_count++;
-                failed_files.push_back(current_file);
-            }
-            std::cout << std::endl;
+    std::vector<fs::path> resultats;
+    for (const auto& entree : fs::directory_iterator(chemin)) {
+        if (entree.is_regular_file() && entree.path().extension() == ".pgn") {
+            resultats.push_back(entree.path());
         }
     }
+    return resultats;
+}
 
-    auto t_end = std::chrono::high_resolution_clock::now();
-    double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-
-    std::cout << "========================================" << std::endl;
-    std::cout << "Bilan des simulations PGN :" << std::endl;
-    std::cout << "Parties reussies : " << success_count << std::endl;
-    std::cout << "Parties echouees : " << error_count << std::endl;
-    std::cout << "Nombre total de ply simules : " << total_plies << std::endl;
-    std::cout << "Temps total d'execution PGN : " << elapsed_time_ms << " ms" << std::endl;
-
-    if (total_plies > 0) {
-        double avg_time_per_ply = elapsed_time_ms / total_plies;
-        std::cout << "Temps moyen par ply : " << avg_time_per_ply << " ms" << std::endl;
+bool tester_pgn(const fs::path& chemin) {
+    const std::vector<fs::path> fichiers = fichiers_pgn(chemin);
+    if (fichiers.empty()) {
+        std::cerr << "Aucun fichier PGN trouve : " << chemin << '\n';
+        return false;
     }
 
-    if (!failed_files.empty()) {
-        std::cout << "----------------------------------------" << std::endl;
-        std::cout << "Fichiers ayant echoue :" << std::endl;
-        for (const std::string& file : failed_files) {
-            std::cout << "- " << file << std::endl;
+    size_t parties = 0;
+    size_t plies = 0;
+    for (const fs::path& fichier : fichiers) {
+        PgnParser parser;
+        if (!parser.parseFiles(fichier.string())) {
+            std::cerr << "Lecture PGN impossible : " << fichier << '\n';
+            return false;
         }
-    }
-    std::cout << "========================================" << std::endl;
 
-    return 0;
+        Chessboard board;
+        board.setStartupPieces();
+        const std::vector<std::string> coups = parser.extractMoves();
+        for (size_t i = 0; i < coups.size(); ++i) {
+            if (!board.movePieceSAN(coups[i])) {
+                std::cerr << "Coup SAN refuse dans " << fichier.filename()
+                          << ", ply " << (i + 1) << " : " << coups[i] << '\n';
+                return false;
+            }
+            ++plies;
+        }
+        if (!verifier_roundtrip(board, fichier.filename().string())) return false;
+        ++parties;
+    }
+
+    std::cout << "PGN : " << parties << " parties et " << plies
+              << " demi-coups verifies\n";
+    return true;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    if (argc == 1) {
+        usage(argv[0]);
+        return 2;
+    }
+
+    bool succes = true;
+    bool test_lance = false;
+    for (int i = 1; i < argc; ++i) {
+        const std::string argument = argv[i];
+        if (argument == "--help" || argument == "-h") {
+            usage(argv[0]);
+            return 0;
+        }
+        if ((argument == "--fen-file" || argument == "--pgn")
+            && i + 1 < argc) {
+            const fs::path chemin = argv[++i];
+            test_lance = true;
+            succes = (argument == "--fen-file" ? tester_fens(chemin)
+                                                 : tester_pgn(chemin))
+                     && succes;
+            continue;
+        }
+
+        std::cerr << "Argument inconnu ou valeur manquante : " << argument << '\n';
+        usage(argv[0]);
+        return 2;
+    }
+
+    return test_lance && succes ? 0 : 1;
 }

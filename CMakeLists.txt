@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 project(Chess)
+enable_testing()
 cmake_policy(SET CMP0135 NEW)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -55,6 +56,10 @@ target_link_libraries(chess_core PUBLIC ${ONNXRUNTIME_LIB} OpenMP::OpenMP_CXX)
 # ==========================================
 add_executable(chess_tests src/main.cpp)
 target_link_libraries(chess_tests PRIVATE chess_core)
+add_test(NAME chess_tests_fen_smoke
+    COMMAND chess_tests --fen-file ${CMAKE_SOURCE_DIR}/tests/data/fens_smoke.txt)
+add_test(NAME chess_tests_pgn_smoke
+    COMMAND chess_tests --pgn ${CMAKE_SOURCE_DIR}/docs/PGN/game_000050.pgn)
 
 # ==========================================
 # 2 bis. Executable de validation perft
