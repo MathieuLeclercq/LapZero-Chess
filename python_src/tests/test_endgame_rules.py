@@ -226,6 +226,24 @@ def test_rejet_semantique_sous_racine_est_compte_une_fois_en_batch(evaluator):
     assert tree.en_vol == 0
 
 
+def test_droits_de_roque_actuels_interdisent_un_hit_tt(evaluator):
+    avec_roque = plateau("4k3/8/8/8/8/8/8/4K2R w K - 0 1")
+    sans_roque = plateau("4k3/8/8/8/8/8/8/4K2R w - - 0 1")
+
+    assert (avec_roque.get_evaluation_cache_key(0).position_hash
+            != sans_roque.get_evaluation_cache_key(0).position_hash)
+
+    mcts = chess_engine.MCTS(evaluator, 8192, 0)
+    mcts.mcts_search(avec_roque, 0, 1.4, False, 8)
+    mcts.reset_counters()
+    mcts.mcts_search(sans_roque, 0, 1.4, False, 8)
+    c = mcts.get_counters()
+
+    assert c.tt_hits == 0
+    assert c.tt_misses == 1
+    assert c.tt_position_matches == 0
+
+
 @pytest.mark.parametrize("depth", [-2, 8])
 def test_mcts_refuse_une_profondeur_de_cache_hors_bornes(evaluator, depth):
     with pytest.raises(ValueError):
