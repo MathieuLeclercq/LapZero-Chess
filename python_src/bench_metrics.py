@@ -358,6 +358,7 @@ def format_report(stats: BenchStats, contexte: dict) -> str:
         f"Banc : `{contexte['fichier_banc']}`, bras {bras}",
         f"Recherche : {contexte['simulations']} simulations, "
         f"c_puct {contexte['c_puct']}, batch {contexte.get('batch_size', 0)}, "
+        f"TT {('legacy' if contexte.get('cache_history_depth', 1) == -1 else 'h' + str(contexte.get('cache_history_depth', 1)))}, "
         f"{contexte['travailleurs']} travailleurs",
         f"Duree : {contexte['duree_totale_s'] / 60.0:.1f} min",
         "",

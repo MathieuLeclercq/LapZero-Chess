@@ -124,16 +124,16 @@ def faire_policy_fn(session):
 
 
 def faire_search_fn(evaluateur, simulations: int, c_puct: float,
-                    batch_size: int = 0):
+                    batch_size: int = 0,
+                    cache_history_depth: int = 1):
     """Renvoie search_fn(board) -> distribution de visites sur 4672.
 
-    Un MCTS neuf a chaque recherche : la table de transposition est indexee sur
-    le seul Zobrist, or les positions successives d'une meme ligne ont des
-    historiques differents, donc un hit renverrait une value calculee sous un
-    autre historique.
+    Un MCTS neuf est cree pour chaque puzzle afin que les mesures restent
+    independantes entre les lignes du banc.
     """
     def search_fn(board):
-        mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+        mcts = chess_engine.MCTS(
+            evaluateur, TAILLE_TT, cache_history_depth)
         return mcts.mcts_search(board, simulations, c_puct, False, batch_size)
 
     return search_fn
@@ -152,7 +152,8 @@ _ETAT: dict = {}
 
 
 def initialiser_travailleur(onnx: str, simulations: int, c_puct: float,
-                            sans_historique: bool, batch_size: int) -> None:
+                            sans_historique: bool, batch_size: int,
+                            cache_history_depth: int) -> None:
     import onnxruntime as ort
 
     options = ort.SessionOptions()
@@ -163,7 +164,8 @@ def initialiser_travailleur(onnx: str, simulations: int, c_puct: float,
 
     _ETAT["policy_fn"] = faire_policy_fn(session)
     _ETAT["search_fn"] = faire_search_fn(
-        chess_engine.ONNXEvaluator(onnx, False), simulations, c_puct, batch_size)
+        chess_engine.ONNXEvaluator(onnx, False), simulations, c_puct,
+        batch_size, cache_history_depth)
     _ETAT["sans_historique"] = sans_historique
 
 
@@ -242,6 +244,8 @@ def main() -> int:
     parser.add_argument("--c-puct", type=float, default=1.4)
     parser.add_argument("--batch-size", type=int, default=0,
                         help="taille du lot MCTS, 0 conserve la recherche sequentielle")
+    parser.add_argument("--cache-history-depth", type=int, default=1,
+                        help="politique TT : -1 pour legacy, 0 a 7 pour h0 a h7")
     parser.add_argument("--travailleurs", type=int, default=16)
     # 2500 sur les 5000 du fichier : la demi-largeur de Wilson globale passe
     # de 1,2 a 1,6 point seulement, et le passage tient en deux fois moins de
@@ -259,6 +263,8 @@ def main() -> int:
 
     if args.batch_size < 0:
         parser.error("--batch-size doit etre positif ou nul")
+    if args.cache_history_depth < -1 or args.cache_history_depth > 7:
+        parser.error("--cache-history-depth doit etre compris entre -1 et 7")
 
     if not args.banc.exists():
         print(f"fichier de banc introuvable : {args.banc}", file=sys.stderr)
@@ -281,16 +287,20 @@ def main() -> int:
     os.environ["OMP_NUM_THREADS"] = "1"
 
     suffixe = " (sans historique)" if args.sans_historique else ""
+    politique = ("legacy" if args.cache_history_depth == -1 else
+                 f"h{args.cache_history_depth}")
     print(f"{len(lignes)} puzzles sur {total_fichier} du fichier, "
           f"{args.simulations} simulations, premier coup seul, "
-          f"batch {args.batch_size}, {args.travailleurs} travailleurs{suffixe}")
+          f"batch {args.batch_size}, TT {politique}, "
+          f"{args.travailleurs} travailleurs{suffixe}")
 
     debut = time.perf_counter()
     lots = _lots(lignes, 16)
     mesures: list = []
     with mp.Pool(args.travailleurs, initializer=initialiser_travailleur,
                  initargs=(str(onnx), args.simulations, args.c_puct,
-                           args.sans_historique, args.batch_size)) as pool:
+                           args.sans_historique, args.batch_size,
+                           args.cache_history_depth)) as pool:
         for i, resultat in enumerate(pool.imap_unordered(traiter_lot, lots), 1):
             mesures.extend(resultat)
             if i % 10 == 0 or i == len(lots):
@@ -309,6 +319,7 @@ def main() -> int:
         "simulations": args.simulations,
         "c_puct": args.c_puct,
         "batch_size": args.batch_size,
+        "cache_history_depth": args.cache_history_depth,
         "fichier_banc": str(args.banc),
         "sans_historique": args.sans_historique,
         "duree_totale_s": duree,
@@ -316,10 +327,11 @@ def main() -> int:
     }
 
     out_csv = args.out_csv or Path(
-        f"../data/bench_results/{Path(onnx).stem}_batch{args.batch_size}.csv")
+        f"../data/bench_results/{Path(onnx).stem}_batch{args.batch_size}"
+        f"_{politique}.csv")
     out_rapport = args.out_rapport or Path(
         f"../docs/superpowers/specs/{time.strftime('%Y-%m-%d')}"
-        f"-puzzle-bench-batch{args.batch_size}-resultats.md")
+        f"-puzzle-bench-batch{args.batch_size}-{politique}-resultats.md")
 
     ecrire_csv(mesures, out_csv)
     out_rapport.parent.mkdir(parents=True, exist_ok=True)

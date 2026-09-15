@@ -128,8 +128,9 @@ def test_la_recherche_transmet_la_taille_de_batch(monkeypatch):
     appels = []
 
     class FauxMCTS:
-        def __init__(self, evaluateur, taille_tt):
+        def __init__(self, evaluateur, taille_tt, cache_history_depth):
             assert taille_tt == puzzle_bench.TAILLE_TT
+            appels.append(("constructeur", cache_history_depth))
 
         def mcts_search(self, board, simulations, c_puct, bruit,
                         batch_size):
@@ -139,8 +140,12 @@ def test_la_recherche_transmet_la_taille_de_batch(monkeypatch):
     monkeypatch.setattr(puzzle_bench.chess_engine, "MCTS", FauxMCTS)
     plateau = object()
 
-    assert puzzle_bench.faire_search_fn(object(), 700, 1.4, 8)(plateau) == [1.0]
-    assert appels == [(plateau, 700, 1.4, False, 8)]
+    assert puzzle_bench.faire_search_fn(
+        object(), 700, 1.4, 8, cache_history_depth=3)(plateau) == [1.0]
+    assert appels == [
+        ("constructeur", 3),
+        (plateau, 700, 1.4, False, 8),
+    ]
 
 
 def test_la_taille_de_tt_reste_petite():
@@ -169,6 +174,7 @@ def test_main_de_bout_en_bout_sur_un_petit_echantillon(tmp_path, monkeypatch):
         "--limite", "6",
         "--simulations", "8",
         "--travailleurs", "2",
+        "--cache-history-depth", "3",
         "--dossier-onnx", str(tmp_path / "onnx"),
         "--out-csv", str(sortie_csv),
         "--out-rapport", str(sortie_rapport),
@@ -198,6 +204,7 @@ def test_main_de_bout_en_bout_sur_un_petit_echantillon(tmp_path, monkeypatch):
     rapport = sortie_rapport.read_text(encoding="utf-8")
     assert "Banc de puzzles" in rapport
     assert "McNemar" in rapport
+    assert "h3" in rapport
 
 
 def test_main_refuse_un_fichier_de_banc_absent(tmp_path, monkeypatch):

@@ -1,6 +1,7 @@
 """Logique pure du harnais de debit. Aucun moteur, aucun modele."""
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -20,11 +21,18 @@ from search_bench import (
 
 def _m(position="depart", chemin="mcts_search", simulations=400, duree_s=1.0,
        nn_calls=300, nn_batches=300, tt_hits=100, tt_misses=300,
-       terminal_hits=0, batch_size=0):
+       terminal_hits=0, batch_size=0, cache_history_depth=1,
+       tt_position_matches=100, tt_rule50_rejects=0,
+       tt_context_rejects=0, tt_history_rejects=0):
     return Mesure(position=position, chemin=chemin, simulations=simulations,
                   batch_size=batch_size, duree_s=duree_s, nn_calls=nn_calls,
                   nn_batches=nn_batches, tt_hits=tt_hits,
-                  tt_misses=tt_misses, terminal_hits=terminal_hits)
+                  tt_misses=tt_misses, terminal_hits=terminal_hits,
+                  cache_history_depth=cache_history_depth,
+                  tt_position_matches=tt_position_matches,
+                  tt_rule50_rejects=tt_rule50_rejects,
+                  tt_context_rejects=tt_context_rejects,
+                  tt_history_rejects=tt_history_rejects)
 
 
 def test_les_trois_grandeurs_sont_distinctes():
@@ -64,10 +72,10 @@ def test_agreger_groupe_par_position_et_chemin():
 
     agr = agreger(mesures)
 
-    assert set(agr) == {("depart", "mcts_search", 0),
-                        ("depart", "step_analysis", 0),
-                        ("finale", "mcts_search", 0)}
-    assert agr[("depart", "mcts_search", 0)]["passages"] == 2
+    assert set(agr) == {("depart", "mcts_search", 0, 1),
+                        ("depart", "step_analysis", 0, 1),
+                        ("finale", "mcts_search", 0, 1)}
+    assert agr[("depart", "mcts_search", 0, 1)]["passages"] == 2
 
 
 def test_agreger_groupe_aussi_par_taille_de_batch():
@@ -79,10 +87,36 @@ def test_agreger_groupe_aussi_par_taille_de_batch():
 
     agr = agreger(mesures)
 
-    assert set(agr) == {("depart", "mcts_search", 0),
-                        ("depart", "mcts_search", 32)}
-    assert agr[("depart", "mcts_search", 32)]["passages"] == 2
-    assert agr[("depart", "mcts_search", 32)]["sims_par_seconde_median"] == pytest.approx(400.0)
+    assert set(agr) == {("depart", "mcts_search", 0, 1),
+                        ("depart", "mcts_search", 32, 1)}
+    assert agr[("depart", "mcts_search", 32, 1)]["passages"] == 2
+    assert agr[("depart", "mcts_search", 32, 1)]["sims_par_seconde_median"] == pytest.approx(400.0)
+
+
+def test_agreger_separe_les_profondeurs_de_cache():
+    agr = agreger([
+        _m(cache_history_depth=0),
+        _m(cache_history_depth=1),
+    ])
+
+    assert set(agr) == {
+        ("depart", "mcts_search", 0, 0),
+        ("depart", "mcts_search", 0, 1),
+    }
+
+
+def test_agreger_prend_la_mediane_des_ratios_et_non_le_ratio_des_medianes():
+    agr = agreger([
+        _m(tt_hits=10, tt_misses=10, tt_position_matches=20,
+           tt_rule50_rejects=10),
+        _m(tt_hits=0, tt_misses=100, tt_position_matches=10,
+           tt_history_rejects=10),
+    ])[("depart", "mcts_search", 0, 1)]
+
+    assert agr["tt_position_match_rate_median"] == pytest.approx(0.55)
+    assert agr["tt_rule50_reject_rate_median"] == pytest.approx(0.25)
+    assert agr["tt_context_reject_rate_median"] == 0.0
+    assert agr["tt_history_reject_rate_median"] == pytest.approx(0.05)
 
 
 def test_agreger_donne_mediane_et_etendue():
@@ -90,7 +124,7 @@ def test_agreger_donne_mediane_et_etendue():
     sait pas distinguer un gain de 5 pour cent d'un bruit de mesure."""
     mesures = [_m(duree_s=1.0), _m(duree_s=2.0), _m(duree_s=4.0)]
 
-    a = agreger(mesures)[("depart", "mcts_search", 0)]
+    a = agreger(mesures)[("depart", "mcts_search", 0, 1)]
 
     assert a["sims_par_seconde_median"] == pytest.approx(200.0)
     assert a["sims_par_seconde_min"] == pytest.approx(100.0)
@@ -134,6 +168,116 @@ def test_format_report_affiche_batch_et_remplissage():
     assert "32.0" in texte
 
 
+def test_rapport_affiche_les_rejets_semantiques():
+    texte = format_report(agreger([_m(
+        cache_history_depth=1,
+        tt_hits=10,
+        tt_misses=20,
+        tt_position_matches=20,
+        tt_rule50_rejects=3,
+        tt_context_rejects=2,
+        tt_history_rejects=5,
+    )]), CONTEXTE, [])
+
+    assert "h1" in texte
+    assert "match position" in texte
+    assert "50 coups" in texte
+    assert "historique" in texte
+    assert "66.7 %" in texte
+    assert "10.0 %" in texte
+    assert "6.7 %" in texte
+    assert "16.7 %" in texte
+
+
+def test_les_mesures_transmettent_la_profondeur_au_mcts(monkeypatch):
+    import search_bench
+
+    constructions = []
+
+    class FauxMCTS:
+        def __init__(self, evaluateur, taille_tt, depth):
+            constructions.append(depth)
+
+        def reset_analysis(self):
+            pass
+
+        def reset_counters(self):
+            pass
+
+        def mcts_search(self, *args):
+            pass
+
+        def step_analysis(self, *args):
+            pass
+
+        def get_counters(self):
+            return type("C", (), dict(
+                nn_calls=1, nn_batches=1, tt_hits=0, tt_misses=1,
+                terminal_hits=0, tt_position_matches=0,
+                tt_rule50_rejects=0, tt_context_rejects=0,
+                tt_history_rejects=0))()
+
+    monkeypatch.setattr(search_bench.chess_engine, "MCTS", FauxMCTS)
+    monkeypatch.setattr(search_bench, "charger_position", lambda fen: object())
+
+    search_bench.mesurer_mcts_search(
+        object(), "fen", "position", 8, cache_history_depth=3)
+    search_bench.mesurer_step_analysis(
+        object(), "fen", "position", 8, cache_history_depth=7)
+
+    assert constructions == [3, 7]
+
+
+def test_main_balaie_toutes_les_profondeurs_demandees(
+        monkeypatch, tmp_path):
+    import search_bench
+    import puzzle_bench
+
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"modele factice")
+    rapport = tmp_path / "rapport.md"
+    appels = []
+
+    class Chauffe:
+        def __init__(self, evaluateur, taille_tt, depth):
+            appels.append(("chauffe", depth))
+
+        def mcts_search(self, *args):
+            pass
+
+    def mesurer_recherche(*args):
+        depth = args[-1]
+        appels.append(("mcts_search", depth))
+        return _m(cache_history_depth=depth)
+
+    def mesurer_analyse(*args):
+        depth = args[-1]
+        appels.append(("step_analysis", depth))
+        return _m(chemin="step_analysis", cache_history_depth=depth)
+
+    monkeypatch.setattr(search_bench, "POSITIONS", (("depart", "fen"),))
+    monkeypatch.setattr(search_bench.chess_engine, "MCTS", Chauffe)
+    monkeypatch.setattr(search_bench.chess_engine, "ONNXEvaluator",
+                        lambda *args: object())
+    monkeypatch.setattr(search_bench, "charger_position", lambda fen: object())
+    monkeypatch.setattr(search_bench, "mesurer_mcts_search", mesurer_recherche)
+    monkeypatch.setattr(search_bench, "mesurer_step_analysis", mesurer_analyse)
+    monkeypatch.setattr(puzzle_bench, "resoudre_modele",
+                        lambda *args: (model, {}))
+    monkeypatch.setattr(sys, "argv", [
+        "search_bench.py", "--model", str(model), "--passages", "1",
+        "--simulations", "8", "--cache-history-depths", "0", "3",
+        "--out-rapport", str(rapport),
+    ])
+
+    assert search_bench.main() == 0
+    assert appels == [
+        ("chauffe", 0),
+        ("mcts_search", 0), ("step_analysis", 0),
+        ("mcts_search", 3), ("step_analysis", 3),
+    ]
+
+
 def test_format_report_n_ecrit_jamais_noeuds_par_seconde():
     """Le perft mesure 1,6 million de noeuds par seconde, la recherche 295
     simulations par seconde : confondre les deux serait une erreur d'un facteur
@@ -149,7 +293,8 @@ def test_format_report_ne_contient_pas_de_tiret_cadratin():
 
 
 def test_format_report_signale_les_violations():
-    invariants = [("depart", 0, 120, 5, 3, ["enfant duplique, move_idx 42"])]
+    invariants = [("depart", 1, 0, 120, 5, 3,
+                   ["enfant duplique, move_idx 42"])]
 
     texte = format_report(_agr(), CONTEXTE, invariants)
 
@@ -158,15 +303,15 @@ def test_format_report_signale_les_violations():
 
 
 def test_format_report_associe_les_invariants_a_leur_batch():
-    invariants = [("depart", 32, 120, 5, 0, [])]
+    invariants = [("depart", 1, 32, 120, 5, 0, [])]
 
     texte = format_report(_agr(), CONTEXTE, invariants)
 
-    assert "| depart | 32 | 120 | 5 | 0 |" in texte
+    assert "| depart | h1 | 32 | 120 | 5 | 0 |" in texte
 
 
 def test_format_report_est_muet_quand_aucune_violation():
-    invariants = [("depart", 0, 120, 5, 0, [])]
+    invariants = [("depart", 1, 0, 120, 5, 0, [])]
 
     texte = format_report(_agr(), CONTEXTE, invariants)
 

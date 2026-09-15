@@ -52,6 +52,11 @@ class Mesure:
     tt_hits: int
     tt_misses: int
     terminal_hits: int
+    cache_history_depth: int
+    tt_position_matches: int
+    tt_rule50_rejects: int
+    tt_context_rejects: int
+    tt_history_rejects: int
 
 
 def sims_par_seconde(m: Mesure) -> float:
@@ -81,6 +86,15 @@ def taux_table(m: Mesure) -> float:
     return m.tt_hits / total if total else 0.0
 
 
+def taux_compteur_tt(m: Mesure, valeur: int) -> float:
+    consultations = m.tt_hits + m.tt_misses
+    return valeur / consultations if consultations else 0.0
+
+
+def etiquette_profondeur(depth: int) -> str:
+    return "legacy" if depth == -1 else f"h{depth}"
+
+
 def charger_position(fen: str):
     board = chess_engine.Chessboard()
     board.load_fen(fen)
@@ -89,9 +103,10 @@ def charger_position(fen: str):
 
 def mesurer_mcts_search(evaluateur, fen: str, nom: str,
                         simulations: int, c_puct: float = 1.4,
-                        batch_size: int = 0) -> Mesure:
+                        batch_size: int = 0,
+                        cache_history_depth: int = 1) -> Mesure:
     """Arbre neuf a chaque appel."""
-    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT, cache_history_depth)
     board = charger_position(fen)
     mcts.reset_counters()
 
@@ -100,16 +115,24 @@ def mesurer_mcts_search(evaluateur, fen: str, nom: str,
     duree = time.perf_counter() - debut
 
     c = mcts.get_counters()
-    return Mesure(nom, "mcts_search", simulations, batch_size, duree,
-                  c.nn_calls, c.nn_batches, c.tt_hits, c.tt_misses,
-                  c.terminal_hits)
+    return Mesure(
+        position=nom, chemin="mcts_search", simulations=simulations,
+        batch_size=batch_size, duree_s=duree, nn_calls=c.nn_calls,
+        nn_batches=c.nn_batches, tt_hits=c.tt_hits, tt_misses=c.tt_misses,
+        terminal_hits=c.terminal_hits,
+        cache_history_depth=cache_history_depth,
+        tt_position_matches=c.tt_position_matches,
+        tt_rule50_rejects=c.tt_rule50_rejects,
+        tt_context_rejects=c.tt_context_rejects,
+        tt_history_rejects=c.tt_history_rejects)
 
 
 def mesurer_step_analysis(evaluateur, fen: str, nom: str,
                           simulations: int, c_puct: float = 1.4,
-                          batch_size: int = 0) -> Mesure:
+                          batch_size: int = 0,
+                          cache_history_depth: int = 1) -> Mesure:
     """Le chemin reel du bot : arbre d'analyse reutilise entre les coups."""
-    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT, cache_history_depth)
     board = charger_position(fen)
     mcts.reset_analysis()
     mcts.reset_counters()
@@ -119,20 +142,28 @@ def mesurer_step_analysis(evaluateur, fen: str, nom: str,
     duree = time.perf_counter() - debut
 
     c = mcts.get_counters()
-    return Mesure(nom, "step_analysis", simulations, batch_size, duree,
-                  c.nn_calls, c.nn_batches, c.tt_hits, c.tt_misses,
-                  c.terminal_hits)
+    return Mesure(
+        position=nom, chemin="step_analysis", simulations=simulations,
+        batch_size=batch_size, duree_s=duree, nn_calls=c.nn_calls,
+        nn_batches=c.nn_batches, tt_hits=c.tt_hits, tt_misses=c.tt_misses,
+        terminal_hits=c.terminal_hits,
+        cache_history_depth=cache_history_depth,
+        tt_position_matches=c.tt_position_matches,
+        tt_rule50_rejects=c.tt_rule50_rejects,
+        tt_context_rejects=c.tt_context_rejects,
+        tt_history_rejects=c.tt_history_rejects)
 
 
 def agreger(mesures: list) -> dict:
-    """Groupe par (position, chemin, taille de batch), avec mediane et etendue.
+    """Groupe par position, chemin, batch et politique de cache.
 
     L'etendue est indispensable : sans elle, un gain de 5 pour cent serait
     indistinguable du bruit de mesure.
     """
     groupes: dict = {}
     for m in mesures:
-        groupes.setdefault((m.position, m.chemin, m.batch_size), []).append(m)
+        groupes.setdefault((m.position, m.chemin, m.batch_size,
+                            m.cache_history_depth), []).append(m)
 
     resultat = {}
     for cle, lot in groupes.items():
@@ -150,16 +181,35 @@ def agreger(mesures: list) -> dict:
             "remplissage_moyen_median": statistics.median(
                 remplissage_moyen(m) for m in lot),
             "taux_table_median": statistics.median(taux_table(m) for m in lot),
+            "tt_misses_median": statistics.median(m.tt_misses for m in lot),
             "terminal_hits_median": statistics.median(
                 m.terminal_hits for m in lot),
+            "tt_position_matches_median": statistics.median(
+                m.tt_position_matches for m in lot),
+            "tt_rule50_rejects_median": statistics.median(
+                m.tt_rule50_rejects for m in lot),
+            "tt_context_rejects_median": statistics.median(
+                m.tt_context_rejects for m in lot),
+            "tt_history_rejects_median": statistics.median(
+                m.tt_history_rejects for m in lot),
+            "tt_position_match_rate_median": statistics.median(
+                taux_compteur_tt(m, m.tt_position_matches) for m in lot),
+            "tt_rule50_reject_rate_median": statistics.median(
+                taux_compteur_tt(m, m.tt_rule50_rejects) for m in lot),
+            "tt_context_reject_rate_median": statistics.median(
+                taux_compteur_tt(m, m.tt_context_rejects) for m in lot),
+            "tt_history_reject_rate_median": statistics.median(
+                taux_compteur_tt(m, m.tt_history_rejects) for m in lot),
         }
     return resultat
 
 
 _EN_TETE = (
-    "| Position | Chemin | batch | passages | sims/s (med) | sims/s (min a max) "
-    "| positions reseau/s | appels batch/s | remplissage | taux table |\n"
-    "|---|---|---|---|---|---|---|---|---|---|"
+    "| Position | Chemin | TT | batch | passages | sims/s (med) "
+    "| sims/s (min a max) | positions reseau/s | appels batch/s "
+    "| remplissage | taux table | match position | 50 coups | contexte "
+    "| historique |\n"
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
 )
 
 
@@ -178,7 +228,8 @@ def format_report(agr: dict, contexte: dict, invariants: list) -> str:
         f"Protocole : {contexte['passages']} passages, "
         f"{contexte['simulations']} simulations, c_puct {contexte['c_puct']}, "
         f"{contexte.get('accelerateur', 'CPU')}, un seul processus, "
-        f"batches demandes {contexte.get('batch_sizes', [0])}",
+        f"batches demandes {contexte.get('batch_sizes', [0])}, "
+        f"politiques TT {contexte.get('cache_history_depths', [1])}",
         "",
         "Trois grandeurs distinctes. Les **simulations par seconde** mesurent le",
         "debit de la recherche. Les **positions reseau par seconde** comptent les",
@@ -192,16 +243,23 @@ def format_report(agr: dict, contexte: dict, invariants: list) -> str:
     ]
 
     for cle in sorted(agr):
-        position, chemin, batch_size = cle
+        position, chemin, batch_size, cache_history_depth = cle
         a = agr[cle]
+        def compteur_et_taux(compteur: str, taux: str) -> str:
+            return f"{a[compteur]:g} ({100 * a[taux]:.1f} %)"
         lignes.append(
-            f"| {position} | {chemin} | {batch_size} | {a['passages']} "
+            f"| {position} | {chemin} | {etiquette_profondeur(cache_history_depth)} "
+            f"| {batch_size} | {a['passages']} "
             f"| {a['sims_par_seconde_median']:.1f} "
             f"| {a['sims_par_seconde_min']:.1f} a {a['sims_par_seconde_max']:.1f} "
             f"| {a['inferences_par_seconde_median']:.1f} "
             f"| {a['appels_batch_par_seconde_median']:.1f} "
             f"| {a['remplissage_moyen_median']:.1f} "
-            f"| {100 * a['taux_table_median']:.1f} % |"
+            f"| {100 * a['taux_table_median']:.1f} % "
+            f"| {compteur_et_taux('tt_position_matches_median', 'tt_position_match_rate_median')} "
+            f"| {compteur_et_taux('tt_rule50_rejects_median', 'tt_rule50_reject_rate_median')} "
+            f"| {compteur_et_taux('tt_context_rejects_median', 'tt_context_reject_rate_median')} "
+            f"| {compteur_et_taux('tt_history_rejects_median', 'tt_history_reject_rate_median')} |"
         )
 
     lignes += ["", "## Invariants d'arbre", ""]
@@ -209,23 +267,27 @@ def format_report(agr: dict, contexte: dict, invariants: list) -> str:
         lignes.append("Non verifies lors de ce passage.")
     else:
         lignes += [
-            "| Position | batch | noeuds | profondeur max | violations |",
-            "|---|---|---|---|---|",
+            "| Position | TT | batch | noeuds | profondeur max | violations |",
+            "|---|---|---|---|---|---|",
         ]
         total = 0
-        for (position, batch_size, nodes, max_depth, violations, _messages) in invariants:
+        for (position, depth, batch_size, nodes, max_depth, violations,
+             _messages) in invariants:
             total += violations
             lignes.append(
-                f"| {position} | {batch_size} | {nodes} | {max_depth} | {violations} |")
+                f"| {position} | {etiquette_profondeur(depth)} | {batch_size} "
+                f"| {nodes} | {max_depth} | {violations} |")
         lignes.append("")
         if total == 0:
             lignes.append("Aucune violation.")
         else:
             lignes.append(f"**{total} violations.** Premiers messages :")
             lignes.append("")
-            for (position, batch_size, _n, _d, _v, messages) in invariants:
+            for (position, depth, batch_size, _n, _d, _v, messages) in invariants:
                 for message in messages:
-                    lignes.append(f"- `{position}`, batch {batch_size} : {message}")
+                    lignes.append(
+                        f"- `{position}`, {etiquette_profondeur(depth)}, "
+                        f"batch {batch_size} : {message}")
 
     return "\n".join(lignes) + "\n"
 
@@ -246,6 +308,10 @@ def main() -> int:
     parser.add_argument("--batch-sizes", type=int, nargs="+", default=[0],
                         help="tailles de batch a balayer, 0 designe la boucle "
                              "sequentielle conservee")
+    parser.add_argument("--cache-history-depths", type=int, nargs="+",
+                        default=[1],
+                        help="politiques TT a balayer : -1 pour legacy, "
+                             "0 a 7 pour h0 a h7")
     parser.add_argument("--gpu", action="store_true",
                         help="utilise le provider CUDA du moteur C++")
     parser.add_argument("--invariants", action="store_true",
@@ -255,6 +321,8 @@ def main() -> int:
 
     if any(taille < 0 for taille in args.batch_sizes):
         parser.error("les tailles de batch doivent etre positives ou nulles")
+    if any(depth < -1 or depth > 7 for depth in args.cache_history_depths):
+        parser.error("les profondeurs de cache doivent etre comprises entre -1 et 7")
 
     onnx, meta = puzzle_bench.resoudre_modele(args.model, args.dossier_onnx)
     if not Path(onnx).exists():
@@ -268,7 +336,8 @@ def main() -> int:
     evaluateur = chess_engine.ONNXEvaluator(str(onnx), args.gpu)
 
     # Rodage : la premiere inference initialise la session.
-    chauffe = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    chauffe = chess_engine.MCTS(
+        evaluateur, TAILLE_TT, args.cache_history_depths[0])
     chauffe.mcts_search(charger_position(POSITIONS[0][1]), 8, args.c_puct,
                         False, args.batch_sizes[0])
 
@@ -279,33 +348,39 @@ def main() -> int:
         # inspect_tree n'est jamais appele dans la boucle de mesure de debit :
         # son cout croit avec la taille de l'arbre et fausserait la mesure
         # qu'il protege. Les deux jambes sont donc exclusives.
-        for batch_size in args.batch_sizes:
-            for nom, fen in POSITIONS:
-                mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
-                mcts.step_analysis(charger_position(fen), args.simulations,
-                                   args.c_puct, batch_size)
-                r = mcts.inspect_tree()
-                invariants.append((nom, batch_size, r.nodes, r.max_depth,
-                                   r.violations, list(r.messages)))
-                etat = "OK" if r.violations == 0 else f"{r.violations} VIOLATIONS"
-                print(f"  {nom:10} batch {batch_size:2} : {r.nodes} noeuds, "
-                      f"profondeur {r.max_depth}, {etat}")
-    else:
-        for passage in range(args.passages):
+        for depth in args.cache_history_depths:
             for batch_size in args.batch_sizes:
                 for nom, fen in POSITIONS:
-                    mesures.append(mesurer_mcts_search(
-                        evaluateur, fen, nom, args.simulations, args.c_puct,
-                        batch_size))
-                    mesures.append(mesurer_step_analysis(
-                        evaluateur, fen, nom, args.simulations, args.c_puct,
-                        batch_size))
+                    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT, depth)
+                    mcts.step_analysis(charger_position(fen), args.simulations,
+                                       args.c_puct, batch_size)
+                    r = mcts.inspect_tree()
+                    invariants.append((nom, depth, batch_size, r.nodes,
+                                       r.max_depth, r.violations,
+                                       list(r.messages)))
+                    etat = ("OK" if r.violations == 0 else
+                            f"{r.violations} VIOLATIONS")
+                    print(f"  {nom:10} {etiquette_profondeur(depth):6} "
+                          f"batch {batch_size:2} : {r.nodes} noeuds, "
+                          f"profondeur {r.max_depth}, {etat}")
+    else:
+        for passage in range(args.passages):
+            for depth in args.cache_history_depths:
+                for batch_size in args.batch_sizes:
+                    for nom, fen in POSITIONS:
+                        mesures.append(mesurer_mcts_search(
+                            evaluateur, fen, nom, args.simulations, args.c_puct,
+                            batch_size, depth))
+                        mesures.append(mesurer_step_analysis(
+                            evaluateur, fen, nom, args.simulations, args.c_puct,
+                            batch_size, depth))
             print(f"  passage {passage + 1}/{args.passages}", flush=True)
 
     agr = agreger(mesures)
     for cle in sorted(agr):
         a = agr[cle]
-        print(f"  {cle[0]:10} {cle[1]:14} batch {cle[2]:2} : "
+        print(f"  {cle[0]:10} {cle[1]:14} "
+              f"{etiquette_profondeur(cle[3]):6} batch {cle[2]:2} : "
             f"{a['sims_par_seconde_median']:7.1f} sims/s, "
               f"{a['inferences_par_seconde_median']:7.1f} positions/s, "
               f"remplissage {a['remplissage_moyen_median']:.1f}, "
@@ -320,6 +395,7 @@ def main() -> int:
         "c_puct": args.c_puct,
         "accelerateur": "GPU" if args.gpu else "CPU",
         "batch_sizes": args.batch_sizes,
+        "cache_history_depths": args.cache_history_depths,
     }
 
     sortie = args.out_rapport or Path(
@@ -329,7 +405,7 @@ def main() -> int:
     sortie.write_text(format_report(agr, contexte, invariants), encoding="utf-8")
     print(f"\nRapport : {sortie}")
 
-    total_violations = sum(v for (_, _, _, _, v, _) in invariants)
+    total_violations = sum(v for (_, _, _, _, _, v, _) in invariants)
     if total_violations:
         print(f"{total_violations} violations d'invariants", file=sys.stderr)
         return 1
