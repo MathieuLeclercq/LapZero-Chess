@@ -23,7 +23,8 @@ def _m(position="depart", chemin="mcts_search", simulations=400, duree_s=1.0,
        nn_calls=300, nn_batches=300, tt_hits=100, tt_misses=300,
        terminal_hits=0, batch_size=0, cache_history_depth=1,
        tt_position_matches=100, tt_rule50_rejects=0,
-       tt_context_rejects=0, tt_history_rejects=0):
+       tt_context_rejects=0, tt_history_rejects=0, repetition=0,
+       timing=None):
     return Mesure(position=position, chemin=chemin, simulations=simulations,
                   batch_size=batch_size, duree_s=duree_s, nn_calls=nn_calls,
                   nn_batches=nn_batches, tt_hits=tt_hits,
@@ -32,7 +33,18 @@ def _m(position="depart", chemin="mcts_search", simulations=400, duree_s=1.0,
                   tt_position_matches=tt_position_matches,
                   tt_rule50_rejects=tt_rule50_rejects,
                   tt_context_rejects=tt_context_rejects,
-                  tt_history_rejects=tt_history_rejects)
+                  tt_history_rejects=tt_history_rejects,
+                  repetition=repetition, timing=timing)
+
+
+def _timing(wall_ns: int) -> dict[str, int]:
+    champs = (
+        "wall_ns", "selection_ns", "tensor_key_ns", "tt_probe_store_ns",
+        "tt_wait_ns", "board_copy_ns", "batch_assembly_ns", "evaluator_ns",
+        "expansion_ns", "backup_ns", "worker_wait_ns",
+    )
+    return {champ: wall_ns if champ == "wall_ns" else 0
+            for champ in champs}
 
 
 def test_les_trois_grandeurs_sont_distinctes():
@@ -168,6 +180,29 @@ def test_format_report_affiche_batch_et_remplissage():
     assert "32.0" in texte
 
 
+def test_format_report_affiche_les_chronometrages_par_phase():
+    timing = {
+        "wall_ns": 100_000_000,
+        "selection_ns": 10_000_000,
+        "tensor_key_ns": 20_000_000,
+        "tt_probe_store_ns": 30_000_000,
+        "tt_wait_ns": 0,
+        "board_copy_ns": 0,
+        "batch_assembly_ns": 1_000_000,
+        "evaluator_ns": 40_000_000,
+        "expansion_ns": 5_000_000,
+        "backup_ns": 4_000_000,
+        "worker_wait_ns": 0,
+    }
+
+    texte = format_report(agreger([_m(timing=timing)]), CONTEXTE, [])
+
+    assert "Chronometrages" in texte
+    assert "evaluateur" in texte
+    assert "40.000" in texte
+    assert "selection" in texte
+
+
 def test_rapport_affiche_les_rejets_semantiques():
     texte = format_report(agreger([_m(
         cache_history_depth=1,
@@ -228,6 +263,110 @@ def test_les_mesures_transmettent_la_profondeur_au_mcts(monkeypatch):
     assert constructions == [3, 7]
 
 
+def test_la_mesure_capture_les_timings_et_la_taille_tt(monkeypatch):
+    import search_bench
+
+    constructions = []
+
+    class FauxMCTS:
+        def __init__(self, evaluateur, taille_tt, depth):
+            constructions.append((taille_tt, depth))
+
+        def reset_counters(self):
+            pass
+
+        def set_timing_enabled(self, enabled):
+            assert enabled is True
+
+        def mcts_search(self, *args):
+            pass
+
+        def get_last_timing(self):
+            return type("T", (), dict(
+                wall_ns=101, selection_ns=11, tensor_key_ns=12,
+                tt_probe_store_ns=13, tt_wait_ns=14, board_copy_ns=15,
+                batch_assembly_ns=16, evaluator_ns=17, expansion_ns=18,
+                backup_ns=19, worker_wait_ns=20))()
+
+        def get_counters(self):
+            return type("C", (), dict(
+                nn_calls=1, nn_batches=1, tt_hits=0, tt_misses=1,
+                terminal_hits=0, tt_position_matches=0,
+                tt_rule50_rejects=0, tt_context_rejects=0,
+                tt_history_rejects=0))()
+
+    monkeypatch.setattr(search_bench.chess_engine, "MCTS", FauxMCTS)
+    monkeypatch.setattr(search_bench, "charger_position", lambda fen: object())
+
+    mesure = search_bench.mesurer_mcts_search(
+        object(), "fen", "position", 8, cache_history_depth=0,
+        tt_size=123, timings=True, repetition=7)
+
+    assert constructions == [(123, 0)]
+    assert mesure.repetition == 7
+    assert mesure.timing["wall_ns"] == 101
+    assert mesure.timing["evaluator_ns"] == 17
+
+
+def test_main_ecrit_les_mesures_individuelles_en_json(
+        monkeypatch, tmp_path):
+    import json
+    import search_bench
+    import puzzle_bench
+
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"modele factice")
+    rapport = tmp_path / "rapport.md"
+    brut = tmp_path / "mesures.json"
+    appels = []
+
+    class Chauffe:
+        def __init__(self, evaluateur, taille_tt, depth):
+            assert taille_tt == 123
+
+        def mcts_search(self, *args):
+            pass
+
+    def mesurer_recherche(*args, **kwargs):
+        appels.append(("mcts_search", kwargs["repetition"]))
+        return _m(cache_history_depth=0, repetition=kwargs["repetition"],
+                  timing=_timing(101))
+
+    def mesurer_analyse(*args, **kwargs):
+        appels.append(("step_analysis", kwargs["repetition"]))
+        return _m(chemin="step_analysis", cache_history_depth=0,
+                  repetition=kwargs["repetition"],
+                  timing=_timing(102))
+
+    monkeypatch.setattr(search_bench, "POSITIONS", (("depart", "fen"),))
+    monkeypatch.setattr(search_bench.chess_engine, "MCTS", Chauffe)
+    monkeypatch.setattr(search_bench.chess_engine, "ONNXEvaluator",
+                        lambda *args: object())
+    monkeypatch.setattr(search_bench, "charger_position", lambda fen: object())
+    monkeypatch.setattr(search_bench, "mesurer_mcts_search", mesurer_recherche)
+    monkeypatch.setattr(search_bench, "mesurer_step_analysis", mesurer_analyse)
+    monkeypatch.setattr(puzzle_bench, "resoudre_modele",
+                        lambda *args: (model, {}))
+    monkeypatch.setattr(sys, "argv", [
+        "search_bench.py", "--model", str(model), "--passages", "1",
+        "--repetitions", "2", "--simulations", "8",
+        "--cache-history-depths", "0", "--tt-size", "123",
+        "--timings", "--out-json", str(brut),
+        "--out-rapport", str(rapport),
+    ])
+
+    assert search_bench.main() == 0
+    assert appels == [
+        ("mcts_search", 0), ("step_analysis", 0),
+        ("mcts_search", 1), ("step_analysis", 1),
+    ]
+    donnees = json.loads(brut.read_text(encoding="utf-8"))
+    assert donnees["contexte"]["tt_size"] == 123
+    assert donnees["contexte"]["timings"] is True
+    assert len(donnees["mesures"]) == 4
+    assert donnees["mesures"][0]["timing"]["wall_ns"] == 101
+
+
 def test_main_balaie_toutes_les_profondeurs_demandees(
         monkeypatch, tmp_path):
     import search_bench
@@ -245,12 +384,12 @@ def test_main_balaie_toutes_les_profondeurs_demandees(
         def mcts_search(self, *args):
             pass
 
-    def mesurer_recherche(*args):
+    def mesurer_recherche(*args, **kwargs):
         depth = args[-1]
         appels.append(("mcts_search", depth))
         return _m(cache_history_depth=depth)
 
-    def mesurer_analyse(*args):
+    def mesurer_analyse(*args, **kwargs):
         depth = args[-1]
         appels.append(("step_analysis", depth))
         return _m(chemin="step_analysis", cache_history_depth=depth)

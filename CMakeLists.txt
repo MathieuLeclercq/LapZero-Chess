@@ -40,6 +40,7 @@ add_library(chess_core STATIC
     src/mcts.cpp 
     src/mcts_observe.cpp
     src/mcts_batch.cpp
+    src/search_timing.cpp
     src/zobrist.cpp
     src/onnx_evaluator.cpp
     src/selfplay_manager.cpp
@@ -66,6 +67,13 @@ add_test(NAME chess_tests_pgn_smoke
 # ==========================================
 add_executable(chess_perft src/perft_main.cpp)
 target_link_libraries(chess_perft PRIVATE chess_core)
+
+# ==========================================
+# 2 ter. Tests unitaires C++ du MCTS
+# ==========================================
+add_executable(search_timing_tests tests/cpp/test_search_timing.cpp)
+target_link_libraries(search_timing_tests PRIVATE chess_core)
+add_test(NAME search_timing COMMAND search_timing_tests)
 
 # ==========================================
 # 3. Configuration Python & Pybind11

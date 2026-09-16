@@ -8,6 +8,19 @@
 #include <algorithm>
 #include <cmath>
 
+void MCTS::set_timing_enabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_timing_enabled = enabled;
+    if (!enabled) {
+        m_last_timing = SearchTiming{};
+    }
+}
+
+SearchTiming MCTS::get_last_timing() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_last_timing;
+}
+
 SearchCounters MCTS::get_counters() const {
     SearchCounters c;
     c.nn_calls = m_nn_calls.load(std::memory_order_relaxed);

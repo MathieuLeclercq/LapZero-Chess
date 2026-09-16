@@ -13,6 +13,7 @@
 #include <string>
 
 #include "onnx_evaluator.hpp"
+#include "search_timing.hpp"
 
 struct MCTSNode {
     int visit_count;
@@ -112,9 +113,11 @@ private:
     std::vector<float> m_eval_tensor;
     std::vector<float> m_eval_policy;
     std::unique_ptr<MCTSNode> m_analysis_root;
-    std::mutex m_mutex;
+    mutable std::mutex m_mutex;
     ONNXEvaluator* m_evaluator;
     std::mt19937 m_noise_rng;
+    bool m_timing_enabled = false;
+    SearchTiming m_last_timing;
 
     // Atomiques parce que le self-play appelle advance_to_leaf depuis une region
     // OpenMP a 8 fils sur une instance de MCTS partagee
@@ -143,7 +146,8 @@ public:
     std::vector<MoveStats> get_analysis_results() const;
     std::vector<float> mcts_search(Chessboard& board, int num_simulations, float c_puct,
                                    bool add_dirichlet, int batch_size = 0);
-    float expand_node_single(MCTSNode* node, Chessboard& board);
+    float expand_node_single(MCTSNode* node, Chessboard& board,
+                             SearchTiming* timing = nullptr);
     bool apply_move_by_index(Chessboard& board, int idx);
     void add_dirichlet_noise(MCTSNode* root, float epsilon);
 
@@ -151,29 +155,37 @@ public:
     SearchCounters get_counters() const;
     void reset_counters();
     TreeReport inspect_tree() const;
+    void set_timing_enabled(bool enabled);
+    SearchTiming get_last_timing() const;
 
     // recherche mcts asynchrone
     MCTSNode* advance_to_leaf(MCTSNode* root, Chessboard& board, float c_puct, int& moves_played);
     void expand_and_backup(MCTSNode* leaf_node, Chessboard& board, const float* policy, float value);
 
 private:
-    void backup(MCTSNode* node, float value);
+    void backup(MCTSNode* node, float value, SearchTiming* timing = nullptr);
     EvaluationCacheKey make_cache_key(const Chessboard& board) const;
-    TTProbe probe_tt(const EvaluationCacheKey& key) const;
+    TTProbe probe_tt(const EvaluationCacheKey& key,
+                     SearchTiming* timing = nullptr) const;
     void record_tt_probe(TTProbeStatus status);
     void store_tt(const EvaluationCacheKey& key,
                   const std::vector<int>& legal_indices,
-                  const float* policy, float value);
-    std::pair<MCTSNode*, int> select_leaf(MCTSNode* root, Chessboard& board, float c_puct);
+                  const float* policy, float value,
+                  SearchTiming* timing = nullptr);
+    std::pair<MCTSNode*, int> select_leaf(MCTSNode* root, Chessboard& board,
+                                         float c_puct,
+                                         SearchTiming* timing = nullptr);
     void expand_and_backup_prepared(MCTSNode* leaf_node,
                                     const std::vector<int>& legal_indices,
                                     const EvaluationCacheKey& key,
-                                    const float* policy, float value);
+                                    const float* policy, float value,
+                                    SearchTiming* timing = nullptr);
 
     // Noyau unique de recherche, defini dans mcts_batch.cpp.
     // batch_size == 0 : boucle sequentielle historique, conservee telle quelle.
     // batch_size >= 1 : boucle batchee avec virtual loss.
     void run_search(MCTSNode* root, Chessboard& board, int simulations,
-                    float c_puct, int batch_size);
+                    float c_puct, int batch_size,
+                    SearchTiming* timing = nullptr);
 
 };

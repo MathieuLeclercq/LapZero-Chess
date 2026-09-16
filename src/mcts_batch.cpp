@@ -41,14 +41,16 @@ struct FeuilleCollectee {
 // qu'elle sert de reference au test d'equivalence de la boucle batchee.
 
 void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
-                      float c_puct, int batch_size) {
+                      float c_puct, int batch_size,
+                      SearchTiming* timing) {
     if (batch_size < 0) {
         throw std::invalid_argument("run_search : batch_size doit etre positif");
     }
 
     if (batch_size == 0) {
         for (int sim = 0; sim < simulations; sim++) {
-            auto [node, moves_played] = select_leaf(root, board, c_puct);
+            auto [node, moves_played] = select_leaf(root, board, c_puct,
+                                                    timing);
 
             if (node->is_terminal) {
                 m_terminal_hits.fetch_add(1, std::memory_order_relaxed);
@@ -62,14 +64,14 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
                     value = board.isInCheck() ? -1.0f : 0.0f;
                 }
 
-                backup(node, value);
+                backup(node, value, timing);
                 for (int i = 0; i < moves_played; i++) board.undoMove();
                 continue;
             }
 
             if (node->children.empty()) {
-                float value = expand_node_single(node, board);
-                backup(node, value);
+                float value = expand_node_single(node, board, timing);
+                backup(node, value, timing);
             }
 
             for (int i = 0; i < moves_played; i++) {
@@ -95,7 +97,8 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
 
         while (static_cast<int>(batch.size()) < batch_size &&
                completed + static_cast<int>(batch.size()) < simulations) {
-            auto [node, moves_played] = select_leaf(root, board, c_puct);
+            auto [node, moves_played] = select_leaf(root, board, c_puct,
+                                                    timing);
 
             if (node->is_terminal) {
                 m_terminal_hits.fetch_add(1, std::memory_order_relaxed);
@@ -108,7 +111,7 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
                 else {
                     value = board.isInCheck() ? -1.0f : 0.0f;
                 }
-                backup(node, value);
+                backup(node, value, timing);
                 for (int i = 0; i < moves_played; i++) board.undoMove();
                 completed++;
                 continue;
@@ -126,15 +129,19 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
             // qui a continue la descente. expand_node_single rend alors la
             // valeur en cache sans inferer.
             if (!node->children.empty()) {
-                float value = expand_node_single(node, board);
-                backup(node, value);
+                float value = expand_node_single(node, board, timing);
+                backup(node, value, timing);
                 for (int i = 0; i < moves_played; i++) board.undoMove();
                 completed++;
                 continue;
             }
 
-            const EvaluationCacheKey key = make_cache_key(board);
-            const TTProbe probe = probe_tt(key);
+            EvaluationCacheKey key;
+            {
+                PhaseTimer timer(timing, SearchPhase::TensorKey);
+                key = make_cache_key(board);
+            }
+            const TTProbe probe = probe_tt(key, timing);
             if (probe.status == TTProbeStatus::HIT) {
                 throw std::logic_error(
                     "run_search : select_leaf a ignore un hit de TT");
@@ -143,19 +150,29 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
 
             FeuilleCollectee leaf;
             leaf.node = node;
-            leaf.legal_moves = board.getLegalMoveIndices();
+            {
+                PhaseTimer timer(timing, SearchPhase::TensorKey);
+                leaf.legal_moves = board.getLegalMoveIndices();
+            }
             leaf.key = key;
 
             if (leaf.legal_moves.empty()) {
                 node->is_terminal = true;
-                backup(node, board.isInCheck() ? -1.0f : 0.0f);
+                backup(node, board.isInCheck() ? -1.0f : 0.0f, timing);
                 for (int i = 0; i < moves_played; i++) board.undoMove();
                 completed++;
                 continue;
             }
 
-            board.getAlphaZeroTensor(current_tensor);
-            tensors.insert(tensors.end(), current_tensor.begin(), current_tensor.end());
+            {
+                PhaseTimer timer(timing, SearchPhase::TensorKey);
+                board.getAlphaZeroTensor(current_tensor);
+            }
+            {
+                PhaseTimer timer(timing, SearchPhase::BatchAssembly);
+                tensors.insert(tensors.end(), current_tensor.begin(),
+                               current_tensor.end());
+            }
             poser_virtual_loss(node);
             batch.push_back(std::move(leaf));
 
@@ -167,14 +184,17 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
         const int batch_count = static_cast<int>(batch.size());
         m_nn_calls.fetch_add(batch_count, std::memory_order_relaxed);
         m_nn_batches.fetch_add(1, std::memory_order_relaxed);
-        m_evaluator->evaluate_batch(tensors, policies, values, batch_count);
+        {
+            PhaseTimer timer(timing, SearchPhase::Evaluator);
+            m_evaluator->evaluate_batch(tensors, policies, values, batch_count);
+        }
 
         for (int i = 0; i < batch_count; ++i) {
             annuler_virtual_loss(batch[i].node);
             expand_and_backup_prepared(batch[i].node, batch[i].legal_moves,
                                        batch[i].key,
                                        policies.data() + static_cast<size_t>(i) * 4672,
-                                       values[i]);
+                                       values[i], timing);
             completed++;
         }
     }

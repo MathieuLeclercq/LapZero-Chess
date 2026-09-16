@@ -158,6 +158,40 @@ PYBIND11_MODULE(chess_engine, m) {
         .def_readonly("en_vol", &TreeReport::en_vol)
         .def_readonly("messages", &TreeReport::messages);
 
+    py::class_<SearchTiming>(m, "SearchTiming")
+        .def_readonly("enabled", &SearchTiming::enabled)
+        .def_readonly("wall_ns", &SearchTiming::wall_ns)
+        .def_property_readonly("selection_ns", [](const SearchTiming& t) {
+            return t.phase_ns(SearchPhase::Selection);
+        })
+        .def_property_readonly("tensor_key_ns", [](const SearchTiming& t) {
+            return t.phase_ns(SearchPhase::TensorKey);
+        })
+        .def_property_readonly("tt_probe_store_ns", [](const SearchTiming& t) {
+            return t.phase_ns(SearchPhase::TTProbeStore);
+        })
+        .def_property_readonly("tt_wait_ns", [](const SearchTiming& t) {
+            return t.phase_ns(SearchPhase::TTWait);
+        })
+        .def_property_readonly("board_copy_ns", [](const SearchTiming& t) {
+            return t.phase_ns(SearchPhase::BoardCopy);
+        })
+        .def_property_readonly("batch_assembly_ns", [](const SearchTiming& t) {
+            return t.phase_ns(SearchPhase::BatchAssembly);
+        })
+        .def_property_readonly("evaluator_ns", [](const SearchTiming& t) {
+            return t.phase_ns(SearchPhase::Evaluator);
+        })
+        .def_property_readonly("expansion_ns", [](const SearchTiming& t) {
+            return t.phase_ns(SearchPhase::Expansion);
+        })
+        .def_property_readonly("backup_ns", [](const SearchTiming& t) {
+            return t.phase_ns(SearchPhase::Backup);
+        })
+        .def_property_readonly("worker_wait_ns", [](const SearchTiming& t) {
+            return t.phase_ns(SearchPhase::WorkerWait);
+        });
+
     py::class_<ONNXEvaluator>(m, "ONNXEvaluator")
         .def(py::init<const std::string&, bool>(), py::arg("model_path"), py::arg("use_gpu") = false);
 
@@ -181,6 +215,9 @@ PYBIND11_MODULE(chess_engine, m) {
         .def("get_analysis_results", &MCTS::get_analysis_results)
         .def("get_counters", &MCTS::get_counters)
         .def("reset_counters", &MCTS::reset_counters)
+        .def("set_timing_enabled", &MCTS::set_timing_enabled,
+             py::arg("enabled"))
+        .def("get_last_timing", &MCTS::get_last_timing)
         .def("inspect_tree", &MCTS::inspect_tree);
 
     py::class_<GameResult>(m, "GameResult")

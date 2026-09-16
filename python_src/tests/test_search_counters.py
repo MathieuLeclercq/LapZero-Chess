@@ -142,3 +142,23 @@ def test_les_compteurs_sont_par_instance(evaluateur):
 
     assert a.get_counters().nn_calls > 0
     assert b.get_counters().nn_calls == 0
+
+
+def test_les_chronometrages_sont_optionnels_et_couvrent_l_inference(evaluateur):
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT)
+    board = _plateau()
+
+    mcts.step_analysis(board, 8, 1.4, 4)
+    disabled = mcts.get_last_timing()
+    assert disabled.wall_ns == 0
+    assert disabled.evaluator_ns == 0
+
+    mcts.reset_analysis()
+    mcts.set_timing_enabled(True)
+    mcts.step_analysis(board, 8, 1.4, 4)
+    enabled = mcts.get_last_timing()
+
+    assert enabled.wall_ns > 0
+    assert enabled.selection_ns > 0
+    assert enabled.evaluator_ns > 0
+    assert enabled.wall_ns >= enabled.evaluator_ns

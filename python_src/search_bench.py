@@ -7,10 +7,11 @@ Voir docs/superpowers/specs/2026-09-11-search-bench-design.md
 """
 
 import os
+import json
 import statistics
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 RACINE_PYTHON = Path(__file__).resolve().parent
@@ -57,6 +58,36 @@ class Mesure:
     tt_rule50_rejects: int
     tt_context_rejects: int
     tt_history_rejects: int
+    repetition: int = 0
+    timing: dict[str, int] | None = None
+
+
+TIMING_FIELDS = (
+    "wall_ns", "selection_ns", "tensor_key_ns", "tt_probe_store_ns",
+    "tt_wait_ns", "board_copy_ns", "batch_assembly_ns", "evaluator_ns",
+    "expansion_ns", "backup_ns", "worker_wait_ns",
+)
+
+TIMING_LABELS = (
+    ("wall_ns", "total"),
+    ("selection_ns", "selection"),
+    ("tensor_key_ns", "tenseur et cle"),
+    ("tt_probe_store_ns", "lecture/ecriture TT"),
+    ("tt_wait_ns", "attente TT"),
+    ("board_copy_ns", "copie plateau"),
+    ("batch_assembly_ns", "assemblage batch"),
+    ("evaluator_ns", "evaluateur"),
+    ("expansion_ns", "expansion"),
+    ("backup_ns", "backup"),
+    ("worker_wait_ns", "attente workers"),
+)
+
+
+def extraire_timing(mcts, enabled: bool) -> dict[str, int] | None:
+    if not enabled:
+        return None
+    timing = mcts.get_last_timing()
+    return {name: int(getattr(timing, name)) for name in TIMING_FIELDS}
 
 
 def sims_par_seconde(m: Mesure) -> float:
@@ -104,9 +135,14 @@ def charger_position(fen: str):
 def mesurer_mcts_search(evaluateur, fen: str, nom: str,
                         simulations: int, c_puct: float = 1.4,
                         batch_size: int = 0,
-                        cache_history_depth: int = 1) -> Mesure:
+                        cache_history_depth: int = 1,
+                        tt_size: int = TAILLE_TT,
+                        timings: bool = False,
+                        repetition: int = 0) -> Mesure:
     """Arbre neuf a chaque appel."""
-    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT, cache_history_depth)
+    mcts = chess_engine.MCTS(evaluateur, tt_size, cache_history_depth)
+    if timings:
+        mcts.set_timing_enabled(True)
     board = charger_position(fen)
     mcts.reset_counters()
 
@@ -124,15 +160,22 @@ def mesurer_mcts_search(evaluateur, fen: str, nom: str,
         tt_position_matches=c.tt_position_matches,
         tt_rule50_rejects=c.tt_rule50_rejects,
         tt_context_rejects=c.tt_context_rejects,
-        tt_history_rejects=c.tt_history_rejects)
+        tt_history_rejects=c.tt_history_rejects,
+        repetition=repetition,
+        timing=extraire_timing(mcts, timings))
 
 
 def mesurer_step_analysis(evaluateur, fen: str, nom: str,
                           simulations: int, c_puct: float = 1.4,
                           batch_size: int = 0,
-                          cache_history_depth: int = 1) -> Mesure:
+                          cache_history_depth: int = 1,
+                          tt_size: int = TAILLE_TT,
+                          timings: bool = False,
+                          repetition: int = 0) -> Mesure:
     """Le chemin reel du bot : arbre d'analyse reutilise entre les coups."""
-    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT, cache_history_depth)
+    mcts = chess_engine.MCTS(evaluateur, tt_size, cache_history_depth)
+    if timings:
+        mcts.set_timing_enabled(True)
     board = charger_position(fen)
     mcts.reset_analysis()
     mcts.reset_counters()
@@ -151,7 +194,9 @@ def mesurer_step_analysis(evaluateur, fen: str, nom: str,
         tt_position_matches=c.tt_position_matches,
         tt_rule50_rejects=c.tt_rule50_rejects,
         tt_context_rejects=c.tt_context_rejects,
-        tt_history_rejects=c.tt_history_rejects)
+        tt_history_rejects=c.tt_history_rejects,
+        repetition=repetition,
+        timing=extraire_timing(mcts, timings))
 
 
 def agreger(mesures: list) -> dict:
@@ -201,6 +246,11 @@ def agreger(mesures: list) -> dict:
             "tt_history_reject_rate_median": statistics.median(
                 taux_compteur_tt(m, m.tt_history_rejects) for m in lot),
         }
+        timings = [m.timing for m in lot if m.timing is not None]
+        if timings:
+            for name in TIMING_FIELDS:
+                resultat[cle][f"{name}_median_ms"] = statistics.median(
+                    timing[name] for timing in timings) / 1_000_000.0
     return resultat
 
 
@@ -262,6 +312,31 @@ def format_report(agr: dict, contexte: dict, invariants: list) -> str:
             f"| {compteur_et_taux('tt_history_rejects_median', 'tt_history_reject_rate_median')} |"
         )
 
+    if any("wall_ns_median_ms" in a for a in agr.values()):
+        lignes += [
+            "",
+            "## Chronometrages",
+            "",
+            "Durees medianes en millisecondes. Les phases sont mesurees par "
+            "thread et certaines durees peuvent etre inclusives.",
+            "",
+            "| Position | Chemin | TT | batch | "
+            + " | ".join(label for _name, label in TIMING_LABELS) + " |",
+            "|---|---|---|---|" + "---|" * len(TIMING_LABELS),
+        ]
+        for cle in sorted(agr):
+            position, chemin, batch_size, cache_history_depth = cle
+            a = agr[cle]
+            if "wall_ns_median_ms" not in a:
+                continue
+            valeurs = " | ".join(
+                f"{a[f'{name}_median_ms']:.3f}"
+                for name, _label in TIMING_LABELS)
+            lignes.append(
+                f"| {position} | {chemin} "
+                f"| {etiquette_profondeur(cache_history_depth)} "
+                f"| {batch_size} | {valeurs} |")
+
     lignes += ["", "## Invariants d'arbre", ""]
     if not invariants:
         lignes.append("Non verifies lors de ce passage.")
@@ -304,6 +379,8 @@ def main() -> int:
                         default=Path("checkpoints_onnx"))
     parser.add_argument("--simulations", type=int, default=400)
     parser.add_argument("--passages", type=int, default=5)
+    parser.add_argument("--repetitions", type=int, default=1,
+                        help="mesures successives par passage et configuration")
     parser.add_argument("--c-puct", type=float, default=1.4)
     parser.add_argument("--batch-sizes", type=int, nargs="+", default=[0],
                         help="tailles de batch a balayer, 0 designe la boucle "
@@ -316,6 +393,11 @@ def main() -> int:
                         help="utilise le provider CUDA du moteur C++")
     parser.add_argument("--invariants", action="store_true",
                         help="verifie les invariants d'arbre, sans mesurer le debit")
+    parser.add_argument("--timings", action="store_true",
+                        help="active les chronometrages internes par phase")
+    parser.add_argument("--tt-size", type=int, default=TAILLE_TT)
+    parser.add_argument("--out-json", type=Path, default=None,
+                        help="mesures individuelles et contexte en JSON")
     parser.add_argument("--out-rapport", type=Path, default=None)
     args = parser.parse_args()
 
@@ -323,6 +405,10 @@ def main() -> int:
         parser.error("les tailles de batch doivent etre positives ou nulles")
     if any(depth < -1 or depth > 7 for depth in args.cache_history_depths):
         parser.error("les profondeurs de cache doivent etre comprises entre -1 et 7")
+    if args.passages <= 0 or args.repetitions <= 0:
+        parser.error("passages et repetitions doivent etre positifs")
+    if args.tt_size <= 0:
+        parser.error("tt-size doit etre positif")
 
     onnx, meta = puzzle_bench.resoudre_modele(args.model, args.dossier_onnx)
     if not Path(onnx).exists():
@@ -337,7 +423,7 @@ def main() -> int:
 
     # Rodage : la premiere inference initialise la session.
     chauffe = chess_engine.MCTS(
-        evaluateur, TAILLE_TT, args.cache_history_depths[0])
+        evaluateur, args.tt_size, args.cache_history_depths[0])
     chauffe.mcts_search(charger_position(POSITIONS[0][1]), 8, args.c_puct,
                         False, args.batch_sizes[0])
 
@@ -351,7 +437,7 @@ def main() -> int:
         for depth in args.cache_history_depths:
             for batch_size in args.batch_sizes:
                 for nom, fen in POSITIONS:
-                    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT, depth)
+                    mcts = chess_engine.MCTS(evaluateur, args.tt_size, depth)
                     mcts.step_analysis(charger_position(fen), args.simulations,
                                        args.c_puct, batch_size)
                     r = mcts.inspect_tree()
@@ -365,15 +451,21 @@ def main() -> int:
                           f"profondeur {r.max_depth}, {etat}")
     else:
         for passage in range(args.passages):
-            for depth in args.cache_history_depths:
-                for batch_size in args.batch_sizes:
-                    for nom, fen in POSITIONS:
-                        mesures.append(mesurer_mcts_search(
-                            evaluateur, fen, nom, args.simulations, args.c_puct,
-                            batch_size, depth))
-                        mesures.append(mesurer_step_analysis(
-                            evaluateur, fen, nom, args.simulations, args.c_puct,
-                            batch_size, depth))
+            for repetition_locale in range(args.repetitions):
+                repetition = passage * args.repetitions + repetition_locale
+                for depth in args.cache_history_depths:
+                    for batch_size in args.batch_sizes:
+                        for nom, fen in POSITIONS:
+                            mesures.append(mesurer_mcts_search(
+                                evaluateur, fen, nom, args.simulations,
+                                args.c_puct, batch_size, depth,
+                                tt_size=args.tt_size, timings=args.timings,
+                                repetition=repetition))
+                            mesures.append(mesurer_step_analysis(
+                                evaluateur, fen, nom, args.simulations,
+                                args.c_puct, batch_size, depth,
+                                tt_size=args.tt_size, timings=args.timings,
+                                repetition=repetition))
             print(f"  passage {passage + 1}/{args.passages}", flush=True)
 
     agr = agreger(mesures)
@@ -390,12 +482,16 @@ def main() -> int:
         "modele": Path(onnx).name,
         "iteration": meta.get("iteration"),
         "global_step": meta.get("global_step"),
-        "passages": args.passages if not args.invariants else 1,
+        "passages": (args.passages * args.repetitions
+                     if not args.invariants else 1),
+        "repetitions": args.repetitions,
         "simulations": args.simulations,
         "c_puct": args.c_puct,
         "accelerateur": "GPU" if args.gpu else "CPU",
         "batch_sizes": args.batch_sizes,
         "cache_history_depths": args.cache_history_depths,
+        "tt_size": args.tt_size,
+        "timings": args.timings,
     }
 
     sortie = args.out_rapport or Path(
@@ -404,6 +500,14 @@ def main() -> int:
     sortie.parent.mkdir(parents=True, exist_ok=True)
     sortie.write_text(format_report(agr, contexte, invariants), encoding="utf-8")
     print(f"\nRapport : {sortie}")
+
+    if args.out_json is not None:
+        args.out_json.parent.mkdir(parents=True, exist_ok=True)
+        args.out_json.write_text(json.dumps({
+            "contexte": contexte,
+            "mesures": [asdict(m) for m in mesures],
+        }, indent=2, sort_keys=True), encoding="utf-8")
+        print(f"Mesures : {args.out_json}")
 
     total_violations = sum(v for (_, _, _, _, _, v, _) in invariants)
     if total_violations:
