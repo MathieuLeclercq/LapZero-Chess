@@ -5,6 +5,7 @@ cmake_policy(SET CMP0135 NEW)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(OpenMP REQUIRED)
+find_package(Threads REQUIRED)
 
 # ==========================================
 # RÉCUPÉRATION DE ONNX RUNTIME (C++)
@@ -42,6 +43,7 @@ add_library(chess_core STATIC
     src/mcts_observe.cpp
     src/mcts_batch.cpp
     src/mcts_reservation.cpp
+    src/search_executor.cpp
     src/search_timing.cpp
     src/zobrist.cpp
     src/onnx_evaluator.cpp
@@ -52,7 +54,7 @@ add_library(chess_core STATIC
 target_include_directories(chess_core PUBLIC src ${ONNXRUNTIME_INCLUDE_DIR})
 
 # On lie la librairie ONNX Runtime
-target_link_libraries(chess_core PUBLIC ${ONNXRUNTIME_LIB} OpenMP::OpenMP_CXX)
+target_link_libraries(chess_core PUBLIC ${ONNXRUNTIME_LIB} OpenMP::OpenMP_CXX Threads::Threads)
 
 # ==========================================
 # 2. Exécutable de test (C++ pur)
@@ -108,6 +110,12 @@ add_executable(node_state_tests tests/cpp/test_node_state.cpp)
 target_link_libraries(node_state_tests PRIVATE chess_core)
 copy_onnx_runtime(node_state_tests)
 add_test(NAME node_state COMMAND node_state_tests)
+
+add_executable(search_executor_tests tests/cpp/test_search_executor.cpp)
+target_link_libraries(search_executor_tests PRIVATE chess_core Threads::Threads)
+copy_onnx_runtime(search_executor_tests)
+add_test(NAME search_executor COMMAND search_executor_tests)
+set_tests_properties(search_executor PROPERTIES TIMEOUT 30)
 
 add_executable(selfplay_phase_bench tests/cpp/selfplay_phase_bench.cpp)
 target_link_libraries(selfplay_phase_bench PRIVATE chess_core)
