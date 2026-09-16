@@ -287,9 +287,13 @@ fois, sur une machine qui a déjà 4 Go de table de transposition.
   Certains shards sont lus par plusieurs workers, d'autres jamais.
 - `ONNXEvaluator` (`onnx_evaluator.cpp:20`) élargit le chemin avec
   `std::wstring(s.begin(), s.end())`, ce qui casse sur tout chemin non-ASCII.
-- Softmax sur les 4672 logits (`onnx_evaluator.cpp:74`) alors que seuls ~35 coups légaux
-  sont ensuite renormalisés. Équivalent mathématiquement, environ 100 fois plus de
-  travail que nécessaire.
+- **Softmax légal, optimisation indépendante du multicœur.** `ONNXEvaluator`
+  applique actuellement le softmax aux 4672 logits, puis le MCTS renormalise les
+  ~35 coups légaux. Un softmax limité aux coups légaux est mathématiquement équivalent,
+  hors petites différences d'arrondi, et évite l'essentiel de ce calcul. Ce chantier
+  devra expliciter l'interface logits/probabilités pour ne pas casser les consommateurs
+  du self-play, puis être mesuré isolément. Il n'est ni un prérequis ni un critère
+  d'acceptation de la recherche multicœur.
 - `inline int Piece::getZobristIndex()` (`piece.hpp:40`) utilise un qualificateur
   `Piece::` sur une définition interne à la classe : extension MSVC, refusée par GCC et
   Clang.
