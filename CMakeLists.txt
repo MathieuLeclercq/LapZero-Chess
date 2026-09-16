@@ -32,6 +32,7 @@ set(ONNXRUNTIME_CUDA_DLL "${ONNX_GPU_DIR}/lib/onnxruntime_providers_cuda.dll")
 # ==========================================
 add_library(chess_core STATIC 
     src/chessboard.cpp
+    src/evaluation_cache.cpp
     src/evaluation_key.cpp
     src/square.cpp 
     src/piece.cpp 
@@ -91,6 +92,11 @@ add_executable(board_copy_tests tests/cpp/test_board_copy.cpp)
 target_link_libraries(board_copy_tests PRIVATE chess_core)
 copy_onnx_runtime(board_copy_tests)
 add_test(NAME board_copy COMMAND board_copy_tests)
+
+add_executable(evaluation_cache_tests tests/cpp/test_evaluation_cache.cpp)
+target_link_libraries(evaluation_cache_tests PRIVATE chess_core)
+copy_onnx_runtime(evaluation_cache_tests)
+add_test(NAME evaluation_cache COMMAND evaluation_cache_tests)
 
 add_executable(selfplay_phase_bench tests/cpp/selfplay_phase_bench.cpp)
 target_link_libraries(selfplay_phase_bench PRIVATE chess_core)

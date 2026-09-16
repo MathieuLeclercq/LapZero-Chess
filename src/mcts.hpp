@@ -6,11 +6,11 @@
 #include <utility>
 #include <cstdint>
 #include <mutex>
-#include <array>
 #include <random>
 #include <atomic>
 #include <string>
 
+#include "evaluation_cache.hpp"
 #include "evaluator.hpp"
 #include "search_timing.hpp"
 
@@ -36,35 +36,6 @@ struct MCTSNode {
     MCTSNode* find_child(int idx) const;
     bool has_child(int idx) const;
     std::unique_ptr<MCTSNode> extract_child(int idx);
-};
-
-
-static constexpr int TT_MAX_MOVES = 128;
-static constexpr int LEGACY_CACHE_HISTORY_DEPTH = -1;
-static constexpr int DEFAULT_CACHE_HISTORY_DEPTH = 0;
-
-enum class TTProbeStatus {
-    HIT,
-    MISS,
-    RULE50_REJECT,
-    CONTEXT_REJECT,
-    HISTORY_REJECT,
-};
-
-struct TTEntry {
-    uint64_t hash = 0;
-    uint64_t evaluation_hash = 0;
-    uint64_t current_context_hash = 0;
-    uint64_t history_hash = 0;
-    uint16_t half_move_clock = 0;
-    float value = 0.0f;
-    int policy_size = 0;
-    std::array<std::pair<int, float>, TT_MAX_MOVES> legal_policy;
-};
-
-struct TTProbe {
-    const TTEntry* entry = nullptr;
-    TTProbeStatus status = TTProbeStatus::MISS;
 };
 
 
@@ -104,9 +75,8 @@ struct TreeReport {
 
 class MCTS {
 private:
-    std::vector<TTEntry> transposition_table;
     static constexpr size_t DEFAULT_TT_SIZE = 2097143;
-    size_t m_tt_size;
+    EvaluationCache m_cache;
     int m_cache_history_depth;
     std::vector<float> m_eval_tensor;
     std::vector<float> m_eval_policy;

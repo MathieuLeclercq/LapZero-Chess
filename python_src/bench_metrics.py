@@ -33,7 +33,7 @@ TRANCHES = (
     ("2350-2800", 2350, 2800),
 )
 
-# TT_MAX_MOVES cote C++ (mcts.hpp:34) : au dela, les coups legaux sont tronques
+# TT_MAX_MOVES cote C++ (evaluation_cache.hpp) : au dela, les coups legaux sont tronques
 # et ne peuvent jamais etre joues.
 LIMITE_TT_MAX_MOVES = 128
 
