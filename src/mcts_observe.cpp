@@ -61,16 +61,40 @@ static void ajouter_violation(TreeReport& rapport, const std::string& message) {
 
 static void visiter(const MCTSNode* node, uint64_t profondeur, TreeReport& rapport) {
     rapport.nodes++;
-    if (node->n_in_flight != 0) rapport.en_vol++;
+    const std::uint32_t in_flight =
+        node->n_in_flight.load(std::memory_order_relaxed);
+    const NodeState state = node->state.load(std::memory_order_acquire);
+    if (in_flight != 0) rapport.en_vol++;
+    if (state == NodeState::Pending) {
+        rapport.pending++;
+        ajouter_violation(rapport, "noeud Pending au repos");
+    }
     rapport.max_depth = std::max(rapport.max_depth, profondeur);
 
-    // Un noeud terminal n'est jamais developpe.
-    if (node->is_terminal && !node->children.empty()) {
-        ajouter_violation(rapport, "noeud terminal avec des enfants");
-        return;
+    if (!std::isfinite(node->prior) ||
+        !std::isfinite(node->total_value) ||
+        !std::isfinite(node->q_value())) {
+        ajouter_violation(rapport, "statistique non finie");
+    }
+    if (node->visit_count < 0) {
+        ajouter_violation(rapport, "nombre de visites negatif");
     }
 
-    if (node->children.empty()) return;
+    const bool has_children = !node->children.empty();
+    if (state == NodeState::Unexpanded && has_children) {
+        ajouter_violation(rapport, "noeud Unexpanded avec des enfants");
+    }
+    if (state == NodeState::Pending && has_children) {
+        ajouter_violation(rapport, "noeud Pending avec des enfants");
+    }
+    if (state == NodeState::Expanded && !has_children) {
+        ajouter_violation(rapport, "noeud Expanded sans enfant");
+    }
+    if (state == NodeState::Terminal && has_children) {
+        ajouter_violation(rapport, "noeud Terminal avec des enfants");
+    }
+
+    if (!has_children) return;
 
     std::vector<int> vus;
     vus.reserve(node->children.size());
@@ -100,7 +124,17 @@ static void visiter(const MCTSNode* node, uint64_t profondeur, TreeReport& rappo
                 "pointeur parent incoherent, move_idx " + std::to_string(idx));
         }
 
-        somme_visites += static_cast<uint64_t>(enfant->visit_count);
+        if (!std::isfinite(enfant->prior) ||
+            !std::isfinite(enfant->total_value) ||
+            !std::isfinite(enfant->q_value())) {
+            ajouter_violation(rapport,
+                "statistique enfant non finie, move_idx " +
+                std::to_string(idx));
+        }
+
+        if (enfant->visit_count >= 0) {
+            somme_visites += static_cast<uint64_t>(enfant->visit_count);
+        }
         somme_priors += enfant->prior;
     }
 
@@ -108,8 +142,11 @@ static void visiter(const MCTSNode* node, uint64_t profondeur, TreeReport& rappo
     // par l'expansion paresseuse : selon qu'un noeud a ete developpe en tant
     // que feuille (defaut de table) ou traverse en creant ses enfants au vol
     // (succes de table), il a recu ou non une visite propre.
-    const uint64_t visites = static_cast<uint64_t>(node->visit_count);
-    if (visites < somme_visites || visites > somme_visites + 1) {
+    const uint64_t visites = node->visit_count >= 0
+        ? static_cast<uint64_t>(node->visit_count)
+        : 0;
+    if (node->visit_count >= 0 &&
+        (visites < somme_visites || visites > somme_visites + 1)) {
         ajouter_violation(rapport,
             "visites hors encadrement : noeud " + std::to_string(visites) +
             ", enfants " + std::to_string(somme_visites));
@@ -127,9 +164,17 @@ static void visiter(const MCTSNode* node, uint64_t profondeur, TreeReport& rappo
 }
 
 TreeReport MCTS::inspect_tree() const {
-    TreeReport rapport;
-    if (!m_analysis_root) return rapport;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return inspect_tree(m_analysis_root.get());
+}
 
-    visiter(m_analysis_root.get(), 0, rapport);
+TreeReport MCTS::inspect_tree(const MCTSNode* root) const {
+    TreeReport rapport;
+    if (root == nullptr) return rapport;
+
+    rapport.root_visits = root->visit_count >= 0
+        ? static_cast<uint64_t>(root->visit_count)
+        : 0;
+    visiter(root, 0, rapport);
     return rapport;
 }

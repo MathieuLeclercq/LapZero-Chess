@@ -77,6 +77,8 @@ def test_la_recherche_sequentielle_ne_viole_aucun_invariant(evaluateur, nom, fen
     assert rapport.violations == 0, f"{nom} : {list(rapport.messages)}"
     assert rapport.nodes > 1
     assert rapport.max_depth >= 1
+    assert rapport.pending == 0
+    assert rapport.root_visits == 400
 
 
 def test_les_visites_de_la_racine_egalent_les_simulations(evaluateur):
@@ -124,4 +126,6 @@ def test_la_politique_tt_ne_corrompt_pas_l_arbre(
     rapport = mcts.inspect_tree()
     assert rapport.violations == 0, list(rapport.messages)
     assert rapport.en_vol == 0
+    assert rapport.pending == 0
+    assert rapport.root_visits == 200
     assert sum(s.visits for s in mcts.get_analysis_results()) == 200

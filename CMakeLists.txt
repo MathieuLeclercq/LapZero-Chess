@@ -41,6 +41,7 @@ add_library(chess_core STATIC
     src/mcts.cpp 
     src/mcts_observe.cpp
     src/mcts_batch.cpp
+    src/mcts_reservation.cpp
     src/search_timing.cpp
     src/zobrist.cpp
     src/onnx_evaluator.cpp
@@ -97,6 +98,16 @@ add_executable(evaluation_cache_tests tests/cpp/test_evaluation_cache.cpp)
 target_link_libraries(evaluation_cache_tests PRIVATE chess_core)
 copy_onnx_runtime(evaluation_cache_tests)
 add_test(NAME evaluation_cache COMMAND evaluation_cache_tests)
+
+add_executable(reservation_tests tests/cpp/test_reservation.cpp)
+target_link_libraries(reservation_tests PRIVATE chess_core)
+copy_onnx_runtime(reservation_tests)
+add_test(NAME reservation COMMAND reservation_tests)
+
+add_executable(node_state_tests tests/cpp/test_node_state.cpp)
+target_link_libraries(node_state_tests PRIVATE chess_core)
+copy_onnx_runtime(node_state_tests)
+add_test(NAME node_state COMMAND node_state_tests)
 
 add_executable(selfplay_phase_bench tests/cpp/selfplay_phase_bench.cpp)
 target_link_libraries(selfplay_phase_bench PRIVATE chess_core)

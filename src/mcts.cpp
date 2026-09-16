@@ -5,6 +5,66 @@
 #include <stdexcept>
 #include <cstdint>
 
+namespace {
+
+using NodeChildren =
+    std::vector<std::pair<int, std::unique_ptr<MCTSNode>>>;
+
+NodeChildren make_children_from_policy(
+        MCTSNode* parent, const std::vector<int>& legal_indices,
+        const float* policy) {
+    const int policy_size = std::min(
+        static_cast<int>(legal_indices.size()), TT_MAX_MOVES);
+    float sum_legal = 0.0f;
+    for (int i = 0; i < policy_size; ++i) {
+        sum_legal += policy[legal_indices[i]];
+    }
+
+    NodeChildren children;
+    children.reserve(policy_size);
+    const float uniform = 1.0f / static_cast<float>(policy_size);
+    for (int i = 0; i < policy_size; ++i) {
+        const int move_index = legal_indices[i];
+        const float prior = sum_legal > 0.0f
+            ? policy[move_index] / sum_legal
+            : uniform;
+        children.emplace_back(
+            move_index,
+            std::make_unique<MCTSNode>(prior, move_index, parent));
+    }
+    return children;
+}
+
+NodeChildren make_children_from_probe(MCTSNode* parent,
+                                      const TTProbe& probe) {
+    float sum_legal = 0.0f;
+    for (int i = 0; i < probe.policy_size; ++i) {
+        sum_legal += probe.legal_policy[i].second;
+    }
+
+    NodeChildren children;
+    children.reserve(probe.policy_size);
+    const float uniform = 1.0f / static_cast<float>(probe.policy_size);
+    for (int i = 0; i < probe.policy_size; ++i) {
+        const int move_index = probe.legal_policy[i].first;
+        const float prior = sum_legal > 0.0f
+            ? probe.legal_policy[i].second / sum_legal
+            : uniform;
+        children.emplace_back(
+            move_index,
+            std::make_unique<MCTSNode>(prior, move_index, parent));
+    }
+    return children;
+}
+
+void reserve_path(PathReservation& reservation, MCTSNode* leaf) {
+    for (MCTSNode* node = leaf; node != nullptr; node = node->parent) {
+        reservation.reserve(node);
+    }
+}
+
+}  // namespace
+
 
 // ============================================================
 //                     MCTSNode
@@ -12,14 +72,17 @@
 
 MCTSNode::MCTSNode(float prior, int move_idx, MCTSNode* parent)
     : prior(prior), move_idx(move_idx), parent(parent),
-    visit_count(0), total_value(0.0f), is_terminal(false), n_in_flight(0) {
+    visit_count(0), total_value(0.0f) {
 }
 
 float MCTSNode::ucb_score(float exploration_factor, float parent_q, float fpu_reduction) const {
     // Implémentation du FPU de LeelaChess0
     // Si noeud pas visité, on ne met pas sa Q value à 0,
     // mais on utilise celle du parent.
-    float u = exploration_factor * prior / (1.0f + visit_count + n_in_flight);
+    const std::uint32_t in_flight =
+        n_in_flight.load(std::memory_order_relaxed);
+    float u = exploration_factor * prior
+        / (1.0f + visit_count + in_flight);
     float exploitation = (visit_count == 0) ? (parent_q - fpu_reduction) : -q_value();
     return exploitation + u;
 }
@@ -130,16 +193,14 @@ std::pair<MCTSNode*, int> MCTS::select_leaf(MCTSNode* root, Chessboard& board,
     MCTSNode* node = root;
     int moves_played = 0;
 
-    while (!node->is_terminal) {
+    while (true) {
+        const NodeState state = node->state.load(std::memory_order_acquire);
+        if (state == NodeState::Terminal || state == NodeState::Pending) {
+            break;
+        }
 
         // --- 1. EXPANSION PARESSEUSE ---
-        if (node->children.empty()) {
-            // Collision : cette feuille est deja collectee par une descente
-            // precedente du meme lot. Sans cette garde, l'expansion paresseuse
-            // ci-dessous lui creerait des enfants, et le backup du lot lui en
-            // creerait un second jeu. L'arbre serait corrompu en silence.
-            if (node->n_in_flight > 0) break;
-
+        if (state == NodeState::Unexpanded) {
             EvaluationCacheKey key;
             {
                 PhaseTimer timer(timing, SearchPhase::TensorKey);
@@ -148,26 +209,28 @@ std::pair<MCTSNode*, int> MCTS::select_leaf(MCTSNode* root, Chessboard& board,
             const TTProbe probe = probe_tt(key, timing);
 
             if (probe.status == TTProbeStatus::HIT) {
+                PathReservation publication;
+                if (!publication.try_claim(node)) {
+                    continue;
+                }
                 record_tt_probe(probe.status);
-                const int size = probe.policy_size;
-                float sum_legal = 0.0f;
-                for (int k = 0; k < size; ++k) {
-                    sum_legal += probe.legal_policy[k].second;
-                }
-
                 PhaseTimer timer(timing, SearchPhase::Expansion);
-                node->children.reserve(size);
-                for (int k = 0; k < size; ++k) {
-                    int idx = probe.legal_policy[k].first;
-                    float prob = (sum_legal > 0.0f)
-                        ? (probe.legal_policy[k].second / sum_legal)
-                        : (1.0f / (float)size);
-                    node->children.emplace_back(idx, std::make_unique<MCTSNode>(prob, idx, node));
-                }
+                NodeChildren children = make_children_from_probe(node, probe);
+                node->children.swap(children);
+                publication.publish(NodeState::Expanded);
             }
             else {
                 break; // Vraie feuille, besoin du GPU
             }
+        }
+
+        if (node->state.load(std::memory_order_acquire)
+                != NodeState::Expanded) {
+            continue;
+        }
+        if (node->children.empty()) {
+            throw std::logic_error(
+                "select_leaf : noeud Expanded sans enfant");
         }
 
         PhaseTimer selection_timer(timing, SearchPhase::Selection);
@@ -209,7 +272,8 @@ std::pair<MCTSNode*, int> MCTS::select_leaf(MCTSNode* root, Chessboard& board,
         if (board.checkThreefoldRepetition() ||
             board.getHalfMoveClock() >= 100 ||
             board.checkInsufficientMaterial()) {
-            node->is_terminal = true;
+            node->state.store(NodeState::Terminal,
+                              std::memory_order_release);
             break;
         }
     }
@@ -219,9 +283,18 @@ std::pair<MCTSNode*, int> MCTS::select_leaf(MCTSNode* root, Chessboard& board,
 
 float MCTS::expand_node_single(MCTSNode* node, Chessboard& board,
                                SearchTiming* timing) {
+    PathReservation publication;
+    if (!publication.try_claim(node)) {
+        const NodeState state = node->state.load(std::memory_order_acquire);
+        if (state == NodeState::Terminal) {
+            return 0.0f;
+        }
+        throw std::logic_error(
+            "expand_node_single : noeud deja publie ou reserve");
+    }
 
     if (board.checkThreefoldRepetition() || board.getHalfMoveClock() >= 100 || board.checkInsufficientMaterial()) {
-        node->is_terminal = true;
+        publication.publish(NodeState::Terminal);
         return 0.0f;
     }
 
@@ -243,7 +316,7 @@ float MCTS::expand_node_single(MCTSNode* node, Chessboard& board,
         legal_indices = board.getLegalMoveIndices();
     }
     if (legal_indices.empty()) {
-        node->is_terminal = true;
+        publication.publish(NodeState::Terminal);
         return board.isInCheck() ? -1.0f : 0.0f;
     }
 
@@ -261,36 +334,12 @@ float MCTS::expand_node_single(MCTSNode* node, Chessboard& board,
 
     store_tt(key, legal_indices, m_eval_policy.data(), value, timing);
 
-    const int policy_size = std::min(
-        static_cast<int>(legal_indices.size()), TT_MAX_MOVES);
-    float sum_legal = 0.0f;
-    for (int k = 0; k < policy_size; ++k) {
-        int idx = legal_indices[k];
-        float prob = m_eval_policy[idx];
-        sum_legal += prob;
-    }
-
     {
         PhaseTimer timer(timing, SearchPhase::Expansion);
-        // Création des enfants
-        node->children.reserve(policy_size);
-        if (sum_legal > 0.0f) {
-            for (int k = 0; k < policy_size; ++k) {
-                const int idx = legal_indices[k];
-                node->children.emplace_back(
-                    idx,
-                    std::make_unique<MCTSNode>(m_eval_policy[idx] / sum_legal,
-                                               idx, node));
-            }
-        }
-        else {
-            float uniform_prob = 1.0f / policy_size;
-            for (int k = 0; k < policy_size; ++k) {
-                const int idx = legal_indices[k];
-                node->children.emplace_back(
-                    idx, std::make_unique<MCTSNode>(uniform_prob, idx, node));
-            }
-        }
+        NodeChildren children = make_children_from_policy(
+            node, legal_indices, m_eval_policy.data());
+        node->children.swap(children);
+        publication.publish(NodeState::Expanded);
     }
 
     return value;
@@ -514,11 +563,14 @@ std::vector<MoveStats> MCTS::get_analysis_results() const {
     return results;
 }
 
-MCTSNode* MCTS::advance_to_leaf(MCTSNode* root, Chessboard& board, float c_puct, int& moves_played) {
+MCTSNode* MCTS::advance_to_leaf(MCTSNode* root, Chessboard& board,
+                                float c_puct, int& moves_played,
+                                PathReservation& reservation) {
     auto [node, moves] = select_leaf(root, board, c_puct);
     moves_played = moves;
 
-    if (node->is_terminal) {
+    const NodeState state = node->state.load(std::memory_order_acquire);
+    if (state == NodeState::Terminal) {
         float value = 0.0f;
         if (board.checkThreefoldRepetition() ||
             board.getHalfMoveClock() >= 100 ||
@@ -532,6 +584,15 @@ MCTSNode* MCTS::advance_to_leaf(MCTSNode* root, Chessboard& board, float c_puct,
         for (int i = 0; i < moves_played; i++) board.undoMove();
         return nullptr;
     }
+    if (state == NodeState::Pending) {
+        for (int i = 0; i < moves_played; i++) board.undoMove();
+        return nullptr;
+    }
+    if (state != NodeState::Unexpanded) {
+        for (int i = 0; i < moves_played; i++) board.undoMove();
+        throw std::logic_error(
+            "advance_to_leaf : select_leaf a rendu un noeud Expanded");
+    }
 
     // Vérification TT avant GPU
     const EvaluationCacheKey key = make_cache_key(board);
@@ -544,62 +605,50 @@ MCTSNode* MCTS::advance_to_leaf(MCTSNode* root, Chessboard& board, float c_puct,
         return nullptr;
     }
 
+    if (!reservation.try_claim(node)) {
+        for (int i = 0; i < moves_played; i++) board.undoMove();
+        return nullptr;
+    }
+    reserve_path(reservation, node);
+
     return node;
 }
 
-void MCTS::expand_and_backup(MCTSNode* leaf_node, Chessboard& board, const float* policy, float value) {
+void MCTS::expand_and_backup(MCTSNode* leaf_node, Chessboard& board,
+                             const float* policy, float value,
+                             PathReservation& reservation) {
 
     std::vector<int> legal_indices = board.getLegalMoveIndices();
     if (legal_indices.empty()) {
-        leaf_node->is_terminal = true;
+        reservation.publish(NodeState::Terminal);
         backup(leaf_node, board.isInCheck() ? -1.0f : 0.0f);
+        reservation.release();
         return;
     }
 
     expand_and_backup_prepared(
-        leaf_node, legal_indices, make_cache_key(board), policy, value);
+        leaf_node, legal_indices, make_cache_key(board), policy, value,
+        reservation);
 }
 
 void MCTS::expand_and_backup_prepared(MCTSNode* leaf_node,
                                       const std::vector<int>& legal_indices,
                                       const EvaluationCacheKey& key,
                                       const float* policy, float value,
+                                      PathReservation& reservation,
                                       SearchTiming* timing) {
     // Les feuilles terminales sont traitees pendant la descente, jamais ici :
     // legal_indices est donc non vide et le plateau n'est pas necessaire.
     store_tt(key, legal_indices, policy, value, timing);
 
-    const int policy_size = std::min(
-        static_cast<int>(legal_indices.size()), TT_MAX_MOVES);
-    float sum_legal = 0.0f;
-    for (int k = 0; k < policy_size; ++k) {
-        int idx = legal_indices[k];
-        float prob = policy[idx];
-        sum_legal += prob;
-    }
-
     {
         PhaseTimer timer(timing, SearchPhase::Expansion);
-        // Création des enfants
-        leaf_node->children.reserve(policy_size);
-        if (sum_legal > 0.0f) {
-            for (int k = 0; k < policy_size; ++k) {
-                const int idx = legal_indices[k];
-                leaf_node->children.emplace_back(
-                    idx,
-                    std::make_unique<MCTSNode>(policy[idx] / sum_legal,
-                                               idx, leaf_node));
-            }
-        }
-        else {
-            float uniform_prob = 1.0f / policy_size;
-            for (int k = 0; k < policy_size; ++k) {
-                const int idx = legal_indices[k];
-                leaf_node->children.emplace_back(
-                    idx, std::make_unique<MCTSNode>(uniform_prob, idx, leaf_node));
-            }
-        }
+        NodeChildren children = make_children_from_policy(
+            leaf_node, legal_indices, policy);
+        leaf_node->children.swap(children);
+        reservation.publish(NodeState::Expanded);
     }
 
     backup(leaf_node, value, timing);
+    reservation.release();
 }

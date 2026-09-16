@@ -148,6 +148,8 @@ def test_la_boucle_batchee_respecte_les_invariants(evaluateur, taille):
     rapport = mcts.inspect_tree()
     assert rapport.violations == 0, list(rapport.messages)
     assert rapport.en_vol == 0, "virtual loss non annule"
+    assert rapport.pending == 0, "feuille Pending non liberee"
+    assert rapport.root_visits == 400
 
 
 @pytest.mark.parametrize("taille", [1, 2, 8, 32])

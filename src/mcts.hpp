@@ -12,12 +12,12 @@
 
 #include "evaluation_cache.hpp"
 #include "evaluator.hpp"
+#include "mcts_reservation.hpp"
 #include "search_timing.hpp"
 
 struct MCTSNode {
     int visit_count;
     int move_idx;
-    bool is_terminal;
     float prior;
     float total_value;
 
@@ -25,7 +25,10 @@ struct MCTSNode {
     // noeud. N'entre QUE dans le denominateur du terme U de ucb_score, jamais
     // dans q_value(), sans quoi Q se diluerait vers zero et avantagerait les
     // noeuds perdants.
-    uint32_t n_in_flight;
+    // L'etat publie la liste d'enfants. Un lecteur ne consulte children
+    // qu'apres un load-acquire ayant observe Expanded.
+    std::atomic<NodeState> state{NodeState::Unexpanded};
+    std::atomic<std::uint32_t> n_in_flight{0};
 
     MCTSNode* parent;
     std::vector<std::pair<int, std::unique_ptr<MCTSNode>>> children;
@@ -69,6 +72,8 @@ struct TreeReport {
     uint64_t max_depth = 0;
     uint64_t violations = 0;
     uint64_t en_vol = 0;   // noeuds dont n_in_flight != 0 apres la recherche
+    uint64_t pending = 0;
+    uint64_t root_visits = 0;
     std::vector<std::string> messages;
 };
 
@@ -123,12 +128,17 @@ public:
     SearchCounters get_counters() const;
     void reset_counters();
     TreeReport inspect_tree() const;
+    TreeReport inspect_tree(const MCTSNode* root) const;
     void set_timing_enabled(bool enabled);
     SearchTiming get_last_timing() const;
 
     // recherche mcts asynchrone
-    MCTSNode* advance_to_leaf(MCTSNode* root, Chessboard& board, float c_puct, int& moves_played);
-    void expand_and_backup(MCTSNode* leaf_node, Chessboard& board, const float* policy, float value);
+    MCTSNode* advance_to_leaf(MCTSNode* root, Chessboard& board, float c_puct,
+                              int& moves_played,
+                              PathReservation& reservation);
+    void expand_and_backup(MCTSNode* leaf_node, Chessboard& board,
+                           const float* policy, float value,
+                           PathReservation& reservation);
 
 private:
     void backup(MCTSNode* node, float value, SearchTiming* timing = nullptr);
@@ -147,6 +157,7 @@ private:
                                     const std::vector<int>& legal_indices,
                                     const EvaluationCacheKey& key,
                                     const float* policy, float value,
+                                    PathReservation& reservation,
                                     SearchTiming* timing = nullptr);
 
     // Noyau unique de recherche, defini dans mcts_batch.cpp.

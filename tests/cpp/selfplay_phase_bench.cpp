@@ -107,6 +107,7 @@ Result run_repetition(Evaluator& evaluator, int rounds) {
 
     std::vector<MCTSNode*> leaves(GAME_COUNT, nullptr);
     std::vector<int> moves_played(GAME_COUNT, 0);
+    std::vector<PathReservation> reservations(GAME_COUNT);
     std::vector<std::vector<float>> tensors(
         GAME_COUNT, std::vector<float>(INPUT_SIZE));
     std::vector<float> batch_input;
@@ -123,7 +124,8 @@ Result run_repetition(Evaluator& evaluator, int rounds) {
 #pragma omp parallel for num_threads(GAME_COUNT) schedule(static)
         for (int game = 0; game < GAME_COUNT; ++game) {
             leaves[game] = mcts.advance_to_leaf(
-                roots[game].get(), boards[game], 1.4f, moves_played[game]);
+                roots[game].get(), boards[game], 1.4f,
+                moves_played[game], reservations[game]);
             if (leaves[game] != nullptr) {
                 boards[game].getAlphaZeroTensor(tensors[game]);
             }
@@ -154,7 +156,7 @@ Result run_repetition(Evaluator& evaluator, int rounds) {
                 mcts.expand_and_backup(
                     leaves[game], boards[game],
                     policies.data() + batch_index * POLICY_SIZE,
-                    values[batch_index]);
+                    values[batch_index], reservations[game]);
                 for (int move = 0; move < moves_played[game]; ++move) {
                     boards[game].undoMove();
                 }

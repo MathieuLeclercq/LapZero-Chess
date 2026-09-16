@@ -156,6 +156,8 @@ PYBIND11_MODULE(chess_engine, m) {
         .def_readonly("max_depth", &TreeReport::max_depth)
         .def_readonly("violations", &TreeReport::violations)
         .def_readonly("en_vol", &TreeReport::en_vol)
+        .def_readonly("pending", &TreeReport::pending)
+        .def_readonly("root_visits", &TreeReport::root_visits)
         .def_readonly("messages", &TreeReport::messages);
 
     py::class_<SearchTiming>(m, "SearchTiming")
@@ -223,7 +225,8 @@ PYBIND11_MODULE(chess_engine, m) {
         .def("set_timing_enabled", &MCTS::set_timing_enabled,
              py::arg("enabled"))
         .def("get_last_timing", &MCTS::get_last_timing)
-        .def("inspect_tree", &MCTS::inspect_tree);
+        .def("inspect_tree",
+             py::overload_cast<>(&MCTS::inspect_tree, py::const_));
 
     py::class_<GameResult>(m, "GameResult")
         .def_property_readonly("state_tensors", [](py::object& self) {

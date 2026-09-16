@@ -109,35 +109,57 @@ void SelfPlayManager::execute_gpu_batch() {
     if (m_waiting_leaves.empty()) return;
     int current_batch_size = m_waiting_leaves.size();
 
-    m_evaluator->evaluate_batch(m_batch_input, m_batch_policies, m_batch_values, current_batch_size);
-
-    for (int i = 0; i < current_batch_size; ++i) {
-        int game_idx = m_waiting_game_indices[i];
-        int moves_played = m_waiting_moves_played[i];
-
-        float value = m_batch_values[i];
-        const float* single_policy = m_batch_policies.data() + (i * 4672);
-        m_shared_mcts->expand_and_backup(m_waiting_leaves[i], m_boards[game_idx], single_policy, value);
-
-        if (m_waiting_leaves[i] == m_roots[game_idx].get()) {
-            float current_epsilon = m_tactical_boost[game_idx] ? TACTICAL_EPSILON : NORMAL_EPSILON;
-            m_shared_mcts->add_dirichlet_noise(m_roots[game_idx].get(), current_epsilon);
+    auto cleanup_waiting = [&]() noexcept {
+        for (int i = 0; i < current_batch_size; ++i) {
+            const int game_idx = m_waiting_game_indices[i];
+            for (int move = 0; move < m_waiting_moves_played[i]; ++move) {
+                m_boards[game_idx].undoMove();
+            }
+            m_waiting_moves_played[i] = 0;
+            m_is_waiting[game_idx] = false;
         }
+        m_waiting_reservations.clear();
+        m_waiting_leaves.clear();
+        m_waiting_game_indices.clear();
+        m_waiting_moves_played.clear();
+    };
 
-        for (int k = 0; k < moves_played; ++k) {
-            m_boards[game_idx].undoMove();
+    try {
+        m_evaluator->evaluate_batch(
+            m_batch_input, m_batch_policies, m_batch_values,
+            current_batch_size);
+
+        for (int i = 0; i < current_batch_size; ++i) {
+            int game_idx = m_waiting_game_indices[i];
+            int moves_played = m_waiting_moves_played[i];
+
+            float value = m_batch_values[i];
+            const float* single_policy =
+                m_batch_policies.data() + (i * 4672);
+            m_shared_mcts->expand_and_backup(
+                m_waiting_leaves[i], m_boards[game_idx], single_policy,
+                value, m_waiting_reservations[i]);
+
+            if (m_waiting_leaves[i] == m_roots[game_idx].get()) {
+                float current_epsilon = m_tactical_boost[game_idx]
+                    ? TACTICAL_EPSILON : NORMAL_EPSILON;
+                m_shared_mcts->add_dirichlet_noise(
+                    m_roots[game_idx].get(), current_epsilon);
+            }
+
+            for (int k = 0; k < moves_played; ++k) {
+                m_boards[game_idx].undoMove();
+            }
+            m_waiting_moves_played[i] = 0;
+            m_sims_completed[game_idx]++;
         }
-
-        m_sims_completed[game_idx]++;
+    }
+    catch (...) {
+        cleanup_waiting();
+        throw;
     }
 
-    for (int i = 0; i < current_batch_size; ++i) {
-        m_is_waiting[m_waiting_game_indices[i]] = false;
-    }
-
-    m_waiting_leaves.clear();
-    m_waiting_game_indices.clear();
-    m_waiting_moves_played.clear();
+    cleanup_waiting();
 }
 
 void SelfPlayManager::play_best_move(int game_idx) {
@@ -383,13 +405,16 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
                 if (m_is_waiting[i] || m_sims_completed[i] >= m_sims_target[i]) continue;
 
                 int moves_played = 0;
+                PathReservation reservation;
                 MCTSNode* leaf = m_shared_mcts->advance_to_leaf(
-                    m_roots[i].get(), m_boards[i], 1.4f, moves_played);
+                    m_roots[i].get(), m_boards[i], 1.4f, moves_played,
+                    reservation);
 
                 if (leaf != nullptr) {
                     buf.leaves.push_back(leaf);
                     buf.game_indices.push_back(i);
                     buf.moves_played.push_back(moves_played);
+                    buf.reservations.push_back(std::move(reservation));
 
                     m_boards[i].getAlphaZeroTensor(buf.tensor_scratch);
                     int offset = (buf.leaves.size() - 1) * 119 * 64;
@@ -408,13 +433,15 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
         // ==========================================================
         // PHASE 3 : Séquentiel — Fusion et batch GPU
         // ==========================================================
-        for (const auto& buf : thread_buffers) {
+        for (auto& buf : thread_buffers) {
             for (size_t j = 0; j < buf.leaves.size(); ++j) {
                 if ((int)m_waiting_leaves.size() >= m_num_concurrent_games) break;
 
                 m_waiting_leaves.push_back(buf.leaves[j]);
                 m_waiting_game_indices.push_back(buf.game_indices[j]);
                 m_waiting_moves_played.push_back(buf.moves_played[j]);
+                m_waiting_reservations.push_back(
+                    std::move(buf.reservations[j]));
 
                 int batch_offset = m_waiting_leaves.size() - 1;
                 std::copy(buf.tensors.begin() + j * 119 * 64,

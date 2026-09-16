@@ -21,6 +21,7 @@ struct ThreadLocalBuffer {
     std::vector<MCTSNode*> leaves;
     std::vector<int> game_indices;
     std::vector<int> moves_played;
+    std::vector<PathReservation> reservations;
     std::vector<float> tensors;
     std::vector<float> tensor_scratch;
 
@@ -28,6 +29,7 @@ struct ThreadLocalBuffer {
         leaves.clear();
         game_indices.clear();
         moves_played.clear();
+        reservations.clear();
     }
 };
 
@@ -71,6 +73,7 @@ private:
     std::vector<MCTSNode*> m_waiting_leaves;
     std::vector<int> m_waiting_game_indices;
     std::vector<int> m_waiting_moves_played;
+    std::vector<PathReservation> m_waiting_reservations;
     std::vector<char> m_is_waiting;
 
     std::mt19937 m_rng{ std::random_device{}() };
