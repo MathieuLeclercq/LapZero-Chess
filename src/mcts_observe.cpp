@@ -32,6 +32,10 @@ SearchCounters MCTS::get_counters() const {
     c.tt_context_rejects = m_tt_context_rejects.load(std::memory_order_relaxed);
     c.tt_history_rejects = m_tt_history_rejects.load(std::memory_order_relaxed);
     c.terminal_hits = m_terminal_hits.load(std::memory_order_relaxed);
+    c.waves = m_waves.load(std::memory_order_relaxed);
+    c.leaf_collisions = m_leaf_collisions.load(std::memory_order_relaxed);
+    c.completed_simulations =
+        m_completed_simulations.load(std::memory_order_relaxed);
     return c;
 }
 
@@ -45,6 +49,9 @@ void MCTS::reset_counters() {
     m_tt_context_rejects.store(0, std::memory_order_relaxed);
     m_tt_history_rejects.store(0, std::memory_order_relaxed);
     m_terminal_hits.store(0, std::memory_order_relaxed);
+    m_waves.store(0, std::memory_order_relaxed);
+    m_leaf_collisions.store(0, std::memory_order_relaxed);
+    m_completed_simulations.store(0, std::memory_order_relaxed);
 }
 
 

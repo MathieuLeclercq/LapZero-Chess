@@ -149,7 +149,11 @@ PYBIND11_MODULE(chess_engine, m) {
         .def_readonly("tt_rule50_rejects", &SearchCounters::tt_rule50_rejects)
         .def_readonly("tt_context_rejects", &SearchCounters::tt_context_rejects)
         .def_readonly("tt_history_rejects", &SearchCounters::tt_history_rejects)
-        .def_readonly("terminal_hits", &SearchCounters::terminal_hits);
+        .def_readonly("terminal_hits", &SearchCounters::terminal_hits)
+        .def_readonly("waves", &SearchCounters::waves)
+        .def_readonly("leaf_collisions", &SearchCounters::leaf_collisions)
+        .def_readonly("completed_simulations",
+                      &SearchCounters::completed_simulations);
 
     py::class_<TreeReport>(m, "TreeReport")
         .def_readonly("nodes", &TreeReport::nodes)
@@ -209,24 +213,33 @@ PYBIND11_MODULE(chess_engine, m) {
         .def("mcts_search", &MCTS::mcts_search,
             py::call_guard<py::gil_scoped_release>(),
             py::arg("board"), py::arg("num_simulations"), py::arg("c_puct") = 1.4f,
-            py::arg("add_dirichlet") = false, py::arg("batch_size") = 0)
+            py::arg("add_dirichlet") = false, py::arg("batch_size") = 0,
+            py::arg("worker_count") = 1)
 
         // --- BINDINGS D'ANALYSE ---
         .def("step_analysis", &MCTS::step_analysis,
             py::call_guard<py::gil_scoped_release>(),
             py::arg("board"), py::arg("num_simulations"), py::arg("c_puct") = 1.4f,
-            py::arg("batch_size") = 0)
-        .def("reset_analysis", &MCTS::reset_analysis)
-        .def("update_root", &MCTS::update_root, "Déplace la racine de l'arbre vers un coup spécifique")
-        .def("get_root_q", &MCTS::get_root_q)
-        .def("get_analysis_results", &MCTS::get_analysis_results)
+            py::arg("batch_size") = 0, py::arg("worker_count") = 1)
+        .def("reset_analysis", &MCTS::reset_analysis,
+             py::call_guard<py::gil_scoped_release>())
+        .def("update_root", &MCTS::update_root,
+             py::call_guard<py::gil_scoped_release>(),
+             "Déplace la racine de l'arbre vers un coup spécifique")
+        .def("get_root_q", &MCTS::get_root_q,
+             py::call_guard<py::gil_scoped_release>())
+        .def("get_analysis_results", &MCTS::get_analysis_results,
+             py::call_guard<py::gil_scoped_release>())
         .def("get_counters", &MCTS::get_counters)
         .def("reset_counters", &MCTS::reset_counters)
         .def("set_timing_enabled", &MCTS::set_timing_enabled,
+             py::call_guard<py::gil_scoped_release>(),
              py::arg("enabled"))
-        .def("get_last_timing", &MCTS::get_last_timing)
+        .def("get_last_timing", &MCTS::get_last_timing,
+             py::call_guard<py::gil_scoped_release>())
         .def("inspect_tree",
-             py::overload_cast<>(&MCTS::inspect_tree, py::const_));
+             py::overload_cast<>(&MCTS::inspect_tree, py::const_),
+             py::call_guard<py::gil_scoped_release>());
 
     py::class_<GameResult>(m, "GameResult")
         .def_property_readonly("state_tensors", [](py::object& self) {

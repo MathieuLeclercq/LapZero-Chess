@@ -61,6 +61,8 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
 
                 backup(node, value, timing);
                 for (int i = 0; i < moves_played; i++) board.undoMove();
+                m_completed_simulations.fetch_add(
+                    1, std::memory_order_relaxed);
                 continue;
             }
 
@@ -76,6 +78,8 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
             for (int i = 0; i < moves_played; i++) {
                 board.undoMove();
             }
+            m_completed_simulations.fetch_add(
+                1, std::memory_order_relaxed);
         }
         return;
     }
@@ -115,6 +119,8 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
                 backup(node, value, timing);
                 for (int i = 0; i < moves_played; i++) board.undoMove();
                 completed++;
+                m_completed_simulations.fetch_add(
+                    1, std::memory_order_relaxed);
                 continue;
             }
 
@@ -162,6 +168,8 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
                 leaf.reservation.release();
                 for (int i = 0; i < moves_played; i++) board.undoMove();
                 completed++;
+                m_completed_simulations.fetch_add(
+                    1, std::memory_order_relaxed);
                 continue;
             }
 
@@ -196,6 +204,8 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
                                        values[i], batch[i].reservation,
                                        timing);
             completed++;
+            m_completed_simulations.fetch_add(
+                1, std::memory_order_relaxed);
         }
     }
 }

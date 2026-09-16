@@ -24,6 +24,7 @@ struct LeafWork {
     std::vector<int> legal_moves;
     std::vector<float> tensor;
     float terminal_value = 0.0f;
+    bool known_terminal = false;
 };
 
 struct WorkerContext {

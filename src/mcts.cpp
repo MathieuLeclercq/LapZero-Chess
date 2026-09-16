@@ -5,6 +5,8 @@
 #include <stdexcept>
 #include <cstdint>
 
+#include "search_executor.hpp"
+
 namespace {
 
 using NodeChildren =
@@ -60,6 +62,24 @@ NodeChildren make_children_from_probe(MCTSNode* parent,
 void reserve_path(PathReservation& reservation, MCTSNode* leaf) {
     for (MCTSNode* node = leaf; node != nullptr; node = node->parent) {
         reservation.reserve(node);
+    }
+}
+
+void validate_search_request(int num_simulations, int batch_size,
+                             int worker_count) {
+    if (num_simulations < 0) {
+        throw std::invalid_argument(
+            "num_simulations doit etre positif");
+    }
+    if (batch_size < 0) {
+        throw std::invalid_argument("batch_size doit etre positif");
+    }
+    if (worker_count < 1) {
+        throw std::invalid_argument("worker_count doit etre au moins 1");
+    }
+    if (worker_count > 1 && batch_size == 0) {
+        throw std::invalid_argument(
+            "la recherche multicoeur exige un batch_size positif");
     }
 }
 
@@ -126,6 +146,12 @@ MCTS::MCTS(Evaluator* evaluator, size_t tt_size,
         m_noise_rng(std::random_device{}()) {
     m_eval_tensor.reserve(119 * 64);
     m_eval_policy.reserve(4672);
+}
+
+MCTS::~MCTS() {
+    if (m_search_executor) {
+        m_search_executor->shutdown();
+    }
 }
 
 EvaluationCacheKey MCTS::make_cache_key(const Chessboard& board) const {
@@ -363,8 +389,11 @@ void MCTS::add_dirichlet_noise(MCTSNode* root, float epsilon) {
     }
 }
 
-std::vector<float> MCTS::mcts_search(Chessboard& board, int num_simulations, float c_puct,
-                                     bool add_dirichlet, int batch_size) {
+std::vector<float> MCTS::mcts_search(
+        Chessboard& board, int num_simulations, float c_puct,
+        bool add_dirichlet, int batch_size, int worker_count) {
+
+    validate_search_request(num_simulations, batch_size, worker_count);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     SearchTiming timing;
@@ -393,8 +422,14 @@ std::vector<float> MCTS::mcts_search(Chessboard& board, int num_simulations, flo
             add_dirichlet_noise(root.get(), 0.12f);
         }
 
-        run_search(root.get(), board, num_simulations, c_puct, batch_size,
-                   &timing);
+        if (worker_count == 1) {
+            run_search(root.get(), board, num_simulations, c_puct, batch_size,
+                       &timing);
+        }
+        else {
+            run_search_waves(root.get(), board, num_simulations, c_puct,
+                             batch_size, worker_count, &timing);
+        }
 
         std::vector<float> pi(4672, 0.0f);
         float sum_visits = 0.0f;
@@ -495,12 +530,15 @@ void MCTS::update_root(int move_idx) {
 }
 
 float MCTS::get_root_q() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
     if (!m_analysis_root) return 0.0f;
     return m_analysis_root->q_value();
 }
 
-void MCTS::step_analysis(Chessboard& board, int num_simulations, float c_puct,
-                         int batch_size) {
+void MCTS::step_analysis(
+        Chessboard& board, int num_simulations, float c_puct,
+        int batch_size, int worker_count) {
+    validate_search_request(num_simulations, batch_size, worker_count);
     // Le verrou couvre desormais toute la duree de l'appel, au lieu d'etre pris
     // et relache a chaque simulation. C'est necessaire pour la boucle batchee,
     // qui detiendra des MCTSNode* bruts pendant l'inference : relacher le verrou
@@ -528,8 +566,14 @@ void MCTS::step_analysis(Chessboard& board, int num_simulations, float c_puct,
             expand_node_single(m_analysis_root.get(), board, &timing);
         }
 
-        run_search(m_analysis_root.get(), board, num_simulations, c_puct,
-                   batch_size, &timing);
+        if (worker_count == 1) {
+            run_search(m_analysis_root.get(), board, num_simulations, c_puct,
+                       batch_size, &timing);
+        }
+        else {
+            run_search_waves(m_analysis_root.get(), board, num_simulations,
+                             c_puct, batch_size, worker_count, &timing);
+        }
         finish_timing();
     }
     catch (...) {
@@ -539,7 +583,7 @@ void MCTS::step_analysis(Chessboard& board, int num_simulations, float c_puct,
 }
 
 std::vector<MoveStats> MCTS::get_analysis_results() const {
-    std::lock_guard<std::mutex> lock(const_cast<MCTS&>(*this).m_mutex);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
     std::vector<MoveStats> results;
     if (!m_analysis_root) return results;

@@ -105,6 +105,7 @@ LeafWork MCTS::collect_wave_leaf(
     const auto collision = [&]() -> LeafWork {
         work.kind = LeafKind::Collision;
         work.reservation.release();
+        m_leaf_collisions.fetch_add(1, std::memory_order_relaxed);
         return std::move(work);
     };
 
@@ -124,6 +125,9 @@ LeafWork MCTS::collect_wave_leaf(
                 if (!work.reservation.try_claim(node)) return collision();
                 work.reservation.publish(NodeState::Terminal);
             }
+            else if (state == NodeState::Terminal) {
+                work.known_terminal = true;
+            }
             else if (state != NodeState::Terminal) {
                 throw std::logic_error(
                     "noeud de nulle deja publie Expanded");
@@ -138,6 +142,7 @@ LeafWork MCTS::collect_wave_leaf(
             work.kind = LeafKind::Terminal;
             work.node = node;
             work.terminal_value = terminal_value(context.board);
+            work.known_terminal = true;
             return work;
         }
         if (state == NodeState::Pending) {
@@ -275,28 +280,36 @@ std::vector<LeafWork> MCTS::collect_wave(
 
     std::atomic<std::size_t> available{slots};
     std::atomic<std::size_t> attempts{0};
+    std::atomic<bool> worker_failed{false};
     const std::size_t max_attempts = 4 * slots + worker_count;
 
     try {
         executor.run(worker_count, [&](std::size_t worker_id) {
-            WorkerContext& context = contexts[worker_id];
-            while (!cancelled.load(std::memory_order_relaxed)) {
-                if (!acquire_slot(available)) return;
+            try {
+                WorkerContext& context = contexts[worker_id];
+                while (!cancelled.load(std::memory_order_relaxed)
+                       && !worker_failed.load(std::memory_order_relaxed)) {
+                    if (!acquire_slot(available)) return;
 
-                const std::size_t attempt =
-                    attempts.fetch_add(1, std::memory_order_relaxed);
-                if (attempt >= max_attempts) {
-                    available.fetch_add(1, std::memory_order_relaxed);
-                    return;
-                }
+                    const std::size_t attempt =
+                        attempts.fetch_add(1, std::memory_order_relaxed);
+                    if (attempt >= max_attempts) {
+                        available.fetch_add(1, std::memory_order_relaxed);
+                        return;
+                    }
 
-                LeafWork work = collect_wave_leaf(
-                    root, context, c_puct, cancelled, hooks);
-                if (work.kind == LeafKind::Collision) {
-                    available.fetch_add(1, std::memory_order_relaxed);
-                    continue;
+                    LeafWork work = collect_wave_leaf(
+                        root, context, c_puct, cancelled, hooks);
+                    if (work.kind == LeafKind::Collision) {
+                        available.fetch_add(1, std::memory_order_relaxed);
+                        continue;
+                    }
+                    context.results.push_back(std::move(work));
                 }
-                context.results.push_back(std::move(work));
+            }
+            catch (...) {
+                worker_failed.store(true, std::memory_order_relaxed);
+                throw;
             }
         });
     }
@@ -321,4 +334,132 @@ std::vector<LeafWork> MCTS::collect_wave(
             "collect_wave : aucune progression apres les collisions");
     }
     return merged;
+}
+
+void MCTS::run_search_waves(
+        MCTSNode* root, const Chessboard& board, int simulations,
+        float c_puct, int batch_size, int worker_count,
+        SearchTiming* timing) {
+    if (simulations == 0) return;
+    if (batch_size <= 0 || worker_count <= 1) {
+        throw std::invalid_argument(
+            "run_search_waves : configuration multicoeur invalide");
+    }
+
+    if (!m_search_executor) {
+        m_search_executor = std::make_unique<SearchExecutor>();
+    }
+    if (m_worker_contexts.size()
+            < static_cast<std::size_t>(worker_count)) {
+        m_worker_contexts.resize(static_cast<std::size_t>(worker_count));
+    }
+
+    {
+        PhaseTimer copy_timer(timing, SearchPhase::BoardCopy);
+        for (int id = 0; id < worker_count; ++id) {
+            m_worker_contexts[static_cast<std::size_t>(id)].board = board;
+        }
+    }
+
+    std::atomic<bool> cancelled{false};
+    int completed = 0;
+    while (completed < simulations) {
+        for (int id = 0; id < worker_count; ++id) {
+            WorkerContext& context =
+                m_worker_contexts[static_cast<std::size_t>(id)];
+            context.timing = SearchTiming{};
+            context.timing.enabled = timing != nullptr && timing->enabled;
+        }
+
+        const std::size_t slots = static_cast<std::size_t>(
+            std::min(batch_size, simulations - completed));
+        m_waves.fetch_add(1, std::memory_order_relaxed);
+
+        std::vector<LeafWork> work;
+        try {
+            PhaseTimer wait_timer(timing, SearchPhase::WorkerWait);
+            work = collect_wave(
+                root, c_puct, slots,
+                static_cast<std::size_t>(worker_count),
+                *m_search_executor, m_worker_contexts, cancelled);
+        }
+        catch (...) {
+            cancelled.store(true, std::memory_order_relaxed);
+            throw;
+        }
+
+        if (timing != nullptr && timing->enabled) {
+            for (int id = 0; id < worker_count; ++id) {
+                timing->merge_worker(
+                    m_worker_contexts[static_cast<std::size_t>(id)].timing);
+            }
+        }
+
+        std::vector<float> batch_input;
+        std::vector<float> policies;
+        std::vector<float> values;
+        std::size_t network_count = 0;
+        {
+            PhaseTimer assembly_timer(timing, SearchPhase::BatchAssembly);
+            for (const LeafWork& leaf : work) {
+                if (leaf.kind != LeafKind::Network) continue;
+                batch_input.insert(batch_input.end(),
+                                   leaf.tensor.begin(), leaf.tensor.end());
+                ++network_count;
+            }
+        }
+
+        if (network_count > 0) {
+            m_nn_calls.fetch_add(network_count, std::memory_order_relaxed);
+            m_nn_batches.fetch_add(1, std::memory_order_relaxed);
+            {
+                PhaseTimer evaluator_timer(timing, SearchPhase::Evaluator);
+                m_evaluator->evaluate_batch(
+                    batch_input, policies, values,
+                    static_cast<int>(network_count));
+            }
+
+            const std::size_t expected_policy = network_count * 4672;
+            if (policies.size() != expected_policy
+                || values.size() != network_count) {
+                throw std::runtime_error(
+                    "evaluateur : dimensions de sortie invalides");
+            }
+            if (!std::all_of(values.begin(), values.end(),
+                             [](float value) { return std::isfinite(value); })
+                || !std::all_of(
+                    policies.begin(), policies.end(),
+                    [](float value) { return std::isfinite(value); })) {
+                throw std::runtime_error(
+                    "evaluateur : sortie non finie");
+            }
+        }
+
+        std::size_t network_index = 0;
+        for (LeafWork& leaf : work) {
+            if (leaf.kind == LeafKind::Network) {
+                expand_and_backup_prepared(
+                    leaf.node, leaf.legal_moves, leaf.key,
+                    policies.data() + network_index * 4672,
+                    values[network_index], leaf.reservation, timing);
+                ++network_index;
+            }
+            else if (leaf.kind == LeafKind::Terminal) {
+                if (leaf.known_terminal) {
+                    m_terminal_hits.fetch_add(
+                        1, std::memory_order_relaxed);
+                }
+                backup(leaf.node, leaf.terminal_value, timing);
+                leaf.reservation.release();
+            }
+            else {
+                throw std::logic_error(
+                    "run_search_waves : collision fusionnee");
+            }
+
+            ++completed;
+            m_completed_simulations.fetch_add(
+                1, std::memory_order_relaxed);
+        }
+    }
 }

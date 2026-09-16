@@ -124,6 +124,12 @@ copy_onnx_runtime(wave_collection_tests)
 add_test(NAME wave_collection COMMAND wave_collection_tests)
 set_tests_properties(wave_collection PROPERTIES TIMEOUT 30)
 
+add_executable(wave_search_tests tests/cpp/test_wave_search.cpp)
+target_link_libraries(wave_search_tests PRIVATE chess_core Threads::Threads)
+copy_onnx_runtime(wave_search_tests)
+add_test(NAME wave_search COMMAND wave_search_tests)
+set_tests_properties(wave_search PROPERTIES TIMEOUT 30)
+
 add_executable(selfplay_phase_bench tests/cpp/selfplay_phase_bench.cpp)
 target_link_libraries(selfplay_phase_bench PRIVATE chess_core)
 copy_onnx_runtime(selfplay_phase_bench)

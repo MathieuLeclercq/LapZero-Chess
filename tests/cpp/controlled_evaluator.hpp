@@ -12,6 +12,8 @@ class ControlledEvaluator final : public Evaluator {
 public:
     std::vector<int> batch_sizes;
     int fail_on_call = 0;
+    int truncate_policy_on_call = 0;
+    int truncate_values_on_call = 0;
     float output_value = 0.0f;
     std::function<void()> before_evaluate;
 
@@ -40,5 +42,12 @@ public:
         policies.assign(static_cast<std::size_t>(batch_size) * 4672,
                         1.0f / 4672.0f);
         values.assign(batch_size, output_value);
+        const int call = static_cast<int>(batch_sizes.size());
+        if (truncate_policy_on_call == call && !policies.empty()) {
+            policies.pop_back();
+        }
+        if (truncate_values_on_call == call && !values.empty()) {
+            values.pop_back();
+        }
     }
 };

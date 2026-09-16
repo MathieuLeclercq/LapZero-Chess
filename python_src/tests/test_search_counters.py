@@ -86,6 +86,9 @@ def test_les_compteurs_partent_a_zero(evaluateur):
     assert c.tt_context_rejects == 0
     assert c.tt_history_rejects == 0
     assert c.terminal_hits == 0
+    assert c.waves == 0
+    assert c.leaf_collisions == 0
+    assert c.completed_simulations == 0
 
 
 def test_une_recherche_declenche_des_inferences(evaluateur):
@@ -163,7 +166,8 @@ def test_reset_counters_remet_tout_a_zero(evaluateur):
     assert (c.nn_calls, c.nn_batches, c.tt_hits, c.tt_misses,
             c.tt_position_matches, c.tt_rule50_rejects,
             c.tt_context_rejects, c.tt_history_rejects,
-            c.terminal_hits) == (0, 0, 0, 0, 0, 0, 0, 0, 0)
+            c.terminal_hits, c.waves, c.leaf_collisions,
+            c.completed_simulations) == (0,) * 12
 
 
 def test_les_compteurs_sont_par_instance(evaluateur):

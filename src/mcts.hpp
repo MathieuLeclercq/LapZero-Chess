@@ -67,6 +67,9 @@ struct SearchCounters {
     uint64_t tt_context_rejects = 0;
     uint64_t tt_history_rejects = 0;
     uint64_t terminal_hits = 0;
+    uint64_t waves = 0;
+    uint64_t leaf_collisions = 0;
+    uint64_t completed_simulations = 0;
 };
 
 
@@ -97,6 +100,8 @@ private:
     std::mt19937 m_noise_rng;
     bool m_timing_enabled = false;
     SearchTiming m_last_timing;
+    std::unique_ptr<SearchExecutor> m_search_executor;
+    std::vector<WorkerContext> m_worker_contexts;
 
     // Atomiques parce que le self-play appelle advance_to_leaf depuis une region
     // OpenMP a 8 fils sur une instance de MCTS partagee
@@ -112,19 +117,24 @@ private:
     std::atomic<uint64_t> m_tt_context_rejects{ 0 };
     std::atomic<uint64_t> m_tt_history_rejects{ 0 };
     std::atomic<uint64_t> m_terminal_hits{ 0 };
+    std::atomic<uint64_t> m_waves{ 0 };
+    std::atomic<uint64_t> m_leaf_collisions{ 0 };
+    std::atomic<uint64_t> m_completed_simulations{ 0 };
 
 public:
     MCTS(Evaluator* evaluator, size_t tt_size = DEFAULT_TT_SIZE,
          int cache_history_depth = DEFAULT_CACHE_HISTORY_DEPTH);
+    ~MCTS();
 
     void step_analysis(Chessboard& board, int num_simulations, float c_puct,
-                       int batch_size = 0);
+                       int batch_size = 0, int worker_count = 1);
     void reset_analysis();
     void update_root(int move_idx);
     float get_root_q() const;
     std::vector<MoveStats> get_analysis_results() const;
     std::vector<float> mcts_search(Chessboard& board, int num_simulations, float c_puct,
-                                   bool add_dirichlet, int batch_size = 0);
+                                   bool add_dirichlet, int batch_size = 0,
+                                   int worker_count = 1);
     float expand_node_single(MCTSNode* node, Chessboard& board,
                              SearchTiming* timing = nullptr);
     bool apply_move_by_index(Chessboard& board, int idx);
@@ -182,5 +192,8 @@ private:
     void run_search(MCTSNode* root, Chessboard& board, int simulations,
                     float c_puct, int batch_size,
                     SearchTiming* timing = nullptr);
+    void run_search_waves(MCTSNode* root, const Chessboard& board,
+                          int simulations, float c_puct, int batch_size,
+                          int worker_count, SearchTiming* timing = nullptr);
 
 };
