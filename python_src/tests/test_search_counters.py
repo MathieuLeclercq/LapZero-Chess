@@ -5,6 +5,7 @@ ne sont pas observables de l'exterieur : le moteur n'avait aucune
 instrumentation.
 """
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -26,18 +27,49 @@ TAILLE_TT = 8192
 
 
 @pytest.fixture(scope="module")
-def evaluateur(tmp_path_factory):
+def modele_onnx(tmp_path_factory):
     import puzzle_bench
 
     chemin, _ = puzzle_bench.resoudre_modele(
         CHECKPOINT, tmp_path_factory.mktemp("onnx"))
-    return chess_engine.ONNXEvaluator(str(chemin), False)
+    return chemin
+
+
+@pytest.fixture(scope="module")
+def evaluateur(modele_onnx):
+    return chess_engine.ONNXEvaluator(str(modele_onnx), False)
 
 
 def _plateau():
     board = chess_engine.Chessboard()
     board.set_startup_pieces()
     return board
+
+
+def test_le_mcts_python_garde_l_evaluateur_en_vie(modele_onnx):
+    code = r"""
+import gc
+import os
+import sys
+os.add_dll_directory(os.getcwd())
+import chess_engine
+
+def construire_mcts():
+    evaluator = chess_engine.ONNXEvaluator(sys.argv[1], False)
+    return chess_engine.MCTS(evaluator, 8192, 0)
+
+mcts = construire_mcts()
+gc.collect()
+board = chess_engine.Chessboard()
+board.set_startup_pieces()
+mcts.step_analysis(board, 2, 1.4)
+"""
+    resultat = subprocess.run(
+        [sys.executable, "-c", code, str(modele_onnx)],
+        cwd=RACINE / "python_src", capture_output=True, text=True,
+        timeout=60, check=False)
+
+    assert resultat.returncode == 0, resultat.stderr
 
 
 def test_les_compteurs_partent_a_zero(evaluateur):

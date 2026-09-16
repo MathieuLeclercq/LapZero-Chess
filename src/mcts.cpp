@@ -55,7 +55,7 @@ std::unique_ptr<MCTSNode> MCTSNode::extract_child(int idx) {
 // ============================================================
 //                     MCTS
 // ============================================================
-MCTS::MCTS(ONNXEvaluator* evaluator, size_t tt_size,
+MCTS::MCTS(Evaluator* evaluator, size_t tt_size,
            int cache_history_depth) :
         m_evaluator(evaluator), 
         m_tt_size(tt_size),

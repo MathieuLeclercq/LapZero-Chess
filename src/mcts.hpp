@@ -1,7 +1,6 @@
 #pragma once
 
 #include "chessboard.hpp"
-#include <onnxruntime_cxx_api.h>
 #include <vector>
 #include <memory>
 #include <utility>
@@ -12,7 +11,7 @@
 #include <atomic>
 #include <string>
 
-#include "onnx_evaluator.hpp"
+#include "evaluator.hpp"
 #include "search_timing.hpp"
 
 struct MCTSNode {
@@ -105,7 +104,6 @@ struct TreeReport {
 
 class MCTS {
 private:
-    Ort::AllocatorWithDefaultOptions allocator;
     std::vector<TTEntry> transposition_table;
     static constexpr size_t DEFAULT_TT_SIZE = 2097143;
     size_t m_tt_size;
@@ -114,7 +112,7 @@ private:
     std::vector<float> m_eval_policy;
     std::unique_ptr<MCTSNode> m_analysis_root;
     mutable std::mutex m_mutex;
-    ONNXEvaluator* m_evaluator;
+    Evaluator* m_evaluator;
     std::mt19937 m_noise_rng;
     bool m_timing_enabled = false;
     SearchTiming m_last_timing;
@@ -135,7 +133,7 @@ private:
     std::atomic<uint64_t> m_terminal_hits{ 0 };
 
 public:
-    MCTS(ONNXEvaluator* evaluator, size_t tt_size = DEFAULT_TT_SIZE,
+    MCTS(Evaluator* evaluator, size_t tt_size = DEFAULT_TT_SIZE,
          int cache_history_depth = DEFAULT_CACHE_HISTORY_DEPTH);
 
     void step_analysis(Chessboard& board, int num_simulations, float c_puct,

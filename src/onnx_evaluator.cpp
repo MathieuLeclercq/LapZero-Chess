@@ -21,15 +21,6 @@ ONNXEvaluator::ONNXEvaluator(const std::string& model_path, bool use_gpu)
     session = std::make_unique<Ort::Session>(env, w_model_path.c_str(), session_options);
 }
 
-void ONNXEvaluator::evaluate(
-    const std::vector<float>& input_tensor, 
-    std::vector<float>& policy, 
-    float& value) {
-    std::vector<float> values(1);
-    evaluate_batch(input_tensor, policy, values, 1);
-    value = values[0];
-}
-
 void ONNXEvaluator::evaluate_batch(
     const std::vector<float>& input_tensor, 
     std::vector<float>& policies, 

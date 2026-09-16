@@ -71,9 +71,40 @@ target_link_libraries(chess_perft PRIVATE chess_core)
 # ==========================================
 # 2 ter. Tests unitaires C++ du MCTS
 # ==========================================
+function(copy_onnx_runtime target_name)
+    add_custom_command(TARGET ${target_name} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${ONNXRUNTIME_DLL} $<TARGET_FILE_DIR:${target_name}>)
+endfunction()
+
 add_executable(search_timing_tests tests/cpp/test_search_timing.cpp)
 target_link_libraries(search_timing_tests PRIVATE chess_core)
+copy_onnx_runtime(search_timing_tests)
 add_test(NAME search_timing COMMAND search_timing_tests)
+
+add_executable(evaluator_contract_tests tests/cpp/test_evaluator.cpp)
+target_link_libraries(evaluator_contract_tests PRIVATE chess_core)
+copy_onnx_runtime(evaluator_contract_tests)
+add_test(NAME evaluator_contract COMMAND evaluator_contract_tests)
+
+add_executable(board_copy_tests tests/cpp/test_board_copy.cpp)
+target_link_libraries(board_copy_tests PRIVATE chess_core)
+copy_onnx_runtime(board_copy_tests)
+add_test(NAME board_copy COMMAND board_copy_tests)
+
+add_executable(selfplay_phase_bench tests/cpp/selfplay_phase_bench.cpp)
+target_link_libraries(selfplay_phase_bench PRIVATE chess_core)
+copy_onnx_runtime(selfplay_phase_bench)
+add_custom_command(TARGET selfplay_phase_bench POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${ONNXRUNTIME_SHARED_DLL} $<TARGET_FILE_DIR:selfplay_phase_bench>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${ONNXRUNTIME_CUDA_DLL} $<TARGET_FILE_DIR:selfplay_phase_bench>)
+add_test(NAME selfplay_phase_bench_smoke
+    COMMAND selfplay_phase_bench --fake --repetitions 1 --rounds 2)
+set_tests_properties(selfplay_phase_bench_smoke PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "\\\"nn_calls\\\": 16, \\\"nn_batches\\\": 2, \\\"tt_hits\\\": [0-9]+, \\\"tt_misses\\\": [0-9]+, \\\"tt_position_matches\\\":")
 
 # ==========================================
 # 3. Configuration Python & Pybind11

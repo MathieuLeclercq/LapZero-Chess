@@ -196,9 +196,14 @@ PYBIND11_MODULE(chess_engine, m) {
         .def(py::init<const std::string&, bool>(), py::arg("model_path"), py::arg("use_gpu") = false);
 
     py::class_<MCTS>(m, "MCTS")
-        .def(py::init<ONNXEvaluator*, size_t, int>(),
+        .def(py::init([](ONNXEvaluator* evaluator, size_t tt_size,
+                        int cache_history_depth) {
+                return std::make_unique<MCTS>(
+                    evaluator, tt_size, cache_history_depth);
+            }),
             py::arg("evaluator"), py::arg("tt_size") = 2097143,
-            py::arg("cache_history_depth") = DEFAULT_CACHE_HISTORY_DEPTH)
+            py::arg("cache_history_depth") = DEFAULT_CACHE_HISTORY_DEPTH,
+            py::keep_alive<1, 2>())
         .def("mcts_search", &MCTS::mcts_search,
             py::call_guard<py::gil_scoped_release>(),
             py::arg("board"), py::arg("num_simulations"), py::arg("c_puct") = 1.4f,
