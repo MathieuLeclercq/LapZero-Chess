@@ -43,6 +43,7 @@ add_library(chess_core STATIC
     src/mcts_observe.cpp
     src/mcts_batch.cpp
     src/mcts_reservation.cpp
+    src/mcts_wave.cpp
     src/search_executor.cpp
     src/search_timing.cpp
     src/zobrist.cpp
@@ -116,6 +117,12 @@ target_link_libraries(search_executor_tests PRIVATE chess_core Threads::Threads)
 copy_onnx_runtime(search_executor_tests)
 add_test(NAME search_executor COMMAND search_executor_tests)
 set_tests_properties(search_executor PROPERTIES TIMEOUT 30)
+
+add_executable(wave_collection_tests tests/cpp/test_wave_collection.cpp)
+target_link_libraries(wave_collection_tests PRIVATE chess_core Threads::Threads)
+copy_onnx_runtime(wave_collection_tests)
+add_test(NAME wave_collection COMMAND wave_collection_tests)
+set_tests_properties(wave_collection PROPERTIES TIMEOUT 30)
 
 add_executable(selfplay_phase_bench tests/cpp/selfplay_phase_bench.cpp)
 target_link_libraries(selfplay_phase_bench PRIVATE chess_core)

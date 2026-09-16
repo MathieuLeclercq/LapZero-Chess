@@ -13,7 +13,11 @@
 #include "evaluation_cache.hpp"
 #include "evaluator.hpp"
 #include "mcts_reservation.hpp"
+#include "mcts_wave.hpp"
 #include "search_timing.hpp"
+
+class SearchExecutor;
+class MCTSTestAccess;
 
 struct MCTSNode {
     int visit_count;
@@ -79,6 +83,8 @@ struct TreeReport {
 
 
 class MCTS {
+    friend class MCTSTestAccess;
+
 private:
     static constexpr size_t DEFAULT_TT_SIZE = 2097143;
     EvaluationCache m_cache;
@@ -159,6 +165,16 @@ private:
                                     const float* policy, float value,
                                     PathReservation& reservation,
                                     SearchTiming* timing = nullptr);
+    LeafWork collect_wave_leaf(
+        MCTSNode* root, WorkerContext& context, float c_puct,
+        const std::atomic<bool>& cancelled,
+        const WaveTestHooks* hooks = nullptr);
+    std::vector<LeafWork> collect_wave(
+        MCTSNode* root, float c_puct, std::size_t slots,
+        std::size_t worker_count, SearchExecutor& executor,
+        std::vector<WorkerContext>& contexts,
+        const std::atomic<bool>& cancelled,
+        const WaveTestHooks* hooks = nullptr);
 
     // Noyau unique de recherche, defini dans mcts_batch.cpp.
     // batch_size == 0 : boucle sequentielle historique, conservee telle quelle.
