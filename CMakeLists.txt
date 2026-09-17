@@ -130,6 +130,22 @@ copy_onnx_runtime(wave_search_tests)
 add_test(NAME wave_search COMMAND wave_search_tests)
 set_tests_properties(wave_search PROPERTIES TIMEOUT 30)
 
+add_executable(multicore_stress_tests tests/cpp/test_multicore_stress.cpp)
+target_link_libraries(multicore_stress_tests PRIVATE chess_core Threads::Threads)
+copy_onnx_runtime(multicore_stress_tests)
+add_test(NAME multicore_stress COMMAND multicore_stress_tests)
+set_tests_properties(multicore_stress PROPERTIES TIMEOUT 180)
+
+add_executable(selfplay_shared_core_tests
+    tests/cpp/test_selfplay_shared_core.cpp)
+target_link_libraries(selfplay_shared_core_tests PRIVATE chess_core)
+copy_onnx_runtime(selfplay_shared_core_tests)
+add_test(NAME selfplay_shared_core COMMAND selfplay_shared_core_tests)
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/selfplay_test_workdir")
+set_tests_properties(selfplay_shared_core PROPERTIES
+    TIMEOUT 180
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/selfplay_test_workdir")
+
 add_executable(selfplay_phase_bench tests/cpp/selfplay_phase_bench.cpp)
 target_link_libraries(selfplay_phase_bench PRIVATE chess_core)
 copy_onnx_runtime(selfplay_phase_bench)

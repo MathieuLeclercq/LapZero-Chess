@@ -10,7 +10,7 @@
 #include <piece.hpp>
 
 SelfPlayManager::SelfPlayManager(
-    ONNXEvaluator* evaluator,
+    Evaluator* evaluator,
     int num_concurrent_games,
     int slow_sims, int fast_sims, float slow_ratio,
     size_t tt_size)
@@ -125,6 +125,8 @@ void SelfPlayManager::execute_gpu_batch() {
     };
 
     try {
+        m_batch_input.resize(
+            static_cast<std::size_t>(current_batch_size) * 119 * 64);
         m_evaluator->evaluate_batch(
             m_batch_input, m_batch_policies, m_batch_values,
             current_batch_size);
@@ -433,6 +435,8 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
         // ==========================================================
         // PHASE 3 : Séquentiel — Fusion et batch GPU
         // ==========================================================
+        m_batch_input.resize(
+            static_cast<std::size_t>(m_num_concurrent_games) * 119 * 64);
         for (auto& buf : thread_buffers) {
             for (size_t j = 0; j < buf.leaves.size(); ++j) {
                 if ((int)m_waiting_leaves.size() >= m_num_concurrent_games) break;

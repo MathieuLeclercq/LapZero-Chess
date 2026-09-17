@@ -4,8 +4,8 @@
 #include <random>
 #include <string>
 #include "chessboard.hpp"
+#include "evaluator.hpp"
 #include "mcts.hpp"
-#include "onnx_evaluator.hpp"
 
 
 struct GameResult {
@@ -49,7 +49,7 @@ private:
     std::vector<int> m_sims_target;  // sims à faire pour le coup en cours
     std::vector<char> m_is_slow_move;
 
-    ONNXEvaluator* m_evaluator;
+    Evaluator* m_evaluator;
 
     // L'état complet des parties en cours
     std::vector<Chessboard> m_boards;
@@ -93,7 +93,7 @@ private:
 
 
 public:
-    SelfPlayManager(ONNXEvaluator* evaluator, int num_concurrent_games, 
+    SelfPlayManager(Evaluator* evaluator, int num_concurrent_games,
                     int slow_sims, int fast_sims, float slow_ratio,
                     size_t tt_size = 2097143);
     std::vector<GameResult> generate_games(int total_games_to_play);
