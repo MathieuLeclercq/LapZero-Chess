@@ -104,6 +104,24 @@ void test_probe_is_a_stable_snapshot() {
                  "replacement entry is incomplete");
 }
 
+void test_clear_forgets_stored_entries_but_not_snapshots() {
+    EvaluationCache cache(5, 0);
+    const std::vector<int> legal = {5, 17, 42};
+    const auto policy = policy_with(legal, 0.30f);
+    const EvaluationCacheKey key = key_for_hash(9);
+    cache.store(key, legal, policy.data(), 0.75f);
+    const TTProbe saved = cache.probe(key);
+    require_test(saved.status == TTProbeStatus::HIT,
+                 "store then probe did not hit before clear");
+
+    cache.clear();
+
+    require_test(cache.probe(key).status == TTProbeStatus::MISS,
+                 "clear left an old hit");
+    require_test(probe_matches(saved, legal, policy, 0.75f),
+                 "snapshot taken before clear was invalidated");
+}
+
 void test_concurrent_collisions_never_mix_entries() {
     EvaluationCache cache(3, 0);
     const std::vector<int> legal = {5, 17, 42, 99};
@@ -219,6 +237,7 @@ int main() {
     try {
         test_size_and_stripe_count_are_bounded();
         test_probe_is_a_stable_snapshot();
+        test_clear_forgets_stored_entries_but_not_snapshots();
         test_concurrent_collisions_never_mix_entries();
         test_rejection_order_and_contexts();
         test_legacy_mode_ignores_context_and_policy_is_truncated();

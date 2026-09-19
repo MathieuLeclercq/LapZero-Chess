@@ -131,6 +131,8 @@ class PuzzleMeasure:
     part_visites_correct: float
     duree_s: float
     erreur: str
+    simulations_recherche: int = 0
+    depassement_s: float = 0.0
 
 
 def _mesure(puzzle: BenchPuzzle, duree: float, erreur: str = "", *,
@@ -138,7 +140,8 @@ def _mesure(puzzle: BenchPuzzle, duree: float, erreur: str = "", *,
             coup_reseau: str = "", reussi_reseau: bool = False,
             p_correct: float = 0.0, rang: int = 0, value: float = 0.0,
             coup_recherche: str = "", reussi_recherche: bool = False,
-            part_visites: float = 0.0) -> PuzzleMeasure:
+            part_visites: float = 0.0, simulations_recherche: int = 0,
+            depassement_s: float = 0.0) -> PuzzleMeasure:
     return PuzzleMeasure(
         ligne=puzzle.ligne, rating=puzzle.rating, themes=puzzle.themes,
         plies_historique=len(puzzle.coups_uci),
@@ -148,7 +151,8 @@ def _mesure(puzzle: BenchPuzzle, duree: float, erreur: str = "", *,
         value_reseau=float(value),
         coup_recherche=coup_recherche, reussi_recherche=reussi_recherche,
         part_visites_correct=float(part_visites),
-        duree_s=duree, erreur=erreur,
+        duree_s=duree, simulations_recherche=simulations_recherche,
+        depassement_s=float(depassement_s), erreur=erreur,
     )
 
 
@@ -194,7 +198,13 @@ def measure_puzzle(puzzle: BenchPuzzle, policy_fn, search_fn,
     idx_reseau = max(probs, key=probs.get)
 
     # --- Recherche : le meme reseau avec le MCTS ---
-    pi = search_fn(board)
+    resultat = search_fn(board)
+    # Le mode temps renvoie aussi le bilan de la fenetre (simulations
+    # terminees, depassement du dernier appel complet).
+    if isinstance(resultat, tuple):
+        pi, bilan = resultat
+    else:
+        pi, bilan = resultat, {}
     idx_recherche = max(range(TAILLE_POLICY), key=lambda i: pi[i])
 
     return _mesure(
@@ -205,7 +215,9 @@ def measure_puzzle(puzzle: BenchPuzzle, policy_fn, search_fn,
         p_correct=p_correct, rang=rang, value=value,
         coup_recherche=index_to_uci(board, idx_recherche),
         reussi_recherche=(idx_recherche == idx_solution),
-        part_visites=float(pi[idx_solution]))
+        part_visites=float(pi[idx_solution]),
+        simulations_recherche=int(bilan.get("simulations", 0)),
+        depassement_s=float(bilan.get("depassement_s", 0.0)))
 
 
 def wilson(succes: int, total: int, z: float = 1.96) -> tuple[float, float]:
@@ -349,6 +361,8 @@ def format_report(stats: BenchStats, contexte: dict) -> str:
     deux points d'ecart se liraient comme un ecart.
     """
     bras = "sans historique" if contexte["sans_historique"] else "avec historique"
+    budget = contexte.get("budget_label") or (
+        f"{contexte.get('simulations')} simulations")
 
     lignes = [
         "# Banc de puzzles : resultats",
@@ -356,10 +370,12 @@ def format_report(stats: BenchStats, contexte: dict) -> str:
         f"Modele : `{contexte['modele']}`, iteration {contexte['iteration']}, "
         f"global_step {contexte['global_step']}",
         f"Banc : `{contexte['fichier_banc']}`, bras {bras}",
-        f"Recherche : {contexte['simulations']} simulations, "
+        f"Recherche : {budget}, "
         f"c_puct {contexte['c_puct']}, batch {contexte.get('batch_size', 0)}, "
-        f"TT {('legacy' if contexte.get('cache_history_depth', 1) == -1 else 'h' + str(contexte.get('cache_history_depth', 1)))}, "
-        f"{contexte['travailleurs']} travailleurs",
+        f"TT {('legacy' if contexte.get('cache_history_depth', 0) == -1 else 'h' + str(contexte.get('cache_history_depth', 0)))}, "
+        f"{contexte['travailleurs']} travailleurs, "
+        f"{contexte.get('search_workers', 1)} workers de recherche, "
+        f"{contexte.get('accelerateur', 'CPU')}",
         f"Duree : {contexte['duree_totale_s'] / 60.0:.1f} min",
         "",
         "Seul le PREMIER coup est score, celui ou il y a une tactique a trouver.",

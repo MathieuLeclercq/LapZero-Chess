@@ -121,8 +121,9 @@ def test_la_recherche_renvoie_une_distribution_de_visites(modele):
     assert all(pi[i] == 0.0 for i in range(4672) if i not in legaux)
 
 
-def test_la_recherche_transmet_la_taille_de_batch(monkeypatch):
-    """Le banc doit exercer le chemin batche, pas seulement l'exposer en CLI."""
+def test_la_recherche_transmet_batch_et_workers(monkeypatch):
+    """Le banc doit exercer le chemin batche et multicœur, pas seulement les
+    exposer en CLI."""
     import puzzle_bench
 
     appels = []
@@ -133,18 +134,20 @@ def test_la_recherche_transmet_la_taille_de_batch(monkeypatch):
             appels.append(("constructeur", cache_history_depth))
 
         def mcts_search(self, board, simulations, c_puct, bruit,
-                        batch_size):
-            appels.append((board, simulations, c_puct, bruit, batch_size))
+                        batch_size, worker_count):
+            appels.append((board, simulations, c_puct, bruit, batch_size,
+                           worker_count))
             return [1.0]
 
     monkeypatch.setattr(puzzle_bench.chess_engine, "MCTS", FauxMCTS)
     plateau = object()
 
     assert puzzle_bench.faire_search_fn(
-        object(), 700, 1.4, 8, cache_history_depth=3)(plateau) == [1.0]
+        object(), 700, 1.4, 8, cache_history_depth=0,
+        worker_count=4)(plateau) == [1.0]
     assert appels == [
-        ("constructeur", 3),
-        (plateau, 700, 1.4, False, 8),
+        ("constructeur", 0),
+        (plateau, 700, 1.4, False, 8, 4),
     ]
 
 
@@ -161,8 +164,9 @@ def test_main_de_bout_en_bout_sur_un_petit_echantillon(tmp_path, monkeypatch):
     """Execute main() sur 6 puzzles et 8 simulations : verifie l'assemblage,
     pas la qualite du modele."""
     import csv as csv_mod
-
+    import json
     import puzzle_bench
+    from puzzle_bench import chemin_sidecar
 
     sortie_csv = tmp_path / "res.csv"
     sortie_rapport = tmp_path / "rapport.md"
@@ -205,6 +209,201 @@ def test_main_de_bout_en_bout_sur_un_petit_echantillon(tmp_path, monkeypatch):
     assert "Banc de puzzles" in rapport
     assert "McNemar" in rapport
     assert "h3" in rapport
+
+    # Le sidecar porte le contexte complet, sans quoi deux campagnes ne
+    # seraient pas comparables sans ambiguite.
+    sidecar = json.loads(
+        chemin_sidecar(sortie_csv).read_text(encoding="utf-8"))
+    assert sidecar["search_workers"] == 1
+    assert sidecar["accelerateur"] == "CPU"
+    assert sidecar["critere"] == "premier_coup_recherche"
+    assert len(sidecar["modele_sha256"]) == 64
+    assert len(sidecar["banc_sha256"]) == 64
+    assert sidecar["simulations"] == 8
+
+
+def _horloge_factice(pas_s: float = 0.02):
+    temps = [0.0]
+
+    def horloge():
+        valeur = temps[0]
+        temps[0] += pas_s
+        return valeur
+
+    return horloge
+
+
+def test_faire_search_fn_en_mode_temps_rapporte_le_bilan(monkeypatch):
+    """Le mode temps avance par tranches, garde le meme MCTS entre deux
+    puzzles, et rapporte les simulations terminees et le depassement du
+    dernier appel complet."""
+    import puzzle_bench
+
+    instances = []
+
+    class FauxMCTS:
+        def __init__(self, evaluateur, taille_tt, depth):
+            instances.append(self)
+            self.sims = 0
+            self.clears = 0
+
+        def reset_analysis(self):
+            self.sims = 0
+
+        def clear_evaluation_cache(self):
+            self.clears += 1
+
+        def reset_counters(self):
+            self.sims = 0
+
+        def step_analysis(self, board, simulations, c_puct, batch_size,
+                          worker_count):
+            self.sims += simulations
+
+        def get_analysis_results(self):
+            return [type("S", (), dict(move_idx=1, visits=self.sims))()]
+
+        def get_counters(self):
+            return type("C", (), dict(completed_simulations=self.sims))()
+
+    monkeypatch.setattr(puzzle_bench.chess_engine, "MCTS", FauxMCTS)
+    search_fn = puzzle_bench.faire_search_fn(
+        object(), 100, 1.4, 8, cache_history_depth=0, worker_count=4,
+        search_seconds=0.05, horloge=_horloge_factice())
+
+    pi, bilan = search_fn(object())
+
+    assert bilan["simulations"] == 24
+    assert bilan["depassement_s"] == pytest.approx(0.01)
+    assert sum(pi) == pytest.approx(1.0)
+    assert pi[1] == pytest.approx(1.0)
+
+    # Deuxieme puzzle dans le meme processus : l'objet persiste, arbre et TT
+    # sont remis a froid hors fenetre.
+    search_fn(object())
+    assert len(instances) == 1
+    assert instances[0].clears == 2
+
+
+def test_main_transmet_search_workers_sans_processus_supplementaires(
+        tmp_path, monkeypatch):
+    """Huit workers de recherche sont des threads C++ d'un seul processus :
+    ils ne doivent pas devenir huit processus Python."""
+    import json
+    import multiprocessing
+    import puzzle_bench
+
+    onnx = tmp_path / "modele.onnx"
+    onnx.write_bytes(b"onnx factice")
+    csv = tmp_path / "res.csv"
+    rapport = tmp_path / "rapport.md"
+    processus = []
+
+    class FauxPool:
+        def __init__(self, processes, initializer=None, initargs=()):
+            processus.append(processes)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def imap_unordered(self, fonction, lots):
+            return iter(())
+
+    monkeypatch.setattr(multiprocessing, "Pool", FauxPool)
+    monkeypatch.setattr(puzzle_bench, "resoudre_modele",
+                        lambda *args: (onnx, {}))
+    monkeypatch.setattr(sys, "argv", [
+        "puzzle_bench.py", "--model", str(onnx), "--banc", str(BANC),
+        "--limite", "2", "--simulations", "8", "--travailleurs", "1",
+        "--batch-size", "8", "--search-workers", "8",
+        "--out-csv", str(csv), "--out-rapport", str(rapport),
+    ])
+
+    assert puzzle_bench.main() == 0
+    assert processus == [1]
+    assert "8 workers de recherche" in rapport.read_text(encoding="utf-8")
+    from puzzle_bench import chemin_sidecar
+    sidecar = json.loads(chemin_sidecar(csv).read_text(encoding="utf-8"))
+    assert sidecar["search_workers"] == 8
+    assert sidecar["cache_history_depth"] == 0
+
+
+def test_main_en_gpu_reste_dans_un_seul_processus(tmp_path, monkeypatch):
+    """La jambe GPU ne cree aucun Pool et passe les workers de recherche a
+    l'initialiseur unique."""
+    import multiprocessing
+    import puzzle_bench
+
+    onnx = tmp_path / "modele.onnx"
+    onnx.write_bytes(b"onnx factice")
+    rapport = tmp_path / "rapport.md"
+    appels = []
+
+    def pool_interdit(*args, **kwargs):
+        raise AssertionError("aucun Pool ne doit etre cree en mode GPU")
+
+    def faux_initialiser_gpu(*args, **kwargs):
+        appels.append((args, kwargs))
+
+    monkeypatch.setattr(multiprocessing, "Pool", pool_interdit)
+    monkeypatch.setattr(puzzle_bench, "initialiser_gpu", faux_initialiser_gpu)
+    monkeypatch.setattr(puzzle_bench, "traiter_lot", lambda lot: [])
+    monkeypatch.setattr(puzzle_bench, "resoudre_modele",
+                        lambda *args: (onnx, {}))
+    monkeypatch.setattr(sys, "argv", [
+        "puzzle_bench.py", "--model", str(onnx), "--banc", str(BANC),
+        "--limite", "2", "--simulations", "8", "--travailleurs", "1",
+        "--batch-size", "8", "--search-workers", "4", "--gpu",
+        "--out-csv", str(tmp_path / "r.csv"), "--out-rapport", str(rapport),
+    ])
+
+    assert puzzle_bench.main() == 0
+    assert len(appels) == 1
+    args, _kwargs = appels[0]
+    assert args[0] == str(onnx)
+    assert args[6] == 4          # search_workers
+    assert args[7] is None       # mode simulations fixes
+    assert "GPU" in rapport.read_text(encoding="utf-8")
+
+
+def test_main_refuse_le_gpu_avec_plusieurs_processus(tmp_path, monkeypatch):
+    import puzzle_bench
+
+    onnx = tmp_path / "modele.onnx"
+    onnx.write_bytes(b"onnx factice")
+    monkeypatch.setattr(puzzle_bench, "resoudre_modele",
+                        lambda *args: (onnx, {}))
+    monkeypatch.setattr(sys, "argv", [
+        "puzzle_bench.py", "--model", str(onnx), "--banc", str(BANC),
+        "--gpu", "--travailleurs", "2",
+        "--out-csv", str(tmp_path / "r.csv"),
+        "--out-rapport", str(tmp_path / "r.md"),
+    ])
+
+    with pytest.raises(SystemExit):
+        puzzle_bench.main()
+
+
+def test_main_refuse_simulations_explicites_et_mode_temps(
+        tmp_path, monkeypatch):
+    import puzzle_bench
+
+    onnx = tmp_path / "modele.onnx"
+    onnx.write_bytes(b"onnx factice")
+    monkeypatch.setattr(puzzle_bench, "resoudre_modele",
+                        lambda *args: (onnx, {}))
+    monkeypatch.setattr(sys, "argv", [
+        "puzzle_bench.py", "--model", str(onnx), "--banc", str(BANC),
+        "--simulations", "32", "--search-seconds", "1.5",
+        "--out-csv", str(tmp_path / "r.csv"),
+        "--out-rapport", str(tmp_path / "r.md"),
+    ])
+
+    with pytest.raises(SystemExit):
+        puzzle_bench.main()
 
 
 def test_main_refuse_un_fichier_de_banc_absent(tmp_path, monkeypatch):

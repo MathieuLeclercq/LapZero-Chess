@@ -517,6 +517,11 @@ void MCTS::reset_analysis() {
     m_analysis_root.reset();
 }
 
+void MCTS::clear_evaluation_cache() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_cache.clear();
+}
+
 void MCTS::update_root(int move_idx) {
     std::lock_guard<std::mutex> lock(m_mutex);
 

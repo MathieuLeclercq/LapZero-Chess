@@ -188,6 +188,10 @@ class GameState:
 class MCTS:
     def __init__(self, evaluator: ONNXEvaluator, tt_size: typing.SupportsInt | typing.SupportsIndex = 2097143, cache_history_depth: typing.SupportsInt | typing.SupportsIndex = 0) -> None:
         ...
+    def clear_evaluation_cache(self) -> None:
+        """
+        Remet la table de transposition a froid, au repos seulement
+        """
     def get_analysis_results(self) -> list[MoveStats]:
         ...
     def get_counters(self) -> SearchCounters:

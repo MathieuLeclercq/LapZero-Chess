@@ -198,3 +198,22 @@ def test_les_chronometrages_sont_optionnels_et_couvrent_l_inference(evaluateur):
     assert enabled.selection_ns > 0
     assert enabled.evaluator_ns > 0
     assert enabled.wall_ns >= enabled.evaluator_ns
+
+
+def test_clear_evaluation_cache_rend_un_ancien_hit_miss(evaluateur):
+    """Le pool chaud du banc remet la TT a froid entre deux mesures, sans
+    recreer le MCTS : sans clear, la seconde mesure serait un banc de hits."""
+    mcts = chess_engine.MCTS(evaluateur, TAILLE_TT, 0)
+    board = _plateau()
+
+    mcts.mcts_search(board, 1, 1.4, False, 8)
+    mcts.reset_counters()
+    mcts.mcts_search(board, 1, 1.4, False, 8)
+    assert mcts.get_counters().tt_position_matches > 0, \
+        "la fixture ne produit aucun hit : le clear ne prouverait rien"
+
+    mcts.reset_counters()
+    mcts.clear_evaluation_cache()
+    mcts.mcts_search(board, 1, 1.4, False, 8)
+
+    assert mcts.get_counters().tt_position_matches == 0

@@ -165,6 +165,22 @@ def test_measure_puzzle_compte_une_reussite_au_premier_coup():
     assert mesure.nb_coups_legaux > 0
 
 
+def test_measure_puzzle_accepte_le_retour_du_mode_temps():
+    """En mode temps, search_fn renvoie aussi le bilan de la fenetre : le
+    nombre de simulations terminees et le depassement du dernier appel."""
+    puzzle = _puzzle(["e2e4", "e7e5", "g1f3"], ["b8c6"])
+
+    def search_fn(board):
+        return (_visites_sur(board, "b8c6"),
+                {"simulations": 24, "depassement_s": 0.012})
+
+    mesure = measure_puzzle(puzzle, _faux_reseau("b8c6"), search_fn)
+
+    assert mesure.reussi_recherche is True
+    assert mesure.simulations_recherche == 24
+    assert mesure.depassement_s == pytest.approx(0.012)
+
+
 def test_measure_puzzle_compte_un_echec_et_le_rang_du_bon_coup():
     puzzle = _puzzle(["e2e4", "e7e5", "g1f3"], ["b8c6"])
 

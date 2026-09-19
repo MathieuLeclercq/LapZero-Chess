@@ -223,6 +223,9 @@ PYBIND11_MODULE(chess_engine, m) {
             py::arg("batch_size") = 0, py::arg("worker_count") = 1)
         .def("reset_analysis", &MCTS::reset_analysis,
              py::call_guard<py::gil_scoped_release>())
+        .def("clear_evaluation_cache", &MCTS::clear_evaluation_cache,
+             py::call_guard<py::gil_scoped_release>(),
+             "Remet la table de transposition a froid, au repos seulement")
         .def("update_root", &MCTS::update_root,
              py::call_guard<py::gil_scoped_release>(),
              "Déplace la racine de l'arbre vers un coup spécifique")

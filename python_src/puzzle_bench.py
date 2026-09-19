@@ -6,8 +6,11 @@ rapport agrege. Le scoring vit dans bench_metrics, testable sans modele.
 Voir docs/superpowers/specs/2026-08-14-puzzle-bench-design.md
 """
 
+import hashlib
+import json
 import os
 import sys
+import time
 from pathlib import Path
 
 RACINE_PYTHON = Path(__file__).resolve().parent
@@ -22,6 +25,11 @@ import chess_engine
 # travailleurs pour 31,4 Gio de RAM. Une recherche ne stocke au plus que
 # `simulations` positions distinctes, donc 8192 entrees suffisent largement.
 TAILLE_TT = 8192
+
+# Granularite de la fenetre de temps : une tranche de 8 simulations, meme
+# valeur que le batch vise. Le dernier appel complet depasse la fenetre, c'est
+# ce depassement qui est enregistre.
+TRANCHE_SIMULATIONS = 8
 
 
 def exporter_onnx(chemin_pt: Path, sortie: Path) -> dict:
@@ -125,25 +133,98 @@ def faire_policy_fn(session):
 
 def faire_search_fn(evaluateur, simulations: int, c_puct: float,
                     batch_size: int = 0,
-                    cache_history_depth: int = 1):
+                    cache_history_depth: int = 0,
+                    worker_count: int = 1,
+                    search_seconds: float | None = None,
+                    horloge=time.perf_counter):
     """Renvoie search_fn(board) -> distribution de visites sur 4672.
 
-    Un MCTS neuf est cree pour chaque puzzle afin que les mesures restent
-    independantes entre les lignes du banc.
+    A simulations fixes, un MCTS neuf est cree pour chaque puzzle afin que les
+    mesures restent independantes entre les lignes du banc.
+
+    En mode temps (search_seconds), l'objet MCTS est conserve entre les puzzles
+    de ce processus : avant chaque fenetre, l'arbre d'analyse et la TT sont
+    remis a froid hors chronometrage, mais les threads du pool restent en
+    place. La recherche avance par tranches de TRANCHE_SIMULATIONS, puis
+    s'arrete apres la tranche qui franchit la fenetre. Le bilan renvoye
+    contient les simulations terminees et le depassement du dernier appel
+    complet.
     """
+    if search_seconds is None:
+        def search_fn(board):
+            mcts = chess_engine.MCTS(
+                evaluateur, TAILLE_TT, cache_history_depth)
+            return mcts.mcts_search(board, simulations, c_puct, False,
+                                    batch_size, worker_count)
+        return search_fn
+
+    etat = {"mcts": None}
+
     def search_fn(board):
-        mcts = chess_engine.MCTS(
-            evaluateur, TAILLE_TT, cache_history_depth)
-        return mcts.mcts_search(board, simulations, c_puct, False, batch_size)
+        from bench_metrics import TAILLE_POLICY
+
+        mcts = etat["mcts"]
+        if mcts is None:
+            mcts = chess_engine.MCTS(
+                evaluateur, TAILLE_TT, cache_history_depth)
+            etat["mcts"] = mcts
+        mcts.reset_analysis()
+        mcts.clear_evaluation_cache()
+        mcts.reset_counters()
+
+        debut = horloge()
+        while True:
+            mcts.step_analysis(board, TRANCHE_SIMULATIONS, c_puct,
+                               batch_size, worker_count)
+            ecoule = horloge() - debut
+            if ecoule >= search_seconds:
+                break
+
+        pi = [0.0] * TAILLE_POLICY
+        for stats in mcts.get_analysis_results():
+            pi[stats.move_idx] = float(stats.visits)
+        total = sum(pi)
+        if total > 0.0:
+            pi = [visite / total for visite in pi]
+
+        compteurs = mcts.get_counters()
+        return pi, {
+            "simulations": int(compteurs.completed_simulations),
+            "depassement_s": max(0.0, ecoule - search_seconds),
+        }
 
     return search_fn
+
+
+def sha256_fichier(chemin: Path) -> str:
+    h = hashlib.sha256()
+    with open(chemin, "rb") as f:
+        for bloc in iter(lambda: f.read(1 << 20), b""):
+            h.update(bloc)
+    return h.hexdigest()
+
+
+def chemin_sidecar(chemin_csv: Path) -> Path:
+    """Le contexte complet d'un CSV voyage a cote de lui, pas dedans.
+
+    Deux campagnes ne sont comparables que si modele, banc, budget et
+    politique de TT coincident : le sidecar porte ces hashes et ces reglages,
+    que le multicore_comparison refuse d'interpoler.
+    """
+    return chemin_csv.with_name(chemin_csv.stem + ".meta.json")
+
+
+def ecrire_sidecar(contexte: dict, chemin_csv: Path) -> None:
+    chemin_sidecar(chemin_csv).write_text(
+        json.dumps(contexte, indent=2, sort_keys=True), encoding="utf-8")
 
 
 CHAMPS_CSV = (
     "ligne", "rating", "themes", "plies_historique", "nb_coups_legaux",
     "coup_reseau", "reussi_reseau", "p_correct_reseau", "rang_correct_reseau",
     "value_reseau", "coup_recherche", "reussi_recherche",
-    "part_visites_correct", "duree_s", "erreur",
+    "part_visites_correct", "duree_s", "simulations_recherche",
+    "depassement_s", "erreur",
 )
 
 # Etat par processus travailleur : la session onnxruntime et l'evaluateur ne
@@ -151,9 +232,11 @@ CHAMPS_CSV = (
 _ETAT: dict = {}
 
 
-def initialiser_travailleur(onnx: str, simulations: int, c_puct: float,
+def initialiser_travailleur(onnx: str, simulations, c_puct: float,
                             sans_historique: bool, batch_size: int,
-                            cache_history_depth: int) -> None:
+                            cache_history_depth: int,
+                            search_workers: int = 1,
+                            search_seconds: float | None = None) -> None:
     import onnxruntime as ort
 
     options = ort.SessionOptions()
@@ -165,7 +248,28 @@ def initialiser_travailleur(onnx: str, simulations: int, c_puct: float,
     _ETAT["policy_fn"] = faire_policy_fn(session)
     _ETAT["search_fn"] = faire_search_fn(
         chess_engine.ONNXEvaluator(onnx, False), simulations, c_puct,
-        batch_size, cache_history_depth)
+        batch_size, cache_history_depth, search_workers, search_seconds)
+    _ETAT["sans_historique"] = sans_historique
+
+
+def initialiser_gpu(onnx: str, simulations, c_puct: float,
+                    sans_historique: bool, batch_size: int,
+                    cache_history_depth: int, search_workers: int,
+                    search_seconds: float | None) -> None:
+    """Un seul processus GPU : la policy brute garde sa session CPU, dont le
+    cout est exclu du temps de recherche."""
+    import onnxruntime as ort
+
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = 1
+    options.inter_op_num_threads = 1
+    session = ort.InferenceSession(onnx, options,
+                                   providers=["CPUExecutionProvider"])
+
+    _ETAT["policy_fn"] = faire_policy_fn(session)
+    _ETAT["search_fn"] = faire_search_fn(
+        chess_engine.ONNXEvaluator(onnx, True), simulations, c_puct,
+        batch_size, cache_history_depth, search_workers, search_seconds)
     _ETAT["sans_historique"] = sans_historique
 
 
@@ -224,7 +328,6 @@ def _lots(lignes: list, taille: int) -> list:
 def main() -> int:
     import argparse
     import multiprocessing as mp
-    import time
 
     from bench_metrics import aggregate, format_report
 
@@ -240,13 +343,25 @@ def main() -> int:
     # 700 simulations : le banc sert a deux comparaisons relatives, la
     # recherche contre la policy brute et une iteration contre la precedente.
     # Les deux valent a budget fixe, quel qu'il soit.
-    parser.add_argument("--simulations", type=int, default=700)
+    parser.add_argument("--simulations", type=int, default=None,
+                        help="budget fixe ; defaut 700 si --search-seconds "
+                             "n'est pas fourni")
+    parser.add_argument("--search-seconds", type=float, default=None,
+                        help="budget de temps par puzzle, exclusif d'un "
+                             "--simulations explicite")
     parser.add_argument("--c-puct", type=float, default=1.4)
     parser.add_argument("--batch-size", type=int, default=0,
                         help="taille du lot MCTS, 0 conserve la recherche sequentielle")
-    parser.add_argument("--cache-history-depth", type=int, default=1,
+    parser.add_argument("--cache-history-depth", type=int, default=0,
                         help="politique TT : -1 pour legacy, 0 a 7 pour h0 a h7")
-    parser.add_argument("--travailleurs", type=int, default=16)
+    parser.add_argument("--travailleurs", type=int, default=16,
+                        help="processus Python independants ; en mode GPU, "
+                             "seul 1 est permis")
+    parser.add_argument("--search-workers", type=int, default=1,
+                        help="workers CPU internes au C++ par recherche, sans "
+                             "creer de processus Python supplementaires")
+    parser.add_argument("--gpu", action="store_true",
+                        help="recherche sur le GPU, un seul processus")
     # 2500 sur les 5000 du fichier : la demi-largeur de Wilson globale passe
     # de 1,2 a 1,6 point seulement, et le passage tient en deux fois moins de
     # temps. Le pas etant regulier et le fichier ecrit tranche par tranche, on
@@ -265,6 +380,27 @@ def main() -> int:
         parser.error("--batch-size doit etre positif ou nul")
     if args.cache_history_depth < -1 or args.cache_history_depth > 7:
         parser.error("--cache-history-depth doit etre compris entre -1 et 7")
+    if args.search_workers < 1:
+        parser.error("--search-workers doit etre au moins 1")
+    if args.search_seconds is not None and args.search_seconds <= 0:
+        parser.error("--search-seconds doit etre positif")
+    if args.search_seconds is not None and args.simulations is not None:
+        parser.error("--search-seconds est exclusif d'un --simulations "
+                     "explicite : choisir un seul budget")
+    if args.gpu and args.travailleurs != 1:
+        parser.error("le mode GPU exige --travailleurs 1 : les workers de "
+                     "recherche sont internes au C++ et ne doivent pas "
+                     "multiplier les sessions GPU")
+    if args.search_workers > 1 and args.batch_size == 0:
+        parser.error("la recherche multicoeur exige une taille de batch "
+                     "positive")
+
+    simulations = args.simulations
+    if simulations is None and args.search_seconds is None:
+        simulations = 700
+    budget_label = (f"{simulations} simulations"
+                    if args.search_seconds is None
+                    else f"{args.search_seconds:g} s par puzzle")
 
     if not args.banc.exists():
         print(f"fichier de banc introuvable : {args.banc}", file=sys.stderr)
@@ -290,25 +426,47 @@ def main() -> int:
     politique = ("legacy" if args.cache_history_depth == -1 else
                  f"h{args.cache_history_depth}")
     print(f"{len(lignes)} puzzles sur {total_fichier} du fichier, "
-          f"{args.simulations} simulations, premier coup seul, "
+          f"{budget_label}, premier coup seul, "
           f"batch {args.batch_size}, TT {politique}, "
-          f"{args.travailleurs} travailleurs{suffixe}")
+          f"{args.travailleurs} travailleurs, "
+          f"{args.search_workers} workers de recherche, "
+          f"{'GPU' if args.gpu else 'CPU'}{suffixe}")
 
     debut = time.perf_counter()
     lots = _lots(lignes, 16)
     mesures: list = []
-    with mp.Pool(args.travailleurs, initializer=initialiser_travailleur,
-                 initargs=(str(onnx), args.simulations, args.c_puct,
-                           args.sans_historique, args.batch_size,
-                           args.cache_history_depth)) as pool:
-        for i, resultat in enumerate(pool.imap_unordered(traiter_lot, lots), 1):
-            mesures.extend(resultat)
+    if args.gpu:
+        # Les DLL CUDA de torch rendent celles du provider ONNX visibles au
+        # processus avant la construction de l'evaluateur C++.
+        import torch  # noqa: F401
+
+        initialiser_gpu(str(onnx), simulations, args.c_puct,
+                        args.sans_historique, args.batch_size,
+                        args.cache_history_depth, args.search_workers,
+                        args.search_seconds)
+        for i, lot in enumerate(lots, 1):
+            mesures.extend(traiter_lot(lot))
             if i % 10 == 0 or i == len(lots):
                 ecoule = time.perf_counter() - debut
                 print(f"  {len(mesures)}/{len(lignes)} puzzles, "
                       f"{ecoule / 60.0:.1f} min, "
                       f"{len(mesures) / max(1e-9, ecoule):.1f} puzzles/s",
                       flush=True)
+    else:
+        with mp.Pool(args.travailleurs, initializer=initialiser_travailleur,
+                     initargs=(str(onnx), simulations, args.c_puct,
+                               args.sans_historique, args.batch_size,
+                               args.cache_history_depth, args.search_workers,
+                               args.search_seconds)) as pool:
+            for i, resultat in enumerate(
+                    pool.imap_unordered(traiter_lot, lots), 1):
+                mesures.extend(resultat)
+                if i % 10 == 0 or i == len(lots):
+                    ecoule = time.perf_counter() - debut
+                    print(f"  {len(mesures)}/{len(lignes)} puzzles, "
+                          f"{ecoule / 60.0:.1f} min, "
+                          f"{len(mesures) / max(1e-9, ecoule):.1f} puzzles/s",
+                          flush=True)
     duree = time.perf_counter() - debut
 
     stats = aggregate(mesures)
@@ -316,7 +474,9 @@ def main() -> int:
         "modele": Path(onnx).name,
         "iteration": meta.get("iteration"),
         "global_step": meta.get("global_step"),
-        "simulations": args.simulations,
+        "simulations": simulations,
+        "search_seconds": args.search_seconds,
+        "budget_label": budget_label,
         "c_puct": args.c_puct,
         "batch_size": args.batch_size,
         "cache_history_depth": args.cache_history_depth,
@@ -324,16 +484,24 @@ def main() -> int:
         "sans_historique": args.sans_historique,
         "duree_totale_s": duree,
         "travailleurs": args.travailleurs,
+        "search_workers": args.search_workers,
+        "accelerateur": "GPU" if args.gpu else "CPU",
+        "modele_sha256": sha256_fichier(Path(onnx)),
+        "banc_sha256": sha256_fichier(args.banc),
+        "critere": "premier_coup_recherche",
     }
 
+    suffixe_workers = f"_w{args.search_workers}" if args.search_workers > 1 else ""
     out_csv = args.out_csv or Path(
         f"../data/bench_results/{Path(onnx).stem}_batch{args.batch_size}"
-        f"_{politique}.csv")
+        f"_{politique}{suffixe_workers}.csv")
     out_rapport = args.out_rapport or Path(
         f"../docs/superpowers/specs/{time.strftime('%Y-%m-%d')}"
-        f"-puzzle-bench-batch{args.batch_size}-{politique}-resultats.md")
+        f"-puzzle-bench-batch{args.batch_size}-{politique}"
+        f"{suffixe_workers}-resultats.md")
 
     ecrire_csv(mesures, out_csv)
+    ecrire_sidecar(contexte, out_csv)
     out_rapport.parent.mkdir(parents=True, exist_ok=True)
     out_rapport.write_text(format_report(stats, contexte), encoding="utf-8")
 

@@ -59,6 +59,8 @@ class Mesure:
     tt_context_rejects: int
     tt_history_rejects: int
     repetition: int = 0
+    worker_count: int = 1
+    pool_etat: str = "froid"
     timing: dict[str, int] | None = None
 
 
@@ -135,19 +137,28 @@ def charger_position(fen: str):
 def mesurer_mcts_search(evaluateur, fen: str, nom: str,
                         simulations: int, c_puct: float = 1.4,
                         batch_size: int = 0,
-                        cache_history_depth: int = 1,
+                        cache_history_depth: int = 0,
                         tt_size: int = TAILLE_TT,
                         timings: bool = False,
-                        repetition: int = 0) -> Mesure:
-    """Arbre neuf a chaque appel."""
-    mcts = chess_engine.MCTS(evaluateur, tt_size, cache_history_depth)
+                        repetition: int = 0,
+                        worker_count: int = 1,
+                        pool_etat: str = "froid",
+                        mcts=None) -> Mesure:
+    """Arbre neuf a chaque appel.
+
+    Un MCTS fourni est reutilise tel quel pour mesurer un pool chaud : le
+    coordinateur a deja remis l'arbre et la TT a froid hors chronometrage.
+    """
+    if mcts is None:
+        mcts = chess_engine.MCTS(evaluateur, tt_size, cache_history_depth)
     if timings:
         mcts.set_timing_enabled(True)
     board = charger_position(fen)
     mcts.reset_counters()
 
     debut = time.perf_counter()
-    mcts.mcts_search(board, simulations, c_puct, False, batch_size)
+    mcts.mcts_search(board, simulations, c_puct, False, batch_size,
+                     worker_count)
     duree = time.perf_counter() - debut
 
     c = mcts.get_counters()
@@ -161,19 +172,24 @@ def mesurer_mcts_search(evaluateur, fen: str, nom: str,
         tt_rule50_rejects=c.tt_rule50_rejects,
         tt_context_rejects=c.tt_context_rejects,
         tt_history_rejects=c.tt_history_rejects,
-        repetition=repetition,
+        repetition=repetition, worker_count=worker_count,
+        pool_etat=pool_etat,
         timing=extraire_timing(mcts, timings))
 
 
 def mesurer_step_analysis(evaluateur, fen: str, nom: str,
                           simulations: int, c_puct: float = 1.4,
                           batch_size: int = 0,
-                          cache_history_depth: int = 1,
+                          cache_history_depth: int = 0,
                           tt_size: int = TAILLE_TT,
                           timings: bool = False,
-                          repetition: int = 0) -> Mesure:
+                          repetition: int = 0,
+                          worker_count: int = 1,
+                          pool_etat: str = "froid",
+                          mcts=None) -> Mesure:
     """Le chemin reel du bot : arbre d'analyse reutilise entre les coups."""
-    mcts = chess_engine.MCTS(evaluateur, tt_size, cache_history_depth)
+    if mcts is None:
+        mcts = chess_engine.MCTS(evaluateur, tt_size, cache_history_depth)
     if timings:
         mcts.set_timing_enabled(True)
     board = charger_position(fen)
@@ -181,7 +197,7 @@ def mesurer_step_analysis(evaluateur, fen: str, nom: str,
     mcts.reset_counters()
 
     debut = time.perf_counter()
-    mcts.step_analysis(board, simulations, c_puct, batch_size)
+    mcts.step_analysis(board, simulations, c_puct, batch_size, worker_count)
     duree = time.perf_counter() - debut
 
     c = mcts.get_counters()
@@ -195,20 +211,24 @@ def mesurer_step_analysis(evaluateur, fen: str, nom: str,
         tt_rule50_rejects=c.tt_rule50_rejects,
         tt_context_rejects=c.tt_context_rejects,
         tt_history_rejects=c.tt_history_rejects,
-        repetition=repetition,
+        repetition=repetition, worker_count=worker_count,
+        pool_etat=pool_etat,
         timing=extraire_timing(mcts, timings))
 
 
 def agreger(mesures: list) -> dict:
-    """Groupe par position, chemin, batch et politique de cache.
+    """Groupe par position, chemin, batch, politique de cache, workers et etat
+    du pool.
 
     L'etendue est indispensable : sans elle, un gain de 5 pour cent serait
-    indistinguable du bruit de mesure.
+    indistinguable du bruit de mesure. Separer froid et chaud isole le cout de
+    creation des threads du regime etabli.
     """
     groupes: dict = {}
     for m in mesures:
         groupes.setdefault((m.position, m.chemin, m.batch_size,
-                            m.cache_history_depth), []).append(m)
+                            m.cache_history_depth, m.worker_count,
+                            m.pool_etat), []).append(m)
 
     resultat = {}
     for cle, lot in groupes.items():
@@ -255,11 +275,11 @@ def agreger(mesures: list) -> dict:
 
 
 _EN_TETE = (
-    "| Position | Chemin | TT | batch | passages | sims/s (med) "
+    "| Position | Chemin | TT | batch | workers | pool | passages | sims/s (med) "
     "| sims/s (min a max) | positions reseau/s | appels batch/s "
     "| remplissage | taux table | match position | 50 coups | contexte "
     "| historique |\n"
-    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
 )
 
 
@@ -279,7 +299,11 @@ def format_report(agr: dict, contexte: dict, invariants: list) -> str:
         f"{contexte['simulations']} simulations, c_puct {contexte['c_puct']}, "
         f"{contexte.get('accelerateur', 'CPU')}, un seul processus, "
         f"batches demandes {contexte.get('batch_sizes', [0])}, "
-        f"politiques TT {contexte.get('cache_history_depths', [1])}",
+        f"workers {contexte.get('worker_counts', [1])}, "
+        + ("pool reutilise entre mesures"
+           if contexte.get("warmup_pool") else "MCTS neuf par mesure")
+        + ", "
+        f"politiques TT {contexte.get('cache_history_depths', [0])}",
         "",
         "Trois grandeurs distinctes. Les **simulations par seconde** mesurent le",
         "debit de la recherche. Les **positions reseau par seconde** comptent les",
@@ -293,13 +317,14 @@ def format_report(agr: dict, contexte: dict, invariants: list) -> str:
     ]
 
     for cle in sorted(agr):
-        position, chemin, batch_size, cache_history_depth = cle
+        position, chemin, batch_size, cache_history_depth, worker_count, \
+            pool_etat = cle
         a = agr[cle]
         def compteur_et_taux(compteur: str, taux: str) -> str:
             return f"{a[compteur]:g} ({100 * a[taux]:.1f} %)"
         lignes.append(
             f"| {position} | {chemin} | {etiquette_profondeur(cache_history_depth)} "
-            f"| {batch_size} | {a['passages']} "
+            f"| {batch_size} | {worker_count} | {pool_etat} | {a['passages']} "
             f"| {a['sims_par_seconde_median']:.1f} "
             f"| {a['sims_par_seconde_min']:.1f} a {a['sims_par_seconde_max']:.1f} "
             f"| {a['inferences_par_seconde_median']:.1f} "
@@ -317,15 +342,17 @@ def format_report(agr: dict, contexte: dict, invariants: list) -> str:
             "",
             "## Chronometrages",
             "",
-            "Durees medianes en millisecondes. Les phases sont mesurees par "
-            "thread et certaines durees peuvent etre inclusives.",
+            "Durees medianes en millisecondes. Le temps total est le temps mur "
+            "de l'appel : les phases sont cumulees par thread, peuvent se "
+            "chevaucher et ne s'additionnent jamais en temps mur.",
             "",
-            "| Position | Chemin | TT | batch | "
+            "| Position | Chemin | TT | batch | workers | pool | "
             + " | ".join(label for _name, label in TIMING_LABELS) + " |",
-            "|---|---|---|---|" + "---|" * len(TIMING_LABELS),
+            "|---|---|---|---|---|---|" + "---|" * len(TIMING_LABELS),
         ]
         for cle in sorted(agr):
-            position, chemin, batch_size, cache_history_depth = cle
+            position, chemin, batch_size, cache_history_depth, worker_count, \
+                pool_etat = cle
             a = agr[cle]
             if "wall_ns_median_ms" not in a:
                 continue
@@ -335,22 +362,25 @@ def format_report(agr: dict, contexte: dict, invariants: list) -> str:
             lignes.append(
                 f"| {position} | {chemin} "
                 f"| {etiquette_profondeur(cache_history_depth)} "
-                f"| {batch_size} | {valeurs} |")
+                f"| {batch_size} | {worker_count} | {pool_etat} "
+                f"| {valeurs} |")
 
     lignes += ["", "## Invariants d'arbre", ""]
     if not invariants:
         lignes.append("Non verifies lors de ce passage.")
     else:
         lignes += [
-            "| Position | TT | batch | noeuds | profondeur max | violations |",
-            "|---|---|---|---|---|---|",
+            "| Position | TT | batch | workers | noeuds | profondeur max "
+            "| violations |",
+            "|---|---|---|---|---|---|---|",
         ]
         total = 0
-        for (position, depth, batch_size, nodes, max_depth, violations,
-             _messages) in invariants:
+        for (position, depth, batch_size, worker_count, nodes, max_depth,
+             violations, _messages) in invariants:
             total += violations
             lignes.append(
-                f"| {position} | {etiquette_profondeur(depth)} | {batch_size} "
+                f"| {position} | {etiquette_profondeur(depth)} "
+                f"| {batch_size} | {worker_count} "
                 f"| {nodes} | {max_depth} | {violations} |")
         lignes.append("")
         if total == 0:
@@ -358,11 +388,12 @@ def format_report(agr: dict, contexte: dict, invariants: list) -> str:
         else:
             lignes.append(f"**{total} violations.** Premiers messages :")
             lignes.append("")
-            for (position, depth, batch_size, _n, _d, _v, messages) in invariants:
+            for (position, depth, batch_size, worker_count, _n, _d, _v,
+                 messages) in invariants:
                 for message in messages:
                     lignes.append(
                         f"- `{position}`, {etiquette_profondeur(depth)}, "
-                        f"batch {batch_size} : {message}")
+                        f"batch {batch_size}, workers {worker_count} : {message}")
 
     return "\n".join(lignes) + "\n"
 
@@ -386,9 +417,16 @@ def main() -> int:
                         help="tailles de batch a balayer, 0 designe la boucle "
                              "sequentielle conservee")
     parser.add_argument("--cache-history-depths", type=int, nargs="+",
-                        default=[1],
+                        default=[0],
                         help="politiques TT a balayer : -1 pour legacy, "
                              "0 a 7 pour h0 a h7")
+    parser.add_argument("--worker-counts", type=int, nargs="+", default=[1],
+                        help="workers CPU de chaque recherche, 1 conserve le "
+                             "noyau mono-worker")
+    parser.add_argument("--warmup-pool", action="store_true",
+                        help="reutilise le MCTS entre les repetitions pour "
+                             "isoler le premier appel (creation des threads) des "
+                             "mesures de regime etabli")
     parser.add_argument("--gpu", action="store_true",
                         help="utilise le provider CUDA du moteur C++")
     parser.add_argument("--invariants", action="store_true",
@@ -409,6 +447,12 @@ def main() -> int:
         parser.error("passages et repetitions doivent etre positifs")
     if args.tt_size <= 0:
         parser.error("tt-size doit etre positif")
+    if any(count < 1 for count in args.worker_counts):
+        parser.error("les workers de recherche doivent etre au moins 1")
+    if (any(count > 1 for count in args.worker_counts)
+            and any(taille == 0 for taille in args.batch_sizes)):
+        parser.error("un worker_count superieur a 1 exige une taille de "
+                     "batch positive")
 
     onnx, meta = puzzle_bench.resoudre_modele(args.model, args.dossier_onnx)
     if not Path(onnx).exists():
@@ -429,6 +473,22 @@ def main() -> int:
 
     invariants = []
     mesures = []
+    pools: dict = {}
+
+    def mcts_du_pool(chemin, profondeur, batch_size, worker_count):
+        """Objet MCTS reutilise et son etat de pool, froid ou chaud.
+
+        Un pool chaud est efface hors chronometrage : l'arbre d'analyse et la
+        TT repartent a zero, mais les threads du SearchExecutor restent en
+        place. C'est ce qui separe le cout de creation du regime etabli.
+        """
+        cle = (chemin, profondeur, batch_size, worker_count)
+        if cle in pools:
+            pools[cle].clear_evaluation_cache()
+            return pools[cle], "chaud"
+        mcts = chess_engine.MCTS(evaluateur, args.tt_size, profondeur)
+        pools[cle] = mcts
+        return mcts, "froid"
 
     if args.invariants:
         # inspect_tree n'est jamais appele dans la boucle de mesure de debit :
@@ -436,44 +496,68 @@ def main() -> int:
         # qu'il protege. Les deux jambes sont donc exclusives.
         for depth in args.cache_history_depths:
             for batch_size in args.batch_sizes:
-                for nom, fen in POSITIONS:
-                    mcts = chess_engine.MCTS(evaluateur, args.tt_size, depth)
-                    mcts.step_analysis(charger_position(fen), args.simulations,
-                                       args.c_puct, batch_size)
-                    r = mcts.inspect_tree()
-                    invariants.append((nom, depth, batch_size, r.nodes,
-                                       r.max_depth, r.violations,
-                                       list(r.messages)))
-                    etat = ("OK" if r.violations == 0 else
-                            f"{r.violations} VIOLATIONS")
-                    print(f"  {nom:10} {etiquette_profondeur(depth):6} "
-                          f"batch {batch_size:2} : {r.nodes} noeuds, "
-                          f"profondeur {r.max_depth}, {etat}")
+                for worker_count in args.worker_counts:
+                    for nom, fen in POSITIONS:
+                        mcts = chess_engine.MCTS(
+                            evaluateur, args.tt_size, depth)
+                        mcts.step_analysis(
+                            charger_position(fen), args.simulations,
+                            args.c_puct, batch_size, worker_count)
+                        r = mcts.inspect_tree()
+                        invariants.append((
+                            nom, depth, batch_size, worker_count, r.nodes,
+                            r.max_depth, r.violations, list(r.messages)))
+                        etat = ("OK" if r.violations == 0 else
+                                f"{r.violations} VIOLATIONS")
+                        print(f"  {nom:10} {etiquette_profondeur(depth):6} "
+                              f"batch {batch_size:2} workers {worker_count} : "
+                              f"{r.nodes} noeuds, "
+                              f"profondeur {r.max_depth}, {etat}")
     else:
         for passage in range(args.passages):
             for repetition_locale in range(args.repetitions):
                 repetition = passage * args.repetitions + repetition_locale
                 for depth in args.cache_history_depths:
                     for batch_size in args.batch_sizes:
-                        for nom, fen in POSITIONS:
-                            mesures.append(mesurer_mcts_search(
-                                evaluateur, fen, nom, args.simulations,
-                                args.c_puct, batch_size, depth,
-                                tt_size=args.tt_size, timings=args.timings,
-                                repetition=repetition))
-                            mesures.append(mesurer_step_analysis(
-                                evaluateur, fen, nom, args.simulations,
-                                args.c_puct, batch_size, depth,
-                                tt_size=args.tt_size, timings=args.timings,
-                                repetition=repetition))
+                        for worker_count in args.worker_counts:
+                            for nom, fen in POSITIONS:
+                                if args.warmup_pool:
+                                    pool, pool_etat = mcts_du_pool(
+                                        "mcts_search", depth, batch_size,
+                                        worker_count)
+                                else:
+                                    pool, pool_etat = None, "froid"
+                                mesures.append(mesurer_mcts_search(
+                                    evaluateur, fen, nom, args.simulations,
+                                    args.c_puct, batch_size, depth,
+                                    tt_size=args.tt_size,
+                                    timings=args.timings,
+                                    repetition=repetition,
+                                    worker_count=worker_count,
+                                    pool_etat=pool_etat, mcts=pool))
+                                if args.warmup_pool:
+                                    pool, pool_etat = mcts_du_pool(
+                                        "step_analysis", depth, batch_size,
+                                        worker_count)
+                                else:
+                                    pool, pool_etat = None, "froid"
+                                mesures.append(mesurer_step_analysis(
+                                    evaluateur, fen, nom, args.simulations,
+                                    args.c_puct, batch_size, depth,
+                                    tt_size=args.tt_size,
+                                    timings=args.timings,
+                                    repetition=repetition,
+                                    worker_count=worker_count,
+                                    pool_etat=pool_etat, mcts=pool))
             print(f"  passage {passage + 1}/{args.passages}", flush=True)
 
     agr = agreger(mesures)
     for cle in sorted(agr):
         a = agr[cle]
         print(f"  {cle[0]:10} {cle[1]:14} "
-              f"{etiquette_profondeur(cle[3]):6} batch {cle[2]:2} : "
-            f"{a['sims_par_seconde_median']:7.1f} sims/s, "
+              f"{etiquette_profondeur(cle[3]):6} batch {cle[2]:2} "
+              f"workers {cle[4]} {cle[5]:5} : "
+              f"{a['sims_par_seconde_median']:7.1f} sims/s, "
               f"{a['inferences_par_seconde_median']:7.1f} positions/s, "
               f"remplissage {a['remplissage_moyen_median']:.1f}, "
               f"table {100 * a['taux_table_median']:.1f} %")
@@ -490,6 +574,8 @@ def main() -> int:
         "accelerateur": "GPU" if args.gpu else "CPU",
         "batch_sizes": args.batch_sizes,
         "cache_history_depths": args.cache_history_depths,
+        "worker_counts": args.worker_counts,
+        "warmup_pool": args.warmup_pool,
         "tt_size": args.tt_size,
         "timings": args.timings,
     }
@@ -509,7 +595,7 @@ def main() -> int:
         }, indent=2, sort_keys=True), encoding="utf-8")
         print(f"Mesures : {args.out_json}")
 
-    total_violations = sum(v for (_, _, _, _, _, v, _) in invariants)
+    total_violations = sum(v for (_, _, _, _, _, _, v, _) in invariants)
     if total_violations:
         print(f"{total_violations} violations d'invariants", file=sys.stderr)
         return 1

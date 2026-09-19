@@ -65,6 +65,18 @@ TTProbe EvaluationCache::probe(const EvaluationCacheKey& key,
     return probe;
 }
 
+void EvaluationCache::clear() {
+    // Une bande a la fois, un seul verrou par bande : les index d'une meme
+    // bande sont espaces de stripe_count, donc le parcours est direct.
+    for (std::size_t stripe = 0; stripe < m_stripes.size(); ++stripe) {
+        std::lock_guard<std::mutex> lock(m_stripes[stripe]);
+        for (std::size_t index = stripe; index < m_entries.size();
+             index += m_stripes.size()) {
+            m_entries[index] = TTEntry{};
+        }
+    }
+}
+
 void EvaluationCache::store(const EvaluationCacheKey& key,
                             const std::vector<int>& legal_indices,
                             const float* policy, float value,

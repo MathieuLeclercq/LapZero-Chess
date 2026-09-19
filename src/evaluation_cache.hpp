@@ -51,6 +51,10 @@ public:
                const float* policy, float value,
                SearchTiming* timing = nullptr);
 
+    // Remise a froid complete, uniquement autorisee au repos (aucune lecture
+    // ni ecriture concurrente). Le pool de workers n'est pas touche.
+    void clear();
+
     std::size_t size() const noexcept { return m_entries.size(); }
     std::size_t stripe_count() const noexcept { return m_stripes.size(); }
 

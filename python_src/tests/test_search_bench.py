@@ -22,6 +22,7 @@ from search_bench import (
 def _m(position="depart", chemin="mcts_search", simulations=400, duree_s=1.0,
        nn_calls=300, nn_batches=300, tt_hits=100, tt_misses=300,
        terminal_hits=0, batch_size=0, cache_history_depth=1,
+       worker_count=1, pool_etat="froid",
        tt_position_matches=100, tt_rule50_rejects=0,
        tt_context_rejects=0, tt_history_rejects=0, repetition=0,
        timing=None):
@@ -30,6 +31,7 @@ def _m(position="depart", chemin="mcts_search", simulations=400, duree_s=1.0,
                   nn_batches=nn_batches, tt_hits=tt_hits,
                   tt_misses=tt_misses, terminal_hits=terminal_hits,
                   cache_history_depth=cache_history_depth,
+                  worker_count=worker_count, pool_etat=pool_etat,
                   tt_position_matches=tt_position_matches,
                   tt_rule50_rejects=tt_rule50_rejects,
                   tt_context_rejects=tt_context_rejects,
@@ -84,10 +86,10 @@ def test_agreger_groupe_par_position_et_chemin():
 
     agr = agreger(mesures)
 
-    assert set(agr) == {("depart", "mcts_search", 0, 1),
-                        ("depart", "step_analysis", 0, 1),
-                        ("finale", "mcts_search", 0, 1)}
-    assert agr[("depart", "mcts_search", 0, 1)]["passages"] == 2
+    assert set(agr) == {("depart", "mcts_search", 0, 1, 1, "froid"),
+                        ("depart", "step_analysis", 0, 1, 1, "froid"),
+                        ("finale", "mcts_search", 0, 1, 1, "froid")}
+    assert agr[("depart", "mcts_search", 0, 1, 1, "froid")]["passages"] == 2
 
 
 def test_agreger_groupe_aussi_par_taille_de_batch():
@@ -99,10 +101,27 @@ def test_agreger_groupe_aussi_par_taille_de_batch():
 
     agr = agreger(mesures)
 
-    assert set(agr) == {("depart", "mcts_search", 0, 1),
-                        ("depart", "mcts_search", 32, 1)}
-    assert agr[("depart", "mcts_search", 32, 1)]["passages"] == 2
-    assert agr[("depart", "mcts_search", 32, 1)]["sims_par_seconde_median"] == pytest.approx(400.0)
+    assert set(agr) == {("depart", "mcts_search", 0, 1, 1, "froid"),
+                        ("depart", "mcts_search", 32, 1, 1, "froid")}
+    assert agr[("depart", "mcts_search", 32, 1, 1, "froid")]["passages"] == 2
+    assert agr[("depart", "mcts_search", 32, 1, 1, "froid")]["sims_par_seconde_median"] == pytest.approx(400.0)
+
+
+def test_agreger_separe_les_workers_et_l_etat_du_pool():
+    """Un pool chaud et un pool froid ne mesurent pas la meme chose : le premier
+    appel d'une configuration paie la creation des threads. Les melanger dans
+    une mediane commune masquerait ce cout."""
+    agr = agreger([
+        _m(worker_count=1),
+        _m(worker_count=4),
+        _m(worker_count=4, pool_etat="chaud"),
+    ])
+
+    assert set(agr) == {
+        ("depart", "mcts_search", 0, 1, 1, "froid"),
+        ("depart", "mcts_search", 0, 1, 4, "froid"),
+        ("depart", "mcts_search", 0, 1, 4, "chaud"),
+    }
 
 
 def test_agreger_separe_les_profondeurs_de_cache():
@@ -112,8 +131,8 @@ def test_agreger_separe_les_profondeurs_de_cache():
     ])
 
     assert set(agr) == {
-        ("depart", "mcts_search", 0, 0),
-        ("depart", "mcts_search", 0, 1),
+        ("depart", "mcts_search", 0, 0, 1, "froid"),
+        ("depart", "mcts_search", 0, 1, 1, "froid"),
     }
 
 
@@ -123,7 +142,7 @@ def test_agreger_prend_la_mediane_des_ratios_et_non_le_ratio_des_medianes():
            tt_rule50_rejects=10),
         _m(tt_hits=0, tt_misses=100, tt_position_matches=10,
            tt_history_rejects=10),
-    ])[("depart", "mcts_search", 0, 1)]
+    ])[("depart", "mcts_search", 0, 1, 1, "froid")]
 
     assert agr["tt_position_match_rate_median"] == pytest.approx(0.55)
     assert agr["tt_rule50_reject_rate_median"] == pytest.approx(0.25)
@@ -136,7 +155,7 @@ def test_agreger_donne_mediane_et_etendue():
     sait pas distinguer un gain de 5 pour cent d'un bruit de mesure."""
     mesures = [_m(duree_s=1.0), _m(duree_s=2.0), _m(duree_s=4.0)]
 
-    a = agreger(mesures)[("depart", "mcts_search", 0, 1)]
+    a = agreger(mesures)[("depart", "mcts_search", 0, 1, 1, "froid")]
 
     assert a["sims_par_seconde_median"] == pytest.approx(200.0)
     assert a["sims_par_seconde_min"] == pytest.approx(100.0)
@@ -263,6 +282,51 @@ def test_les_mesures_transmettent_la_profondeur_au_mcts(monkeypatch):
     assert constructions == [3, 7]
 
 
+def test_les_mesures_transmettent_batch_et_workers_au_mcts(monkeypatch):
+    import search_bench
+
+    appels = []
+
+    class FauxMCTS:
+        def __init__(self, evaluateur, taille_tt, depth):
+            pass
+
+        def reset_analysis(self):
+            pass
+
+        def reset_counters(self):
+            pass
+
+        def mcts_search(self, board, simulations, c_puct, bruit,
+                        batch_size, worker_count):
+            appels.append(("mcts_search", batch_size, worker_count))
+            return [0.0] * 4672
+
+        def step_analysis(self, board, simulations, c_puct, batch_size,
+                          worker_count):
+            appels.append(("step_analysis", batch_size, worker_count))
+
+        def get_counters(self):
+            return type("C", (), dict(
+                nn_calls=1, nn_batches=1, tt_hits=0, tt_misses=1,
+                terminal_hits=0, tt_position_matches=0,
+                tt_rule50_rejects=0, tt_context_rejects=0,
+                tt_history_rejects=0))()
+
+    monkeypatch.setattr(search_bench.chess_engine, "MCTS", FauxMCTS)
+    monkeypatch.setattr(search_bench, "charger_position", lambda fen: object())
+
+    mesure = search_bench.mesurer_mcts_search(
+        object(), "fen", "position", 8, batch_size=8, worker_count=4)
+    analyse = search_bench.mesurer_step_analysis(
+        object(), "fen", "position", 8, batch_size=8, worker_count=4)
+
+    assert appels == [("mcts_search", 8, 4), ("step_analysis", 8, 4)]
+    assert mesure.worker_count == 4
+    assert analyse.worker_count == 4
+    assert mesure.batch_size == 8
+
+
 def test_la_mesure_capture_les_timings_et_la_taille_tt(monkeypatch):
     import search_bench
 
@@ -363,8 +427,12 @@ def test_main_ecrit_les_mesures_individuelles_en_json(
     donnees = json.loads(brut.read_text(encoding="utf-8"))
     assert donnees["contexte"]["tt_size"] == 123
     assert donnees["contexte"]["timings"] is True
+    assert donnees["contexte"]["worker_counts"] == [1]
+    assert donnees["contexte"]["warmup_pool"] is False
     assert len(donnees["mesures"]) == 4
     assert donnees["mesures"][0]["timing"]["wall_ns"] == 101
+    assert donnees["mesures"][0]["worker_count"] == 1
+    assert donnees["mesures"][0]["pool_etat"] == "froid"
 
 
 def test_main_balaie_toutes_les_profondeurs_demandees(
@@ -417,6 +485,125 @@ def test_main_balaie_toutes_les_profondeurs_demandees(
     ]
 
 
+def test_main_reutilise_le_pool_chaud_et_efface_la_tt(monkeypatch, tmp_path):
+    """Le pool chaud doit garder ses threads et oublier la TT entre deux
+    mesures : sans clear, la seconde mesure serait un banc de hits de table,
+    pas un banc de recherche."""
+    import json
+    import search_bench
+    import puzzle_bench
+
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"modele factice")
+    brut = tmp_path / "mesures.json"
+    instances = []
+
+    class FauxMCTS:
+        def __init__(self, evaluateur, taille_tt, depth):
+            instances.append(self)
+            self.clears = 0
+
+        def set_timing_enabled(self, enabled):
+            pass
+
+        def reset_analysis(self):
+            pass
+
+        def reset_counters(self):
+            pass
+
+        def clear_evaluation_cache(self):
+            self.clears += 1
+
+        def mcts_search(self, *args):
+            return [0.0] * 4672
+
+        def step_analysis(self, *args):
+            pass
+
+        def get_counters(self):
+            return type("C", (), dict(
+                nn_calls=1, nn_batches=1, tt_hits=0, tt_misses=1,
+                terminal_hits=0, tt_position_matches=0,
+                tt_rule50_rejects=0, tt_context_rejects=0,
+                tt_history_rejects=0))()
+
+    monkeypatch.setattr(search_bench, "POSITIONS", (("depart", "fen"),))
+    monkeypatch.setattr(search_bench.chess_engine, "MCTS", FauxMCTS)
+    monkeypatch.setattr(search_bench.chess_engine, "ONNXEvaluator",
+                        lambda *args: object())
+    monkeypatch.setattr(search_bench, "charger_position", lambda fen: object())
+    monkeypatch.setattr(puzzle_bench, "resoudre_modele",
+                        lambda *args: (model, {}))
+    monkeypatch.setattr(sys, "argv", [
+        "search_bench.py", "--model", str(model), "--passages", "1",
+        "--repetitions", "2", "--simulations", "8",
+        "--cache-history-depths", "0", "--warmup-pool",
+        "--out-json", str(brut), "--out-rapport", str(tmp_path / "r.md"),
+    ])
+
+    assert search_bench.main() == 0
+
+    # chauffe, puis un objet persistant par chemin.
+    assert len(instances) == 3
+    assert [m.clears for m in instances[1:]] == [1, 1]
+    donnees = json.loads(brut.read_text(encoding="utf-8"))
+    assert donnees["contexte"]["warmup_pool"] is True
+    assert donnees["contexte"]["worker_counts"] == [1]
+    etats = {(m["chemin"], m["pool_etat"]) for m in donnees["mesures"]}
+    assert etats == {
+        ("mcts_search", "froid"), ("mcts_search", "chaud"),
+        ("step_analysis", "froid"), ("step_analysis", "chaud"),
+    }
+
+
+def test_le_defaut_de_profondeur_est_h0(monkeypatch, tmp_path):
+    """La CLI harmonise son defaut sur h0, comme le defaut C++."""
+    import json
+    import search_bench
+    import puzzle_bench
+
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"modele factice")
+    brut = tmp_path / "mesures.json"
+    profondeurs = []
+
+    class Chauffe:
+        def __init__(self, evaluateur, taille_tt, depth):
+            pass
+
+        def mcts_search(self, *args):
+            pass
+
+    def mesurer_recherche(*args, **kwargs):
+        profondeurs.append(args[6])
+        return _m(cache_history_depth=args[6])
+
+    def mesurer_analyse(*args, **kwargs):
+        profondeurs.append(args[6])
+        return _m(chemin="step_analysis", cache_history_depth=args[6])
+
+    monkeypatch.setattr(search_bench, "POSITIONS", (("depart", "fen"),))
+    monkeypatch.setattr(search_bench.chess_engine, "MCTS", Chauffe)
+    monkeypatch.setattr(search_bench.chess_engine, "ONNXEvaluator",
+                        lambda *args: object())
+    monkeypatch.setattr(search_bench, "charger_position", lambda fen: object())
+    monkeypatch.setattr(search_bench, "mesurer_mcts_search", mesurer_recherche)
+    monkeypatch.setattr(search_bench, "mesurer_step_analysis", mesurer_analyse)
+    monkeypatch.setattr(puzzle_bench, "resoudre_modele",
+                        lambda *args: (model, {}))
+    monkeypatch.setattr(sys, "argv", [
+        "search_bench.py", "--model", str(model), "--passages", "1",
+        "--simulations", "8", "--out-json", str(brut),
+        "--out-rapport", str(tmp_path / "r.md"),
+    ])
+
+    assert search_bench.main() == 0
+    assert profondeurs == [0, 0]
+    donnees = json.loads(brut.read_text(encoding="utf-8"))
+    assert donnees["contexte"]["cache_history_depths"] == [0]
+
+
 def test_format_report_n_ecrit_jamais_noeuds_par_seconde():
     """Le perft mesure 1,6 million de noeuds par seconde, la recherche 295
     simulations par seconde : confondre les deux serait une erreur d'un facteur
@@ -432,7 +619,7 @@ def test_format_report_ne_contient_pas_de_tiret_cadratin():
 
 
 def test_format_report_signale_les_violations():
-    invariants = [("depart", 1, 0, 120, 5, 3,
+    invariants = [("depart", 1, 0, 8, 120, 5, 3,
                    ["enfant duplique, move_idx 42"])]
 
     texte = format_report(_agr(), CONTEXTE, invariants)
@@ -442,15 +629,36 @@ def test_format_report_signale_les_violations():
 
 
 def test_format_report_associe_les_invariants_a_leur_batch():
-    invariants = [("depart", 1, 32, 120, 5, 0, [])]
+    invariants = [("depart", 1, 32, 4, 120, 5, 0, [])]
 
     texte = format_report(_agr(), CONTEXTE, invariants)
 
-    assert "| depart | h1 | 32 | 120 | 5 | 0 |" in texte
+    assert "| depart | h1 | 32 | 4 | 120 | 5 | 0 |" in texte
+
+
+def test_format_report_affiche_workers_et_etat_du_pool():
+    texte = format_report(
+        agreger([_m(worker_count=4, pool_etat="chaud")]), CONTEXTE, [])
+
+    assert "workers" in texte.lower()
+    assert "chaud" in texte
+    assert "4" in texte
+
+
+def test_format_report_rappelle_que_le_total_est_le_temps_mur():
+    """Les phases sont cumulees par thread : leur somme peut depasser le mur.
+    Le rapport doit dire lequel des deux est la reference."""
+    timing = _timing(100_000_000)
+    timing["evaluator_ns"] = 400_000_000
+
+    texte = format_report(agreger([_m(timing=timing)]), CONTEXTE, [])
+
+    assert "temps mur" in texte
+    assert "100.000" in texte
 
 
 def test_format_report_est_muet_quand_aucune_violation():
-    invariants = [("depart", 1, 0, 120, 5, 0, [])]
+    invariants = [("depart", 1, 0, 8, 120, 5, 0, [])]
 
     texte = format_report(_agr(), CONTEXTE, invariants)
 

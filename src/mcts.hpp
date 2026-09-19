@@ -132,6 +132,9 @@ public:
     void update_root(int move_idx);
     float get_root_q() const;
     std::vector<MoveStats> get_analysis_results() const;
+    // Remise a froid de la TT, au repos seulement. Le pool de workers reste en
+    // place : les threads ne sont jamais recrees par un reset.
+    void clear_evaluation_cache();
     std::vector<float> mcts_search(Chessboard& board, int num_simulations, float c_puct,
                                    bool add_dirichlet, int batch_size = 0,
                                    int worker_count = 1);
