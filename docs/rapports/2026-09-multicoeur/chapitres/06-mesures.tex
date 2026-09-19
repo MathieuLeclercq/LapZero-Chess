@@ -119,7 +119,6 @@ de m\'ediane. Le candidat retenu reste w8, qui a les meilleures m\'edianes
 globales et la queue la plus stable.
 
 \subsection{R\'epartition par phase et remplissage}
-
 La campagne \`a chronom\'etrages actifs (3 mesures par configuration) montre
 que l'inf\'erence occupe 96,6 \`a 98,7\,\% du temps mur, dans toutes les
 configurations. En huit workers, l'attente de barri\`ere ne p\`ese que 1,5 \`a
@@ -136,11 +135,32 @@ pas toucher \`a l'inf\'erence.}
 \label{fig:phases}
 \end{figure}
 
-Le remplissage progresse l\'eg\`erement : de 6,1 \`a 6,7 en finale et de 6,9
-\`a 7,2 en ouverture. Cette hausse r\'eduit le nombre d'appels GPU physiques
-pour un m\^eme nombre de positions, ce qui est une part du gain mesur\'e :
-le multic\oe{}ur ne fait pas que parall\'eliser la collecte, il ferme moins
-souvent des lots partiels.
+Le remplissage progresse l\'eg\`erement : de 6,10 \`a 6,68 en finale et de
+6,94 \`a 7,23 en ouverture. \`A nombre de positions \'evalu\'ees constant
+(\code{nn\_calls} = 701), cette hausse r\'eduit le nombre d'appels GPU
+physiques, de 115 \`a 105 en finale et de 101 \`a 97 en ouverture. C'est le
+m\'ecanisme m\^eme du gain, et il est sp\'ecifique aux vagues : en
+mono-worker, la collecte s'arr\^ete \`a la premi\`ere collision et ferme le lot
+partiel, alors qu'un worker de vague rend son permis et r\'eessaie.
+
+\begin{piege}[Le gain n'est pas un recouvrement CPU-GPU]
+On pourrait croire que les vagues font travailler le CPU pendant que le GPU
+calcule. C'est faux : la barri\`ere est explicite, et le temps hors
+\'evaluateur \emph{augmente} m\^eme l\'eg\`erement en multic\oe{}ur
+(19,5\,ms en w1 contre 32,6\,ms en w8 pour la finale), parce que l'attente de
+barri\`ere s'ajoute \`a la collecte. Le gain vient uniquement de la
+r\'eduction du nombre d'appels GPU, pas d'un chevauchement des phases.
+\end{piege}
+
+La campagne principale et la campagne de phases ne chiffrent pas ce m\'ecanisme
+de la m\^eme fa\c{c}on. Dans la campagne de phases, o\`u le co\^ut par appel
+est mesur\'e constant ($11{,}88$\,ms en w1 contre $11{,}94$\,ms en w8), les
+dix appels \'economis\'es en finale expliquent la totalit\'e du gain de 8\,\%.
+Dans la campagne principale, le m\^eme couple affiche $+22\,\%$, que la seule
+r\'eduction d'appels ne peut pas couvrir : la part r\'esiduelle rel\`eve de la
+d\'erive entre sessions. Le tableau~\ref{tab:decomposition} du chapitre
+suivant s\'epare ces deux lectures ; il faut donc retenir le m\'ecanisme comme
+certain et son ampleur comme approximative.
 
 \subsection{Le r\'egime r\'eel de la boucle UCI}
 

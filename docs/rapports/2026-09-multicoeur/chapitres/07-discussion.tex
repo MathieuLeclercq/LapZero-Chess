@@ -15,25 +15,62 @@ r\'esultats. Ce chapitre les assume explicitement et en tire les le\c{c}ons.
 
 La loi d'Amdahl \cite{amdahl} explique l'essentiel. Si une fraction $p$ du
 temps est parall\'elisable, le gain maximal est $1/(1-p)$. Ici, la mesure des
-phases donne $1-p \approx 0,97$ \`a $0,99$ : le gain maximal th\'eorique est
-donc de 1 \`a 3\,\%. Le gain observ\'e, de 7 \`a 26\,\% selon la position,
-d\'epasse ce plafond apparent, ce qui signifie que les vagues ne font pas que
-parall\'eliser la collecte : elles am\'eliorent aussi la fa\c{c}on dont les
-lots sont remplis. Le remplissage passe de 6,1 \`a 6,7 en finale, et c'est
-cette hausse qui explique la plus grande partie du gain sur la position la
-plus lente.
+phases donne $1-p \approx 0,97$ \`a $0,99$ : le gain maximal th\'eorique d'un
+recouvrement serait donc de 1 \`a 3\,\%. Or le gain observ\'e va de 7 \`a
+26\,\% selon la position. L'\'ecart ne vient pas d'un chevauchement entre CPU
+et GPU, puisque les phases alternent toujours et que l'attente de barri\`ere
+augmente m\^eme l\'eg\`erement le temps hors \'evaluateur. Il vient d'une
+r\'eduction du nombre d'appels GPU, elle-m\^eme permise par un meilleur
+remplissage : en mono-worker, la collecte referme le lot \`a la premi\`ere
+collision (\code{mcts\_batch.cpp}, sortie sur \code{Pending}), alors qu'un
+worker de vague rend son permis et r\'eessaie dans la limite des tentatives
+(\code{mcts\_wave.cpp}). \`A nombre de positions \'evalu\'ees constant, les
+vagues d\'eclenchent donc moins d'appels physiques.
+
+L'ampleur de cet effet est mesurable, mais elle ne suffit pas \`a expliquer
+tous les chiffres de la campagne principale. Sur la campagne \`a
+chronom\'etrages actifs, o\`u le co\^ut par appel est mesur\'e constant, la
+r\'eduction d'appels explique la totalit\'e d'un gain de 8\,\% en finale. Sur
+la campagne principale, mesur\'ee dans une autre session, le m\^eme couple
+affiche 22\,\% : la r\'eduction d'appels n'en explique alors qu'une partie, et
+le reste rel\`eve de la d\'erive entre sessions, qu'il serait abusif
+d'attribuer au remplissage. Le tableau~\ref{tab:decomposition} s\'epare les
+deux lectures.
+
+\begin{center}
+\small
+\begin{tabular}{lcccr}
+\toprule
+Position & remplissage & appels GPU & gain de d\'ebit & part des appels \\
+         & w1 $\to$ w8 & w1 $\to$ w8 & w8/w1 & dans le gain \\
+\midrule
+ouverture & 6,94 $\to$ 7,23 & 101 $\to$ 97   & $+15\,\%$ & $\approx 30\,\%$ \\
+milieu    & 4,87 $\to$ 5,19 & 144 $\to$ 135 & $+6\,\%$  & $\approx 100\,\%$ \\
+finale    & 6,10 $\to$ 6,68 & 115 $\to$ 105 & $+22\,\%$ & $\approx 43\,\%$ \\
+\bottomrule
+\end{tabular}
+\captionof{table}{D\'ecomposition du gain, \code{step\_analysis}, pool chaud,
+700 simulations, 30 observations (\code{after.json}). La derni\`ere colonne
+estime la part du gain de d\'ebit explicable par les appels GPU \'economis\'es,
+au co\^ut par appel de la campagne de phases ($\approx 11{,}9$\,ms en finale).
+Elle d\'epasse 100\,\% pour le milieu, o\`u le gain de d\'ebit est du m\^eme
+ordre que le bruit de session.}
+\label{tab:decomposition}
+\end{center}
+
+Cette d\'ecomposition est une estimation, pas une mesure directe : les
+appels sont compt\'es, mais leur co\^ut par appel est emprunt\'e \`a une autre
+session. Elle suffit n\'eanmoins \`a \'ecarter l'explication d'un recouvrement
+CPU-GPU et \`a montrer que le remplissage est le m\'ecanisme, sans pr\'etendre
+chiffrer sa part exacte.
 
 Il y a une seconde raison, plus profonde, pour laquelle le plafond est bas :
-le GPU n'\'etait d\'ej\`a pas inoccup\'e pendant la collecte, pas plus que le
-CPU ne l'\'etait pendant l'inf\'erence dans le r\'egime batch\'e. La boucle
-mono-thread \emph{pr\'epare} le lot suivant pendant que le GPU \'evalue le
-pr\'ec\'edent ? Non : dans l'architecture par vagues, les deux phases
-alternent strictement, et c'est justement cette alternance que la production
-continue supprimerait. Mais les mesures montrent que l'alternance co\^ute peu
-(1,5 \`a 2,3\,\% d'attente de barri\`ere) parce que la collecte elle-m\^eme
-est tr\`es courte face \`a l'inf\'erence. Autrement dit, l'architecture
-batch\'ee \'etait d\'ej\`a proche de sa limite : le GPU est le goulot, et il
-le reste.
+le GPU \'etait d\'ej\`a largement occup\'e pendant la collecte, puisque celle-ci
+ne dure que quelques dizaines de millisecondes face \`a une inf\'erence de
+plusieurs centaines. L'alternance des phases co\^ute peu (1,5 \`a 2,3\,\%
+d'attente de barri\`ere) parce que la collecte elle-m\^eme est courte. Autrement
+dit, l'architecture batch\'ee \'etait d\'ej\`a proche de sa limite : le GPU est
+le goulot, et il le reste.
 
 \subsection{Ce qui a march\'e, ce qui a d\'e\c{c}u}
 
