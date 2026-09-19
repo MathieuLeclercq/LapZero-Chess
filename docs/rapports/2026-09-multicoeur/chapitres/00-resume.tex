@@ -2,7 +2,7 @@
 \addcontentsline{toc}{section}{R\'esum\'e}
 
 Ce rapport retrace la conception, l'impl\'ementation et l'\'evaluation d'une
-recherche MCTS multi\oe{}ur dans LapZero-Chess, un moteur d'\'echecs de type
+recherche MCTS multic\oe{}ur dans LapZero-Chess, un moteur d'\'echecs de type
 AlphaZero entra\^in\'e sur une machine personnelle. Avant ce chantier, le
 moteur savait d\'ej\`a regrouper plusieurs positions dans une seule inf\'erence
 GPU gr\^ace \`a un virtual loss de type Leela Chess Zero, mais un seul c\oe{}ur
@@ -34,7 +34,7 @@ pr\'eparation CPU ne peut pas faire davantage. Le r\'eglage
 \begin{essentiel}
 \textbf{L'essentiel en dix points.}
 \begin{enumerate}[leftmargin=1.4em,itemsep=2pt]
-  \item Avant le multi\oe{}ur, chaque simulation payait une latence fixe
+  \item Avant le multic\oe{}ur, chaque simulation payait une latence fixe
   d'environ 3,4\,ms, et le d\'ebit \'etait plat (286 \`a 299 simulations par
   seconde) quelles que soient la position et la profondeur. Le batching par
   virtual loss a fait monter ce d\'ebit \`a 320--850 selon la position et la
