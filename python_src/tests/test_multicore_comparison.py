@@ -56,6 +56,13 @@ def test_verdicts_selon_les_bornes():
     assert verdict_qualite(MARGE_NON_INFERIORITE, 0.01) == "non-inferiorite"
 
 
+def test_verdicts_aux_bornes_exactes():
+    """Le plan dit high < -0.01 pour une regression et low >= -0.01 pour la
+    non-inferiorite : une borne exactement a la marge n'est jamais un echec."""
+    assert verdict_qualite(MARGE_NON_INFERIORITE, 0.05) == "non-inferiorite"
+    assert verdict_qualite(-0.05, MARGE_NON_INFERIORITE) == "indetermine"
+
+
 def _ecrire_campagne(tmp_path, nom, reussites, meta_extra=None,
                      erreurs=None, index_force=None):
     import csv as csv_mod
@@ -143,6 +150,30 @@ def test_comparer_refuse_un_sidecar_absent(tmp_path):
         comparer(reference, candidat)
 
 
+def test_comparer_refuse_une_colonne_absente(tmp_path):
+    """Un CSV tronque ne doit pas produire une comparaison vide : sans la
+    colonne de reussite, la lecture echoue clairement."""
+    reference = _ecrire_campagne(tmp_path, "ref", [True])
+    reference.write_text("ligne,erreur\n0,\n", encoding="utf-8")
+    candidat = _ecrire_campagne(tmp_path, "cand", [True])
+
+    with pytest.raises(ValueError, match="reussi_recherche"):
+        comparer(reference, candidat)
+
+
+@pytest.mark.parametrize("cle, valeur", [
+    ("simulations", 64),
+    ("search_seconds", 2.0),
+])
+def test_comparer_refuse_des_budgets_differents(tmp_path, cle, valeur):
+    reference = _ecrire_campagne(tmp_path, "ref", [True, False])
+    candidat = _ecrire_campagne(
+        tmp_path, "cand", [True, False], meta_extra={cle: valeur})
+
+    with pytest.raises(ValueError, match=cle):
+        comparer(reference, candidat)
+
+
 def test_comparer_non_inferiorite_et_paires_discordantes(tmp_path):
     reference_reussites = [i % 2 == 0 for i in range(100)]
     candidat_reussites = list(reference_reussites)
@@ -174,6 +205,19 @@ def test_comparer_regression_est_detectee(tmp_path):
     assert comparaison.verdict == "regression"
     assert comparaison.discordantes_candidat_perd == 10
     assert comparaison.discordantes_candidat_gagne == 0
+
+
+def test_le_rapport_precise_la_limite_du_bootstrap(tmp_path):
+    """Le bootstrap mesure l'echantillon de puzzles, pas la variabilite
+    d'ordonnancement multicœur : le rapport doit le dire."""
+    reference = _ecrire_campagne(tmp_path, "ref", [True, False])
+    candidat = _ecrire_campagne(tmp_path, "cand", [True, True])
+
+    comparaison, meta_ref, meta_cand = comparer(reference, candidat)
+    texte = format_rapport(comparaison, meta_ref, meta_cand,
+                           reference, candidat, seed=42)
+
+    assert "pas toute la variabilite" in texte
 
 
 def test_format_rapport_affiche_les_metadonnees_et_le_verdict(tmp_path):

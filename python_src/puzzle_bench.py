@@ -509,7 +509,11 @@ def main() -> int:
     print(f"Rapport : {out_rapport}")
     print(f"Duree   : {duree / 60.0:.1f} min")
     if stats.erreurs:
+        # Un CSV contenant des lignes en erreur ne doit jamais se faire passer
+        # pour une campagne reussie : la comparaison les refusera, mais le
+        # statut d'echec doit deja etre visible ici.
         print(f"Erreurs de donnees : {stats.erreurs}", file=sys.stderr)
+        return 1
     return 0
 
 

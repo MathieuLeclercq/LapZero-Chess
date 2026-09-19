@@ -33,6 +33,11 @@ from puzzle_bench import chemin_sidecar
 MARGE_NON_INFERIORITE = -0.01
 TIRAGES_BOOTSTRAP = 20000
 
+# Colonnes sans lesquelles une campagne n'est pas exploitable : sans la
+# colonne de reussite, un fichier tronque produirait une comparaison vide au
+# lieu d'une erreur explicite.
+COLONNES_REQUISES = ("ligne", "erreur", "reussi_recherche")
+
 # Toutes les cles qui doivent coincider entre reference et candidat. Seul le
 # nombre de workers de recherche peut differer : c'est la variable etudiee.
 CLES_COMPATIBLES = (
@@ -78,8 +83,13 @@ def charger_csv(chemin: Path) -> dict[int, dict]:
     lignes: dict[int, dict] = {}
     with open(chemin, encoding="utf-8", newline="") as f:
         for rang, ligne in enumerate(csv.DictReader(f), 1):
-            if "ligne" not in ligne or ligne["ligne"] is None:
-                raise ValueError(f"{chemin} : colonne ligne absente (rang {rang})")
+            for colonne in COLONNES_REQUISES:
+                if colonne not in ligne:
+                    raise ValueError(
+                        f"{chemin} : colonne {colonne} absente (rang {rang})")
+            if ligne["ligne"] is None:
+                raise ValueError(
+                    f"{chemin} : valeur de ligne absente (rang {rang})")
             index = int(ligne["ligne"])
             if index in lignes:
                 raise ValueError(f"{chemin} : ligne {index} en doublon")
@@ -227,7 +237,9 @@ def format_rapport(comparaison: Comparaison, meta_reference: dict,
         f"Paires : {comparaison.total}",
         "",
         "Le critere est le premier coup de recherche, identique a la solution.",
-        "L'intervalle est un bootstrap apparie sur les paires completes. Les",
+        "L'intervalle est un bootstrap apparie sur les paires completes. Ce",
+        "bootstrap mesure l'incertitude de l'echantillon de puzzles pour ces",
+        "executions, pas toute la variabilite d'ordonnancement multicœur. Les",
         "paires discordantes et McNemar sont des diagnostics : une p-value",
         "superieure a 0,05 n'est pas une preuve d'equivalence.",
         "",

@@ -406,6 +406,30 @@ def test_main_refuse_simulations_explicites_et_mode_temps(
         puzzle_bench.main()
 
 
+def test_main_retourne_un_echec_de_campagne_si_un_puzzle_est_en_erreur(
+        tmp_path, monkeypatch, modele):
+    """Une campagne avec des lignes en erreur doit sortir en echec, pour
+    qu'aucun CSV partiellement exploitable ne soit compare en silence."""
+    import puzzle_bench
+
+    chemin, _ = modele
+    banc = tmp_path / "banc_erreur.txt"
+    banc.write_text(
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        "|e2e4 e2e4|b8c6|1500|fork short\n",
+        encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [
+        "puzzle_bench.py", "--model", str(CHECKPOINT),
+        "--dossier-onnx", str(chemin.parent),
+        "--banc", str(banc), "--limite", "1", "--simulations", "8",
+        "--travailleurs", "1",
+        "--out-csv", str(tmp_path / "res.csv"),
+        "--out-rapport", str(tmp_path / "r.md"),
+    ])
+
+    assert puzzle_bench.main() == 1
+
+
 def test_main_refuse_un_fichier_de_banc_absent(tmp_path, monkeypatch):
     import puzzle_bench
 

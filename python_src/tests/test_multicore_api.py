@@ -82,3 +82,29 @@ def test_appels_historiques_sans_worker_restent_valides(evaluateur):
     mcts.step_analysis(_plateau(), 3, 1.4, 1)
 
     assert mcts.inspect_tree().root_visits == 3
+
+
+def test_clear_evaluation_cache_equilibre_un_mcts_neuf(evaluateur):
+    """En mono-worker, une recherche apres clear doit etre indiscernable d'une
+    premiere recherche sur un objet neuf : meme TT vide, meme politique, memes
+    compteurs. C'est la garantie que le pool chaud du banc ne mesure pas autre
+    chose."""
+    board = _plateau()
+
+    chaud = chess_engine.MCTS(evaluateur, 8192, 0)
+    chaud.mcts_search(board, 8, 1.4, False, 8)
+    chaud.reset_counters()
+    chaud.clear_evaluation_cache()
+    pi_chaud = chaud.mcts_search(board, 8, 1.4, False, 8)
+    c_chaud = chaud.get_counters()
+
+    neuf = chess_engine.MCTS(evaluateur, 8192, 0)
+    neuf.reset_counters()
+    pi_neuf = neuf.mcts_search(board, 8, 1.4, False, 8)
+    c_neuf = neuf.get_counters()
+
+    assert pi_chaud == pi_neuf
+    assert (c_chaud.nn_calls, c_chaud.nn_batches, c_chaud.tt_hits,
+            c_chaud.tt_misses, c_chaud.completed_simulations) == (
+        c_neuf.nn_calls, c_neuf.nn_batches, c_neuf.tt_hits,
+        c_neuf.tt_misses, c_neuf.completed_simulations)
