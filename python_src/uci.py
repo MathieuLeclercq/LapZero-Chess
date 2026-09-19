@@ -35,6 +35,26 @@ MCTS_WORKER_COUNT = 8
 SNAPSHOT_INTERVAL = 0.1
 NB_FAST_PLIES_OPENING = 10
 
+# Journal par coup, une ligne par recherche. Independant du log de lichess-bot,
+# qui envoie stderr vers DEVNULL quand silence_stderr est faux. Le volume est
+# d'environ 100 octets par coup, et la taille est plafonnee par rotation.
+STATS_LOG = Path(__file__).resolve().parent / "uci_stats.log"
+STATS_LOG_MAX_BYTES = 1_000_000
+
+
+def _journaliser(message: str) -> None:
+    """Ecrit le bilan sur stderr (terminal, Nibbler) et dans le journal."""
+    print(message, file=sys.stderr, flush=True)
+    try:
+        if (STATS_LOG.exists()
+                and STATS_LOG.stat().st_size > STATS_LOG_MAX_BYTES):
+            STATS_LOG.replace(STATS_LOG.with_suffix(".log.1"))
+        with open(STATS_LOG, "a", encoding="utf-8") as fichier:
+            fichier.write(
+                f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
+    except OSError:
+        pass
+
 
 def _construire_evaluateur():
     """Le GPU d'abord, le CPU en repli.
@@ -45,10 +65,10 @@ def _construire_evaluateur():
     repli silencieux vaut mieux qu'un moteur qui refuse de demarrer.
     """
     try:
-        return chess_engine.ONNXEvaluator(MODEL_PATH, True)
+        return chess_engine.ONNXEvaluator(MODEL_PATH, True), "GPU"
     except Exception as e:
         print(f"info string GPU indisponible, repli sur le CPU : {e}", flush=True)
-        return chess_engine.ONNXEvaluator(MODEL_PATH, False)
+        return chess_engine.ONNXEvaluator(MODEL_PATH, False), "CPU"
 
 
 # ============================================================
@@ -59,8 +79,11 @@ class UCIEngine:
         self.board = chess_engine.Chessboard()
         # Injection pour les tests : sans elle, construire un UCIEngine exige un
         # modele ONNX, et MODEL_PATH pointe vers une autre machine.
-        self.evaluator = (evaluator if evaluator is not None
-                          else _construire_evaluateur())
+        if evaluator is not None:
+            self.evaluator = evaluator
+            self.provider = "injecte"
+        else:
+            self.evaluator, self.provider = _construire_evaluateur()
         self.mcts = (mcts if mcts is not None
                      else chess_engine.MCTS(self.evaluator, tt_size=4_000_000))
         self.search_thread = None
@@ -102,6 +125,12 @@ class UCIEngine:
                 print("option name WeightsFile type string default <internal>")
                 print("uciok")
                 sys.stdout.flush()
+                # Bilan de configuration : stderr pour le direct, journal pour
+                # l'apres-coup.
+                _journaliser(
+                    f"uci.py pret : modele {Path(MODEL_PATH).name}, "
+                    f"{self.provider}, lot {MCTS_BATCH_SIZE}, "
+                    f"workers {MCTS_WORKER_COUNT}, TT 4000000")
 
             elif command == "isready":
                 print("readyok")
@@ -398,6 +427,7 @@ class UCIEngine:
         # --- 2. FIN DE RECHERCHE ET NORME UCI ---
         best_stats = self.mcts.get_analysis_results()
         if not best_stats:
+            _journaliser("recherche : aucune statistique, bestmove 0000")
             print("bestmove 0000")
             sys.stdout.flush()
             return
@@ -406,6 +436,17 @@ class UCIEngine:
         is_black = (self.board.turn == chess_engine.Color.BLACK)
         o_f, o_r, d_f, d_r, promo = decode_move_index(self.board, my_best.move_idx, is_black)
         my_best_uci = coords_to_uci(o_f, o_r, d_f, d_r, promo)
+
+        # Bilan par coup : nombre de simulations, coup choisi et visites.
+        # Permet de diagnostiquer un coup faible a posteriori sans dependre du
+        # log de lichess-bot.
+        visites_racine = sum(s.visits for s in best_stats)
+        _journaliser(
+            f"recherche : {total_sims} sims en "
+            f"{time.time() - self.search_start_time:.1f} s, "
+            f"best {my_best_uci} ({my_best.visits}/{visites_racine} visites), "
+            f"workers {MCTS_WORKER_COUNT}, {self.provider}, "
+            f"{'arretee' if self.stop_event.is_set() else 'terminee'}")
 
         # Si la GUI a forcé l'arrêt OU si on est en analyse libre, on coupe net.
         if self.stop_event.is_set() or self.target_time == 1e9:

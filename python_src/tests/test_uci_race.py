@@ -124,3 +124,64 @@ def test_la_boucle_uci_transmet_le_nombre_de_workers():
     _simulations, batch_size, worker_count = appels[0]
     assert batch_size == uci.MCTS_BATCH_SIZE
     assert worker_count == uci.MCTS_WORKER_COUNT == 8
+
+
+def test_la_recherche_journalise_le_bilan(capsys, tmp_path, monkeypatch):
+    """Le bilan par coup sort sur stderr et dans un journal dedie, pour
+    diagnostiquer un coup faible a posteriori sans dependre de lichess-bot."""
+    import threading
+    from types import SimpleNamespace
+
+    journal = tmp_path / "uci_stats.log"
+    monkeypatch.setattr(uci, "STATS_LOG", journal)
+    premier = threading.Event()
+
+    class FauxMCTSRecherche:
+        index = 0
+
+        def step_analysis(self, board, simulations, c_puct, batch_size,
+                          worker_count):
+            premier.set()
+
+        def get_analysis_results(self):
+            return [SimpleNamespace(move_idx=FauxMCTSRecherche.index, visits=7,
+                                    q_value=0.25, prior=0.5)]
+
+        def reset_analysis(self):
+            pass
+
+        def update_root(self, move_idx):
+            pass
+
+    moteur = UCIEngine(evaluator=object(), mcts=FauxMCTSRecherche())
+    moteur.board.set_startup_pieces()
+    FauxMCTSRecherche.index = moteur.board.get_legal_move_indices()[0]
+    moteur.start_search(["go", "movetime", "10000"])
+    try:
+        assert premier.wait(timeout=5), "step_analysis n'a jamais ete appele"
+    finally:
+        moteur.stop_search()
+
+    err = capsys.readouterr().err
+    assert "recherche :" in err
+
+    contenu = journal.read_text(encoding="utf-8")
+    assert "recherche :" in contenu
+    assert "visites" in contenu
+    assert "workers" in contenu
+    assert str(uci.MCTS_WORKER_COUNT) in contenu
+
+
+def test_le_journal_tourne_au_dela_de_la_taille_max(tmp_path, monkeypatch):
+    """Le journal ne doit pas grossir sans fin sur le disque."""
+    journal = tmp_path / "uci_stats.log"
+    monkeypatch.setattr(uci, "STATS_LOG", journal)
+    monkeypatch.setattr(uci, "STATS_LOG_MAX_BYTES", 200)
+    journal.write_text("x" * 400, encoding="utf-8")
+
+    uci._journaliser("ligne suivante")
+
+    ancien = tmp_path / "uci_stats.log.1"
+    assert ancien.exists()
+    assert ancien.stat().st_size == 400
+    assert "ligne suivante" in journal.read_text(encoding="utf-8")

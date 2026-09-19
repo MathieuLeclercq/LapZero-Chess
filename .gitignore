@@ -14,6 +14,9 @@ training_data/
 python_src/tests/__pycache__
 __pycache__/
 .pytest_cache/
+
+# Journal par coup du bot UCI, regenere a chaque partie.
+python_src/uci_stats.log
 lichess_bot/
 
 lichess_token.txt
