@@ -396,12 +396,12 @@ du banc. Il mesure séparément `mcts_search()` et `step_analysis()`.
 
 Le même protocole compare ensuite :
 
-| Configuration | Rôle |
-|---|---|
-| 1 worker, batch 8 | référence actuelle |
-| 2 workers, batch 8 | premier effet de concurrence |
-| 4 workers, batch 8 | montée en charge |
-| 8 workers, batch 8 | cible initiale |
+| Configuration               | Rôle                                          |
+| --------------------------- | ---------------------------------------------- |
+| 1 worker, batch 8           | référence actuelle                           |
+| 2 workers, batch 8          | premier effet de concurrence                   |
+| 4 workers, batch 8          | montée en charge                              |
+| 8 workers, batch 8          | cible initiale                                 |
 | 16 workers, batch 8 puis 16 | exploratoire, seulement si 8 reste CPU-limité |
 
 Chaque worker peut produire plusieurs feuilles par vague. La taille maximale du lot n'est

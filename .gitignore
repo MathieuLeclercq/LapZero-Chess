@@ -12,6 +12,7 @@ python_src/checkpoints_onnx
 docs/PGN/all
 training_data/
 python_src/tests/__pycache__
+__pycache__/
 .pytest_cache/
 lichess_bot/
 
