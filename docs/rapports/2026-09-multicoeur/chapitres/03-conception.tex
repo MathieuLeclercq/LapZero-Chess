@@ -1,0 +1,343 @@
+\section{Conception}
+\label{sec:conception}
+
+\begin{resume}
+La recherche par vagues s\'epare strictement deux temps. Pendant la collecte,
+plusieurs workers descendent en parall\`ele avec leurs propres plateaux et
+n'\'ecrivent jamais les statistiques de l'arbre ; ils r\'eservent les feuilles
+par une transition atomique et d\'eposent des r\'esultats immuables. Apr\`es la
+barri\`ere, le coordinateur ex\'ecute une seule inf\'erence, d\'eveloppe les
+feuilles et remonte les valeurs, s\'equentiellement. La correction tient \`a
+quatre m\'ecanismes : des \'etats de n\oe{}ud atomiques, une garde RAII qui
+poss\`ede le chemin r\'eserv\'e, une table de transposition par snapshots
+sous verrous ray\'es, et un budget de simulations exact. La production
+continue, les verrous par n\oe{}ud et la d\'eduplication des \'evaluations
+sont explicitement \'ecart\'es \`a ce stade.
+\end{resume}
+
+\subsection{Vue d'ensemble d'une vague}
+
+Une vague est la plus petite unit\'e de travail du syst\`eme. Le coordinateur
+choisit un nombre de permis \'egal \`a $\min(\text{lot}, \text{simulations
+restantes})$, puis les workers actifs descendent l'arbre en parall\`ele. Un
+worker peut encha\^iner plusieurs tentatives par vague, de sorte que deux ou
+quatre workers peuvent remplir un lot de huit. Quand tous les collecteurs
+sont arr\^et\'es, la barri\`ere s'ouvre : le coordinateur fusionne les
+r\'esultats dans un ordre stable, traite les terminaux, lance au plus une
+inf\'erence group\'ee, d\'eveloppe les feuilles et effectue les remont\'ees.
+La vague suivante ne commence qu'apr\`es publication compl\`ete de ces
+modifications.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[x=1cm,y=0.62cm,font=\scriptsize]
+% axe du temps
+\draw[-{Latex[length=2mm]}, gris] (0,0.2) -- (13,0.2)
+  node[right, font=\scriptsize] {temps};
+% lignes de vie
+\foreach \y/\lab in {1.4/W1, 2.2/W2, 3.0/W3, 4.2/Coord.} {
+  \draw[gris!40] (0,\y) -- (12.6,\y);
+  \node[left, font=\scriptsize, align=right] at (0,\y) {\lab};
+}
+% collecte parallele
+\foreach \x/\y in {0/1.4, 0/2.2, 0/3.0} {
+  \fill[bleu!55, rounded corners=1pt]
+    (\x+0.15,\y-0.18) rectangle (\x+4.2,\y+0.18);
+}
+\node at (2.2,1.9) [font=\scriptsize, align=center]
+  {descentes parall\`eles\\\scriptsize (plateaux priv\'es, virtual loss)};
+\draw[dashed, ambre, thick] (4.5,0.4) -- (4.5,4.6)
+  node[above, font=\scriptsize, ambre] {barri\`ere};
+% inference + traitement
+\fill[vert!45, rounded corners=1pt] (4.8,4.02) rectangle (8.6,4.38);
+\node at (6.7,4.2) {une inf\'erence group\'ee};
+\fill[gris!25, rounded corners=1pt] (8.6,4.02) rectangle (12.3,4.38);
+\node at (10.45,4.2) {expansion + remont\'ees};
+% vague suivante
+\foreach \x/\y in {9.2/1.4, 9.2/2.2, 9.2/3.0} {
+  \fill[bleu!25, rounded corners=1pt]
+    (\x,\y-0.18) rectangle (\x+3.4,\y+0.18);
+}
+\node at (10.9,1.9) [font=\scriptsize] {vague suivante};
+\end{tikzpicture}
+\caption{D\'eroulement d'une vague. La collecte est parall\`ele et sans
+\'ecriture des statistiques ; la barri\`ere garantit que l'inf\'erence, les
+expansions et les remont\'ees voient un arbre stable.}
+\label{fig:vague}
+\end{figure}
+
+\subsection{Pourquoi un arbre partag\'e}
+
+L'alternative naturelle, un arbre par c\oe{}ur, a \'et\'e \'ecart\'ee pour
+trois raisons. D'abord elle duplique les \'evaluations : deux arbres
+ind\'ependants red\'ecouvrent la m\^eme position et paient deux inf\'erences.
+Ensuite elle dilue la profondeur : huit arbres \`a 700 simulations explorent
+chacun un arbre de 700 n\oe{}uds au lieu d'un arbre de 5\,600. Enfin elle
+complique fortement la r\'eutilisation de racine : apr\`es un coup jou\'e, le
+sous-arbre du coup doit \^etre retrouv\'e dans chaque arbre, ou perdu.
+
+Le self-play, lui, fonctionne d\'ej\`a par parties ind\'ependantes : ses huit
+fils OpenMP ne partagent pas d'arbre, et c'est tr\`es efficace parce que les
+parties divergent naturellement. La recherche UCI n'a pas cette chance : une
+seule position \`a analyser, donc un seul arbre. C'est pr\'ecis\'ement ce cas
+que les vagues traitent.
+
+\subsection{Le r\'esultat de collecte}
+
+Une descente produit un objet d\'epla\c{c}able, \code{LeafWork}, qui ne
+contient aucun pointeur vers le plateau local. Ses champs :
+
+\begin{itemize}[leftmargin=1.4em]
+  \item le type de r\'esultat : \code{Network}, \code{Terminal} ou
+  \code{Collision} ;
+  \item le n\oe{}ud r\'eserv\'e et la garde \code{PathReservation} compl\`ete
+  qui porte le virtual loss de tout le chemin ;
+  \item la cl\'e de cache et les coups l\'egaux, captur\'es \`a la feuille ;
+  \item le tenseur du r\'eseau, uniquement pour une vraie feuille ;
+  \item la valeur terminale, lorsqu'elle est d\'ej\`a connue.
+\end{itemize}
+
+Le r\'esultat transf\`ere au coordinateur la responsabilit\'e de terminer ou
+d'annuler la r\'eservation exactement une fois. Cette propri\'et\'e est ce qui
+rend les chemins d'erreur simples : la destruction de la garde suffit \`a
+tout nettoyer.
+
+\subsection{\'Etats de n\oe{}ud et propri\'et\'e}
+
+Chaque n\oe{}ud porte un \'etat atomique \`a quatre valeurs :
+
+\begin{center}
+\small
+\begin{tabular}{lp{10.5cm}}
+\toprule
+\'Etat & Signification \\
+\midrule
+\code{Unexpanded} & n\oe{}ud jamais r\'eserv\'e, ses enfants n'existent pas \\
+\code{Pending}    & une descente le poss\`ede ; ses enfants se construisent \\
+\code{Expanded}   & liste d'enfants compl\`ete et publi\'ee \\
+\code{Terminal}   & mat, pat, nulle de r\`egle ou mat\'eriel insuffisant \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+La propri\'et\'e s'acquiert par une comparaison-\'echange
+\code{Unexpanded -> Pending}. Un seul worker gagne ; les autres d\'eclarent
+une collision. \`A aucun moment deux descentes ne peuvent d\'evelopper le
+m\^eme n\oe{}ud, ce qui r\'esout le pi\`ege historique du batching : deux jeux
+d'enfants construits en parall\`ele sur la m\^eme feuille. L'\'etat
+\code{Expanded} n'est publi\'e qu'apr\`es un \code{swap} de la liste
+d'enfants compl\`ete, avec une \'ecriture \code{release} ; un lecteur fait
+d'abord un chargement \code{acquire} de l'\'etat, puis lit la liste. Aucun
+lecteur ne peut donc observer une liste partiellement construite.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  font=\small, node distance=3.4cm,
+  etat/.style={draw=bleu!60, fill=bleuclair, rounded corners=2pt,
+    minimum width=2.3cm, minimum height=0.8cm, align=center},
+  trans/.style={-{Latex[length=2mm]}, draw=gris, thick}
+]
+\node[etat] (unexp) {Unexpanded};
+\node[etat, right of=unexp] (pending) {Pending};
+\node[etat, right of=pending] (expanded) {Expanded};
+\node[etat, below of=pending, yshift=-0.4cm] (terminal) {Terminal};
+
+\draw[trans] (unexp) -- node[above, font=\scriptsize]
+  {CAS (un seul gagnant)} (pending);
+\draw[trans] (pending) -- node[above, font=\scriptsize, align=center]
+  {publication apr\`es\\construction des enfants} (expanded);
+\draw[trans] (pending) -- node[right, font=\scriptsize, align=left, xshift=2pt]
+  {mat, pat,\\nulle de r\`egle} (terminal);
+\draw[trans, dashed] (pending) to[bend left=38]
+  node[below, font=\scriptsize] {collision : release} (unexp);
+\draw[trans] (expanded) to[loop above] node[above, font=\scriptsize]
+  {s\'election} (expanded);
+\end{tikzpicture}
+\caption{Machine \`a \'etats d'un n\oe{}ud. La transition vers \code{Expanded}
+est une publication : les enfants sont enti\`erement construits avant que
+l'\'etat ne devienne visible. La transition en pointill\'es est le retour
+arri\`ere d'une collision ou d'une exception.}
+\label{fig:etats}
+\end{figure}
+
+\subsection{La garde RAII et le virtual loss}
+
+Le virtual loss doit \^etre visible pendant la s\'election, pas apr\`es
+l'arriv\'ee \`a la feuille. Chaque worker ajoute donc la racine puis chaque
+enfant choisi \`a sa garde \code{PathReservation} avant de continuer la
+descente. Deux workers peuvent encore choisir le m\^eme enfant
+simultan\'ement ; le virtual loss r\'eduit cette probabilit\'e mais ne la
+supprime pas. La garantie de correction reste la transition exclusive vers
+\code{Pending}.
+
+La garde poss\`ede deux choses : le chemin r\'eserv\'e (un vecteur de
+pointeurs) et, le cas \'ech\'eant, le n\oe{}ud en \code{Pending} dont elle est
+propri\'etaire. Sa destruction lib\`ere tout exactement une fois.
+
+\begin{lstlisting}[caption={La r\'eservation, coeur de la garde RAII. La
+r\'eservation enregistre le pointeur avant d'incr\'ementer le compteur, de
+sorte qu'une allocation rat\'ee ne perd aucun compteur. La publication
+d\'esarme la propri\'et\'e avant de pouvoir annuler un \'etat publi\'e.},
+label={lst:reservation}]
+bool PathReservation::try_claim(MCTSNode* node) {
+    if (node == nullptr || m_owned_pending != nullptr) return false;
+    NodeState expected = NodeState::Unexpanded;
+    if (!node->state.compare_exchange_strong(
+            expected, NodeState::Pending,
+            std::memory_order_acq_rel, std::memory_order_acquire)) {
+        return false;   // collision : un autre collecteur possede le noeud
+    }
+    m_owned_pending = node;
+    return true;
+}
+
+void PathReservation::publish(NodeState state) noexcept {
+    if (m_owned_pending == nullptr) return;
+    m_owned_pending->state.store(state, std::memory_order_release);
+    m_owned_pending = nullptr;   // la garde ne peut plus annuler
+}
+
+void PathReservation::release() noexcept {
+    if (m_owned_pending != nullptr) {
+        NodeState expected = NodeState::Pending;
+        m_owned_pending->state.compare_exchange_strong(
+            expected, NodeState::Unexpanded,
+            std::memory_order_release, std::memory_order_relaxed);
+        m_owned_pending = nullptr;
+    }
+    for (MCTSNode* node : m_path) {
+        node->n_in_flight.fetch_sub(1, std::memory_order_relaxed);
+    }
+    m_path.clear();
+}
+\end{lstlisting}
+
+Trois propri\'et\'es de cette garde m\'eritent d'\^etre soulign\'ees. D'abord,
+\code{reserve()} enregistre le pointeur dans le vecteur avant d'incr\'ementer
+le compteur atomique : si l'allocation \'echoue, aucun compteur n'est perdu.
+Ensuite, \code{release()} ne remet en \code{Unexpanded} que le n\oe{}ud dont
+la garde est propri\'etaire et qui n'a pas \'et\'e publi\'e ; si un autre
+worker a repris le n\oe{}ud entre-temps, le CAS \'echoue et rien n'est
+\'ecras\'e. Enfin, la publication d\'esarme la garde : un \code{release()}
+ult\'erieur ne peut plus annuler un \'etat d\'ej\`a visible.
+
+\subsection{La table de transposition par snapshots}
+
+La table ne rend plus jamais de pointeur vers une entr\'ee. Un
+\code{probe()} copie la valeur et les seules entr\'ees de politique utiles
+dans un snapshot local, sous le verrou d'une bande ; un \code{store()}
+pr\'epare ses donn\'ees puis remplace l'entr\'ee sous le m\^eme verrou.
+L'index est le hash modulo la taille, et la bande est d\'eriv\'ee de l'index
+physique r\'eel, pas d'un second modulo ind\'ependant sur le hash :
+
+\begin{lstlisting}[caption={Index et bande. La bande est d\'eriv\'ee de
+l'index r\'eellement acc\'ed\'e, ce qui garantit que deux cl\'es qui
+s'\'ecrasent dans la m\^eme entr\'ee prennent toujours la m\^eme bande.},
+label={lst:stripe}]
+std::size_t EvaluationCache::index_for(const EvaluationCacheKey& key) const {
+    return key.position_hash % m_entries.size();
+}
+std::size_t EvaluationCache::stripe_for(std::size_t index) const {
+    return index % m_stripes.size();   // 4096 bandes au plus
+}
+\end{lstlisting}
+
+L'ordre des rejets est celui de la s\'emantique \code{h0} : \`a hash
+\'egal, on v\'erifie le compteur des cinquante coups, puis le contexte
+courant, puis l'historique. L'attention \`a cet ordre n'est pas
+cosm\'etique : il d\'etermine la classification des refus dans les compteurs,
+donc la lisibilit\'e des campagnes. Un snapshot pris avant un
+\'ecrasement reste valide ; c'est test\'e explicitement.
+
+\subsection{Le succ\`es de table pendant la descente}
+
+Sur un succ\`es de table, le worker qui poss\`ede le \code{Pending} copie le
+snapshot, construit les enfants localement, publie \code{Expanded} et
+\emph{poursuit la m\^eme descente}. Ce comportement est celui du
+\code{select\_leaf} historique, et il a \'et\'e conserv\'e volontairement :
+un succ\`es de table ne consomme pas une simulation et ne provoque pas de
+remont\'ee \`a lui seul. Les autres workers ne lisent la liste d'enfants
+qu'apr\`es avoir observ\'e \code{Expanded} par une lecture \code{acquire}.
+
+Les n\oe{}uds terminaux, eux, sont d\'etect\'es avant toute consultation de
+la table. C'est une garantie de s\'emantique : une nulle par r\'ep\'etition
+ou par r\`egle des cinquante coups d\'epend de l'historique complet, et ne
+doit jamais \^etre servie par une entr\'ee de cache calcul\'ee ailleurs.
+
+\subsection{Budget exact, permis et collisions}
+
+Le budget est la contrainte la plus facile \`a violer en silence. Trois
+r\`egles le garantissent.
+
+\begin{enumerate}[leftmargin=1.4em]
+  \item Chaque vague dispose de $\text{slots} = \min(\text{lot},
+  \text{simulations restantes})$ permis, et un CAS d\'ecr\'emente un compteur
+  \code{available} avant toute tentative. Un permis n'est consomm\'e que par
+  un r\'esultat final (terminal ou feuille r\'eseau) ; une collision le rend.
+  \item Un compteur global d'essais borne la vague \`a $4 \times \text{slots}
+  + \text{workers}$ tentatives, pour qu'un arbre tr\`es collisionn\'e ne fasse
+  pas boucler les workers ind\'efiniment.
+  \item Si les collisions emp\^echent de remplir le lot, le coordinateur
+  ex\'ecute un lot partiel : le progr\`es est toujours garanti, et une vague
+  vide est trait\'ee comme une erreur de logique, pas ignor\'ee.
+\end{enumerate}
+
+\`A la fin d'un appel r\'eussi, le nombre de remont\'ees neuves est exactement
+\'egal au nombre de simulations demand\'e. Les compteurs distinguent les
+positions \'evalu\'ees, les appels physiques, les succ\`es de table et les
+collisions, ce qui permet de v\'erifier cette \'egalit\'e sur chaque
+campagne.
+
+\subsection{Exceptions, annulation et quiescence}
+
+Toute exception, qu'elle vienne d'un worker, de l'\'evaluateur ou du
+coordinateur, suit le m\^eme chemin : publication de l'annulation, r\'eveil
+de tous les workers, attente de leur retour, annihilation des gardes encore
+actives, restauration des \code{Pending} non publi\'es, puis relance de
+l'exception. Le destructeur de la garde fait le gros du travail ; le
+coordinateur ne fait que d\'etruire les r\'esultats qu'il d\'etient encore.
+
+Au repos, l'arbre doit \^etre quiescent : aucun \code{Pending}, aucun
+\code{n\_in\_flight} non nul, chaque r\'eservation termin\'ee ou annul\'ee
+exactement une fois. Ces invariants sont v\'erifi\'es par un parcours
+d'observabilit\'e, \code{inspect\_tree}, qui d\'etaille aussi les enfants
+dupliqu\'es, les parents incoh\'erents, les priors qui ne somment pas \`a 1 et
+les statistiques non finies.
+
+\subsection{Instrumentation et observabilit\'e}
+
+Les phases mesur\'ees sont la s\'election, la pr\'eparation du tenseur et de
+la cl\'e, la lecture et l'\'ecriture de table, l'attente de verrou, la copie
+du plateau, l'assemblage du lot, l'inf\'erence, l'expansion, les remont\'ees
+et l'attente des workers. Le chronom\'etrage est optionnel, d\'esactiv\'e par
+d\'efaut, et chaque thread \'ecrit dans son propre accumulateur, fusionn\'e
+apr\`es la recherche. Les d\'efinitions sont volontairement inclusives : le
+rapport ne pr\'etend pas mesurer des noyaux GPU, il mesure des temps d'appel.
+
+\subsection{Ce qui a \'et\'e \'ecart\'e, et pourquoi}
+
+\begin{center}
+\small
+\begin{tabular}{p{4.2cm}p{10.5cm}}
+\toprule
+Piste \'ecart\'ee & Raison \\
+\midrule
+Production continue & Deuxi\`eme \'etape, \`a d\'ecider apr\`es mesure. Elle
+exige une synchronisation des statistiques et de la structure d'arbre que la
+barri\`ere rend inutile. \\
+Un verrou par n\oe{}ud & Consommation m\'emoire et contention pour un
+b\'en\'efice inf\'erieur \`a la transition CAS, qui n'utilise que 8 bits
+d'\'etat. \\
+Atomiques sur $N$ et $W$ & Le protocole de lecture coh\'erente de $Q$ aurait
+\'et\'e plus complexe que la barri\`ere, sans gain mesurable. \\
+D\'eduplication des \'evaluations & Deux n\oe{}uds logiques diff\'erents
+peuvent demander la m\^eme position ; d\'edupliquer est un chantier
+d'optimisation distinct, hors du plan. \\
+R\'eglage de $c_{\text{puct}}$ & Changer la recherche pendant qu'on change
+l'ordonnancement rendrait toute mesure ininterpr\'etable. \\
+Softmax sur les seuls coups l\'egaux & Optimisation ind\'ependante, not\'ee au
+backlog. \\
+\bottomrule
+\end{tabular}
+\end{center}

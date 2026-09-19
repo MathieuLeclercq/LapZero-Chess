@@ -1,0 +1,144 @@
+\section{Validation}
+\label{sec:validation}
+
+\begin{resume}
+Sous MSVC, ThreadSanitizer n'existe pas : la correction concurrente ne peut
+pas \^etre d\'el\'egu\'ee \`a un outil d'analyse dynamique. La strat\'egie
+adopt\'ee combine quatre instruments : des tests d\'eterministes sur
+composants isol\'es, un faux \'evaluateur qui rend les entrelacements
+reproductibles, des points de crochet qui forcent les collisions, et des
+tests de mutation qui v\'erifient que les gardes d\'etectent r\'eellement les
+erreurs. Les invariants d'arbre servent de contr\^ole final apr\`es chaque
+recherche. Ce chapitre inventorie ce que chaque test verrouille, et dit
+honn\^etement ce qu'il ne couvre pas.
+\end{resume}
+
+\subsection{Tester la concurrence sans outil d'analyse}
+
+La difficult\'e d'un test concurrent classique est son irr\'ep\'etabilit\'e :
+un entrelacement fautif peut ne se produire qu'une fois sur mille, et un
+test qui passe ne prouve rien. Le projet a donc pris le probl\`eme par
+l'autre bout : au lieu d'esp\'erer un entrelacement, on le \emph{force} avec
+des points de synchronisation explicites, puis on v\'erifie les invariants.
+
+Trois briques rendent cela possible. Le \code{ControlledEvaluator} simule le
+r\'eseau : politique uniforme, valeur configurable, tailles de lot
+enregistr\'ees, \'echec programmable, et un crochet \code{before\_evaluate}
+qui peut bloquer l'appel sur une variable de condition. Le
+\code{WaveTestHooks} du collecteur offre deux points d'arr\^et,
+\code{before\_claim} et \code{before\_tt\_publish}, qui permettent de faire
+arriver deux workers exactement au m\^eme n\oe{}ud. Enfin, le support de test
+\code{require\_test} l\`eve une exception au lieu d'appeler \code{assert} :
+les tests restent actifs en compilation Release, o\`u \code{NDEBUG} aurait
+supprim\'e les assertions standard.
+
+\subsection{Inventaire des tests}
+
+\begin{center}
+\footnotesize
+\begin{longtable}{p{4.1cm}p{9.7cm}}
+\toprule
+Cible & Ce que le test verrouille \\
+\midrule
+\endhead
+\code{search\_timing} & accumulateurs par phase, mode d\'esactiv\'e sans
+horloge, fusion des workers \\
+\code{evaluator\_contract} & le faux r\'eseau pilote r\'eellement le MCTS ;
+dimensions d'entr\'ee v\'erifi\'ees \\
+\code{board\_copy} & FEN, Zobrist, tenseur, cl\'e h7 et historiques identiques
+apr\`es copie, coup jou\'e et annul\'e (roque, prise en passant, promotion,
+r\'ep\'etition) \\
+\code{evaluation\_cache} & snapshots stables, collisions forc\'ees sur une
+m\^eme entr\'ee, ordre des rejets, clear et probe apr\`es clear, troncature
+\`a 128 coups \\
+\code{reservation} & propri\'et\'e unique sous huit gardes concurrentes,
+d\'eplacement, exception, compteurs nuls apr\`es lib\'eration \\
+\code{node\_state} & observabilit\'e des \'etats au repos, publication
+incoh\'erente, valeurs non finies, visites de racine \\
+\code{search\_executor} & identit\'es de threads stables, sous-ensemble actif,
+exception relay\'ee apr\`es retour des workers, nouvel appel possible,
+arr\^et idempotent \\
+\code{wave\_collection} & collision forc\'ee entre deux collecteurs,
+publication depuis la table, terminaux avant table, lot partiel, budget
+born\'e, tenseur compar\'e au rejeu r\'eel de l'historique \\
+\code{wave\_search} & workers 2/4/8, lots 1/8, budgets exacts, racine
+terminale, erreurs de dimensions, immobilit\'e pendant l'inf\'erence,
+s\'erialisation de \code{update\_root} \\
+\code{multicore\_stress} & 100 recherches par configuration sur trois
+positions, racines neuves et r\'eutilis\'ees, alternance des workers,
+finales et cas terminaux \\
+\code{selfplay\_shared\_core} & huit racines priv\'ees sur une instance MCTS,
+cl\'es qui s'\'ecrasent, deux parties compl\`etes du manager \\
+\code{selfplay\_phase\_bench} & r\'ef\'erence de performance du chemin
+self-play partag\'e, compar\'ee avant et apr\`es le chantier \\
+\bottomrule
+\end{longtable}
+\end{center}
+
+\subsection{Les invariants}
+
+Apr\`es toute recherche r\'eussie, le parcours \code{inspect\_tree} exige :
+tous les \code{n\_in\_flight} nuls ; aucun \code{Pending} au repos ; chaque
+r\'eservation termin\'ee ou annul\'ee exactement une fois ; exactement un
+backup par simulation demand\'ee ; aucun n\oe{}ud d\'evelopp\'e deux fois ;
+des enfants uniques avec parents corrects et priors sommant \`a 1 ; le
+plateau d'entr\'ee intact (FEN, hash, historiques, tenseur) ; et le coup
+principal l\'egal sur le plateau racine. Ces contr\^oles sont ex\'ecut\'es
+apr\`es chaque appel dans le stress de la t\^ache~8, et \`a la main dans les
+tests cibl\'es.
+
+Le budget exact m\'erite une phrase de plus. Il ne se v\'erifie pas sur les
+compteurs du r\'eseau, parce qu'une simulation peut se terminer sur un
+n\oe{}ud terminal ou sur un succ\`es de table sans appel r\'eseau. Il se
+v\'erifie sur \code{completed\_simulations} d'une part, et sur la somme des
+visites de racine d'autre part, avec la comparaison
+$\sum \text{visites enfants} \le \text{visites racine} \le \sum + 1$ qui
+tol\`ere les racines d\'evelopp\'ees sans visite propre.
+
+\subsection{Les entrelacements forc\'es}
+
+Cinq sc\'enarios d\'efectueux sont reproduits \`a volont\'e.
+
+\begin{enumerate}[leftmargin=1.4em]
+  \item \textbf{Collision.} Deux collecteurs sont synchronis\'es pour arriver
+  au m\^eme \code{before\_claim}. Une seule feuille r\'eseau doit sortir,
+  l'autre doit \^etre une collision, sans enfant dupliqu\'e, et les compteurs
+  doivent revenir au repos quand les r\'esultats sont d\'etruits.
+  \item \textbf{Publication depuis la table.} Un worker bloque avant de
+  publier ses enfants ; l'autre doit observer \code{Pending} et ne jamais
+  parcourir une liste partielle. Apr\`es publication, une descente doit
+  rejoindre un descendant, sans backup ni incr\'ement de visites.
+  \item \textbf{Inf\'erence bloqu\'ee.} Le faux r\'eseau se bloque sur une
+  variable de condition ; le compteur de descentes doit rester constant
+  pendant le blocage, ce qui v\'erifie que les workers s'arr\^etent bien \`a la
+  barri\`ere en phase de vagues.
+  \item \textbf{Exception au milieu d'un lot.} Un \'echec programm\'e de
+  l'\'evaluateur doit laisser z\'ero \code{Pending}, z\'ero r\'eservation, un
+  arbre inspectable et une recherche ult\'erieure possible.
+  \item \textbf{Terminal avant table.} Une position de nulle par r\`ep\'etition
+  ou par r\`egle des cinquante coups doit \^etre terminale m\^eme si une
+  entr\'ee de cache existe pour le m\^eme hash dans un autre contexte.
+\end{enumerate}
+
+\subsection{Les tests de mutation}
+
+Un test qui passe ne prouve pas qu'il d\'etecte une erreur. Trois mutations
+volontaires ont donc \'et\'e introduites, v\'erifi\'ees comme d\'etect\'ees,
+puis retir\'ees : la suppression d'une d\'ecr\'ementation du virtual loss
+(le test de fuite \'echoue), la neutralisation de la remise \`a z\'ero de
+\code{Pending} (le test d'exception \'echoue), et la neutralisation du CAS de
+propri\'et\'e (le test de collision \'echoue). Cette pratique a aussi
+\'et\'e appliqu\'ee au test de dur\'ee de vie Python : sans le
+\code{keep\_alive} du binding, le sous-processus meurt par violation
+d'acc\`es, ce qui prouve que le test discrimine.
+
+\subsection{Ce que la validation ne couvre pas}
+
+Trois limites sont assum\'ees. D'abord, l'absence de ThreadSanitizer : la
+conception et les tests d'entrelacement remplacent un outil qui aurait pu
+trouver des courses non anticip\'ees. Ensuite, les hooks forcent des
+entrelacements choisis, pas tous les entrelacements possibles ; un bug qui
+exige trois workers \`a un instant pr\'ecis pourrait passer. Enfin, la
+qualit\'e de recherche ne se teste pas par invariants : elle est mesur\'ee
+par le banc de puzzles, un instrument statistique dont les limites sont
+d\'ecrites au chapitre~6.

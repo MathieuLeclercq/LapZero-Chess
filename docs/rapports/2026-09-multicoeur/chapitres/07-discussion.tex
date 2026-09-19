@@ -1,0 +1,135 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\begin{resume}
+Le gain est modeste parce que le goulot n'\'etait pas l\`a o\`u on le croyait :
+l'inf\'erence occupait d\'ej\`a 96 \`a 99\,\% du temps, donc parall\'eliser la
+pr\'eparation CPU ne pouvait pas donner plus que quelques pour cent de
+m\'ediane, plus un effet de remplissage. Les crit\`eres d'acceptation sont
+franchis, mais la d\'ecision d'activer huit workers se paie d'une complexit\'e
+r\'eelle, et plusieurs menaces p\`esent sur la g\'en\'eralisation des
+r\'esultats. Ce chapitre les assume explicitement et en tire les le\c{c}ons.
+\end{resume}
+
+\subsection{Pourquoi pas un facteur huit}
+
+La loi d'Amdahl \cite{amdahl} explique l'essentiel. Si une fraction $p$ du
+temps est parall\'elisable, le gain maximal est $1/(1-p)$. Ici, la mesure des
+phases donne $1-p \approx 0,97$ \`a $0,99$ : le gain maximal th\'eorique est
+donc de 1 \`a 3\,\%. Le gain observ\'e, de 7 \`a 26\,\% selon la position,
+d\'epasse ce plafond apparent, ce qui signifie que les vagues ne font pas que
+parall\'eliser la collecte : elles am\'eliorent aussi la fa\c{c}on dont les
+lots sont remplis. Le remplissage passe de 6,1 \`a 6,7 en finale, et c'est
+cette hausse qui explique la plus grande partie du gain sur la position la
+plus lente.
+
+Il y a une seconde raison, plus profonde, pour laquelle le plafond est bas :
+le GPU n'\'etait d\'ej\`a pas inoccup\'e pendant la collecte, pas plus que le
+CPU ne l'\'etait pendant l'inf\'erence dans le r\'egime batch\'e. La boucle
+mono-thread \emph{pr\'epare} le lot suivant pendant que le GPU \'evalue le
+pr\'ec\'edent ? Non : dans l'architecture par vagues, les deux phases
+alternent strictement, et c'est justement cette alternance que la production
+continue supprimerait. Mais les mesures montrent que l'alternance co\^ute peu
+(1,5 \`a 2,3\,\% d'attente de barri\`ere) parce que la collecte elle-m\^eme
+est tr\`es courte face \`a l'inf\'erence. Autrement dit, l'architecture
+batch\'ee \'etait d\'ej\`a proche de sa limite : le GPU est le goulot, et il
+le reste.
+
+\subsection{Ce qui a march\'e, ce qui a d\'e\c{c}u}
+
+Ce qui a march\'e : la finale, o\`u le gain atteint $+22\,\%$ de m\'ediane et
+o\`u le p95 de latence s'am\'eliore m\^eme de 12 \`a 17\,\%, parce que les
+recherches lentes y sont justement celles qui b\'en\'eficiaient le plus du
+remplissage complet. L'\'egalit\'e de qualit\'e tient sur 2\,500 puzzles, et
+le self-play n'a pas boug\'e. La correction est d\'emontrable par invariants
+et tests de mutation, pas seulement par empirisme.
+
+Ce qui a d\'e\c{c}u : le milieu de jeu, o\`u le gain de m\'ediane reste sous
+8\,\%, et le plafond d\`es deux workers, qui dit clairement que la
+quatri\`eme et la huiti\`eme unit\'e de calcul ne servent presque \`a rien. La
+tranche de 8 simulations, utilis\'ee par le protocole \`a temps \'egal, est
+m\^eme un r\'egime o\`u huit workers reculent de 19\,\% : sur des arbres de
+huit simulations, les collisions dominent. C'est une propri\'et\'e du couple
+(taille de tranche, nombre de workers) qui m\'erite d'\^etre connue avant
+d'activer le multic\oe{}ur dans un autre contexte que le bot.
+
+\subsection{Menaces sur la validit\'e}
+
+\begin{enumerate}[leftmargin=1.4em]
+  \item \textbf{D\'erive d'horloge et thermique.} Les sessions varient de 15
+  \`a 30\,\%. Tout a \'et\'e mesur\'e en alternance pour compenser, mais les
+  valeurs absolues ne sont pas transf\'erables telles quelles d'une machine
+  \`a l'autre.
+  \item \textbf{Queue de latence sur 50 observations.} Le p95 y est estim\'e
+  sur 50 valeurs par configuration ; c'est mieux que les 6 valeurs par
+  passage de la campagne principale, mais cela reste un estimateur de queue
+  imparfait. Le plan lui-m\^eme pr\'evient qu'un p95 instable exige de
+  nouvelles observations.
+  \item \textbf{\'Echantillon de puzzles.} Le banc est un sous-\'echantillon
+  r\'egulier de 2\,500 puzzles sur 5\,000, stratifi\'e par rating. Il mesure
+  le premier coup d'une position tactique, pas la force en partie compl\`ete.
+  Le verdict de non-inf\'eriorit\'e est un argument de qualit\'e de recherche,
+  pas une mesure Elo.
+  \item \textbf{Arbre froid.} Toutes les mesures partent d'un arbre neuf. En
+  partie r\'eelle, \code{update\_root} conserve le sous-arbre et une partie
+  des simulations \'evite le r\'eseau. Par la loi d'Amdahl, le gain du
+  multic\oe{}ur s'en trouverait r\'eduit. Le cas chaud n'est pas mesur\'e.
+  \item \textbf{Table du bot.} Le bot utilise 4\,000\,000 d'entr\'ees (environ
+  4,16\,Gio), les mesures 8\,192. Un taux de succ\`es de table plus \'elev\'e
+  r\'eduirait encore la fraction acc\'el\'er\'ee.
+  \item \textbf{R\'ep\'etition \'ecart\'ee.} La campagne de 2\,500 puzzles n'a
+  pas \'et\'e r\'ep\'et\'ee ; l'incertitude r\'esiduelle de qualit\'e va
+  jusqu'\`a $-0,8$ point. C'est la limite la plus importante du verdict, et
+  elle est consign\'ee comme telle dans le rapport de r\'esultats.
+  \item \textbf{Mesures GPU seulement.} Le multic\oe{}ur a \'et\'e mesur\'e
+  sur le GPU. Sur CPU, le rapport entre collecte et inf\'erence est tr\`es
+  diff\'erent, et le gain serait probablement plus important ; il n'a pas
+  \'et\'e caract\'eris\'e.
+\end{enumerate}
+
+\subsection{Le co\^ut d'ing\'enierie}
+
+Dix t\^aches, cinq composants, quatorze cibles de test et plus de deux cents
+tests Python : le chantier est lourd pour un gain de l'ordre de 10\,\%. Faut-il
+le regretter ? Trois arguments disent non. D'abord, la partie non
+parall\'elisable \'etait d\'ej\`a optimis\'ee ; sans ce chantier, aucun gain
+suppl\'ementaire n'\'etait disponible c\^ot\'e ordonnancement, et les mesures
+le d\'emontrent. Ensuite, les composants produits (cache par snapshots,
+\'evaluateur injectable, garde RAII, ex\'ecuteur persistant, collecteur
+born\'e) sont exactement les fondations de la production continue : les
+abstractions sont r\'eutilis\'ees, pas jet\'ees. Enfin, la discipline de test
+a produit une base de r\'ef\'erence mesur\'ee (chronom\'etrages, harnais,
+comparaison appari\'ee) qui sert d\'ej\`a \`a d'autres chantiers, comme
+l'\'etude des co\^uts CPU-GPU.
+
+Le risque, lui, est r\'eel : une structure concurrente qu'on ne comprend plus
+est une dette. C'est pourquoi l'observabilit\'e a \'et\'e trait\'ee comme une
+fonctionnalit\'e de premier ordre : compteurs de collisions, d'\'etats
+\code{Pending}, de fuites de virtual loss, messages de parcours. Un arbre
+corrompu se voit au lieu de se deviner.
+
+\subsection{Le\c{c}ons}
+
+\begin{enumerate}[leftmargin=1.4em]
+  \item \textbf{Mesurer avant d'optimiser.} L'intuition initiale, « le CPU
+  prépare pendant que le GPU calcule », \'etait fausse dans ce r\'egime : les
+  deux alternaient, et le GPU dominait \`a 97\,\%. La chronom\'etrie par
+  phase, ajout\'ee en premi\`ere t\^ache, a red\'efini l'objectif avant
+  d'\'ecrire la moindre ligne de concurrence.
+  \item \textbf{Tester la concurrence par la conception.} Sans
+  ThreadSanitizer, la seule strat\'egie tenable est de r\'eduire la surface
+  concurrente \`a quelques \'etats atomiques et une garde, puis de la
+  harceler avec des hooks et des mutations.
+  \item \textbf{Un faux r\'eseau vaut mille GPU.} Le \code{ControlledEvaluator}
+  a rendu testables les erreurs, les blocages et les interleavings que le
+  GPU ne reproduit jamais deux fois.
+  \item \textbf{Comparer en alternance.} Toute comparaison de performance sur
+  une machine \`a horloge variable exige un protocole appari\'e ; l'\'ecart
+  entre l'ancien et le nouveau binaire \'etait invisible sans cela.
+  \item \textbf{Attention aux d\'efinitions des quantiles.} Le p95 de
+  latence est le p5 de d\'ebit ; s'\^etre tromp\'e de queue aurait fait
+  refuser un r\'eglage qui passe les crit\`eres.
+  \item \textbf{Un test peut \^etre faux.} Le premier test d'\'equivalence du
+  pool chaud comparait la mauvaise r\'ef\'erence ; le refaire correctement a
+  transform\'e un \'echec en preuve.
+\end{enumerate}

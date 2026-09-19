@@ -1,0 +1,59 @@
+\section{Chronologie des commits}
+\label{annexe:chronologie}
+
+Les commits cit\'es dans le rapport, dans l'ordre chronologique. La colonne
+\emph{chantier} distingue la pr\'ehistoire (batching et table h0) du chantier
+multic\oe{}ur proprement dit.
+
+\subsection*{Pr\'ehistoire : batching et table h0}
+
+\begin{center}
+\small
+\begin{tabular}{llp{8.6cm}}
+\toprule
+Commit & Date & Objet \\
+\midrule
+\code{0fb11d5} & 2026-09-14 & Boucle batch\'ee avec virtual loss \\
+\code{383d938} & 2026-09-14 & GPU et batching activ\'es dans le moteur UCI \\
+\code{0495e69} & 2026-09-14 & Batching dans le jeu local et le tournoi \\
+\code{2adae81} & 2026-09-14 & Alignement des compteurs de terminaux \\
+\code{5243f2d} & 2026-09-14 & Mesure du remplissage des lots \\
+\code{e78f094} & 2026-09-14 & Balayage du d\'ebit GPU par taille de lot \\
+\code{65db204} & 2026-09-14 & Validation et activation du lot 8 \\
+\code{7de9779} & 2026-09-15 & Cl\'e s\'emantique des \'evaluations (h0) \\
+\code{3c3d1c7} & 2026-09-15 & S\'election de h0 et rapport TT \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection*{Chantier multic\oe{}ur}
+
+\begin{center}
+\small
+\begin{longtable}{llp{8.6cm}}
+\toprule
+Commit & Date & Objet \\
+\midrule
+\endhead
+\code{df3d3b9} & 2026-09-16 & R\'evision de la conception multic\oe{}ur \\
+\code{da29e7b} & 2026-09-16 & Plan des dix t\^aches \\
+\code{4b4f92f} & 2026-09-16 & T1 : chronom\'etrages optionnels \\
+\code{fe63dbe} & 2026-09-16 & T2 : \'evaluateur injectable et banc self-play \\
+\code{a0a182d} & 2026-09-16 & T3 : cache par snapshots et bandes \\
+\code{a303d96} & 2026-09-16 & T4 : \'etats de n\oe{}ud et r\'eservations RAII \\
+\code{540e5ee} & 2026-09-16 & T5 : workers persistants \\
+\code{2772087} & 2026-09-16 & T6 : collecte parall\`ele \\
+\code{3b42dd2} & 2026-09-16 & T7 : coordinateur et API \\
+\code{ef327e2} & 2026-09-17 & T8 : stress et self-play partag\'e \\
+\code{9ad2dcb} & 2026-09-17 & T8 : cases du plan \\
+\code{d4e2712} & 2026-09-19 & Nettoyage des caches Python et spec \\
+\code{7bde9e3} & 2026-09-19 & T9 : bancs multic\oe{}ur et comparaisons appari\'ees \\
+\code{c6ac1c0} & 2026-09-19 & T9 : cases du plan \\
+\code{7cef664} & 2026-09-19 & Durcissement des verdicts et statuts de campagne \\
+\code{9840fa8} & 2026-09-19 & Alternance de l'ordre des workers \\
+\code{f752e8b} & 2026-09-19 & \'Etude des co\^uts CPU et GPU \\
+\code{412b5d4} & 2026-09-19 & T10 : rapport, activation UCI \\
+\code{0aaeeb1} & 2026-09-19 & T10 : cases du plan \\
+\bottomrule
+\end{longtable}
+\end{center}

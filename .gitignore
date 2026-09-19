@@ -24,3 +24,13 @@ CMakeUserPresets.json
 # Symboles de debogage MSVC : artefact de build de 43 Mio, regenere a chaque
 # compilation. Il en existait 32 versions dans l'historique.
 *.pdb
+
+# Intermediaires LaTeX des rapports : le PDF et les sources .tex sont
+# commites, ces fichiers sont regeneres par pdflatex.
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz

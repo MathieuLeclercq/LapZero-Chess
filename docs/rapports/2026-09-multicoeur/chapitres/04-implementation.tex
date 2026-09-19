@@ -1,0 +1,251 @@
+\section{Impl\'ementation : chronologie et pi\`eges}
+\label{sec:implementation}
+
+\begin{resume}
+Le chantier a suivi dix t\^aches, chacune \'ecrite en cycle test d'abord :
+un test rouge cibl\'e, une impl\'ementation minimale, une v\'erification, un
+commit. Les fondations (chronom\'etrage, \'evaluateur injectable, cache par
+snapshots, r\'eservations RAII, pool persistant) pr\'ec\`edent la collecte
+parall\`ele, le coordinateur, le stress, les bancs et enfin les mesures. Les
+deux incidents marquants sont un contrat de dimensions silencieux d\'ecouvert
+par le banc self-play, et un test d'\'equivalence du pool chaud dont la
+premi\`ere version comparait la mauvaise r\'ef\'erence. Ce chapitre raconte
+l'ordre r\'eel des d\'ecouvertes, avec les commits correspondants.
+\end{resume}
+
+\subsection{T\^ache 1 : la r\'ef\'erence et le chronom\'etrage}
+\label{sec:t1}
+
+Premi\`ere t\^ache, premi\`ere discipline : mesurer avant de modifier. La
+r\'ef\'erence a \'et\'e captur\'ee avec le binaire de d\'epart, puis dix
+phases de recherche ont \'et\'e instrument\'ees : s\'election, pr\'eparation du
+tenseur et de la cl\'e, lecture et \'ecriture de table, attente de verrou,
+copie du plateau, assemblage, inf\'erence, expansion, remont\'ees, attente
+des workers. Le chronom\'etrage est d\'esactiv\'e par d\'efaut et sans co\^ut
+mesurable dans ce mode : quand le pointeur de mesure est nul, aucune horloge
+n'est lue.
+
+La campagne de r\'ef\'erence a donn\'e la r\'epartition qui a orient\'e tout
+le reste : l'inf\'erence repr\'esente environ 98\,\% du temps. C'est cette
+mesure, plus que toute intuition, qui a fix\'e l'objectif r\'ealiste du
+chantier multic\oe{}ur : parall\'eliser au mieux 2\,\% du temps, et r\'eduire
+les lots partiels. Commit \code{4b4f92f}.
+
+\subsection{T\^ache 2 : l'\'evaluateur injectable et le banc self-play}
+\label{sec:t2}
+
+Le MCTS ne connaissait que \code{ONNXEvaluator}. Une interface
+\code{Evaluator} a \'et\'e extraite, avec une seule m\'ethode
+\code{evaluate\_batch} ; \code{ONNXEvaluator} en h\'erite sans changer de
+comportement, et un \code{ControlledEvaluator} de test permet de simuler des
+\'echecs, des lots de tailles choisies et des blocages. En parall\`ele, les
+copies de \code{Chessboard} ont \'et\'e verrouill\'ees par des tests sur des
+histoires l\'egales concr\`etes : roque, prise en passant, promotion,
+r\'ep\'etition, avec comparaison de la FEN, du Zobrist, du tenseur et des
+historiques apr\`es copie, coup jou\'e et annul\'e.
+
+Ce travail a aussi produit le banc \code{selfplay\_phase\_bench}, qui rejoue la
+structure du self-play partag\'e : huit racines priv\'ees, cent tours de
+collecte sous OpenMP, puis une \'evaluation et des remont\'ees
+s\'equentielles. C'est ce banc qui a servi plus tard de d\'etecteur de
+r\'egression. Deux accrocs mineurs y ont \'et\'e corrig\'es : une condition de
+validation invers\'ee dans le nouvel outil en ligne de commande, et la
+d\'ecouverte que l'ex\'ecutable autonome a besoin du r\'epertoire
+\code{torch/lib} dans son \code{PATH} pour trouver \code{cublasLt}. Commit
+\code{fe63dbe}.
+
+\subsection{T\^ache 3 : le cache par snapshots}
+\label{sec:t3}
+
+La table de transposition est pass\'ee derri\`ere une classe
+\code{EvaluationCache}. Le point de bascule est le type de retour : le
+\code{probe} ne rend plus un pointeur, mais une copie. Pour \'eliminer le
+verrou global, l'index est d\'ecoup\'e en au plus 4096 bandes, d\'eriv\'ees
+de l'index physique. Les tests de collision forcent deux writers et deux
+readers sur des cl\'es qui ciblent la m\^eme entr\'ee, et v\'erifient qu'un
+snapshot ne m\'elange jamais deux politiques. La migration a \'et\'e men\'ee
+en deux temps : remplacer les types d'abord, compiler rouge, puis corriger
+chaque usage list\'e par le compilateur.
+
+Le surco\^ut mesur\'e face au r\'eseau est minuscule : environ
+$0{,}27$ \`a $0{,}33$\,ms d'attente de verrou et $0{,}45$ \`a
+$0{,}50$\,ms d'acc\`es \`a la table pour une recherche de 0,67 \`a
+1,46 seconde. Sur le faux r\'eseau, o\`u ce co\^ut n'est plus masqu\'e, la
+collecte passe de 0,79 \`a 1,14\,ms pour 100 vagues, soit environ 3,5
+microsecondes ajout\'ees par vague. Commit \code{a0a182d}.
+
+\subsection{T\^ache 4 : \'etats atomiques et r\'eservations RAII}
+\label{sec:t4}
+
+L'ancien bool\'een \code{is\_terminal} a disparu au profit de
+l'\'enum\'eration d'\'etats d\'ecrite au chapitre~3, et le compteur
+\code{n\_in\_flight} est devenu un entier atomique. La classe
+\code{PathReservation} poss\`ede le chemin et le \code{Pending} \'eventuel.
+Un test de mutation a \'et\'e pratiqu\'e : en neutralisant volontairement la
+d\'ecr\'ementation du compteur, le test de fuite \'echoue comme pr\'evu, puis
+le code correct est restaur\'e. La garde a tenu cinquante ex\'ecutions
+concurrentes. Commit \code{a303d96}.
+
+\subsection{T\^ache 5 : le pool de workers persistant}
+\label{sec:t5}
+
+\code{SearchExecutor} cr\'ee les threads au premier appel et les rendort
+entre les vagues sur une variable de condition et un num\'ero de
+g\'en\'eration. C'est le rendez-vous C++17 demand\'e par les contraintes : pas
+de \code{std::jthread}, pas de \code{std::barrier}. Les tests v\'erifient que
+les identit\'es de threads survivent aux appels (8, puis 2, puis 8), qu'une
+exception de worker est relay\'ee apr\`es le retour de tous, et qu'un appel
+ult\'erieur reste possible apr\`es une exception. Le pool ne grandit qu'au
+repos. Commit \code{540e5ee}.
+
+\subsection{T\^ache 6 : le collecteur parall\`ele}
+\label{sec:t6}
+
+Le fichier \code{mcts\_wave}\allowbreak\code{.cpp} contient la descente
+concurrente. Chaque
+worker a son \code{WorkerContext} (plateau complet, r\'esultats locaux,
+chronom\^etre). La boucle de collecte r\'eserve la racine, s\'electionne avec
+le PUCT existant, r\'eserve l'enfant imm\'ediatement, applique le coup sur le
+plateau priv\'e et recommence. Les points d\'ecision sont les suivants.
+
+\begin{lstlisting}[caption={Extrait de la boucle de collecte. Le terminal est
+test\'e avant toute lecture de table ; le CAS vers \code{Pending} est la seule
+garantie de propri\'et\'e ; un succ\`es de table publie les enfants et
+poursuit la descente, comme le faisait \code{select\_leaf}.},
+label={lst:collecte}]
+// ... descente : etat du noeud, terminal par les regles du plateau ...
+if (is_rule_terminal(context.board)) {
+    if (state == NodeState::Pending) return collision();
+    if (state == NodeState::Unexpanded) {
+        if (!work.reservation.try_claim(node)) return collision();
+        work.reservation.publish(NodeState::Terminal);
+    }
+    work.kind = LeafKind::Terminal;
+    return work;
+}
+if (state == NodeState::Unexpanded) {
+    if (!work.reservation.try_claim(node)) return collision();
+    legal_moves = context.board.getLegalMoveIndices();
+    if (legal_moves.empty()) {
+        work.reservation.publish(NodeState::Terminal);
+        return work;   // mat ou pat, valeur terminale
+    }
+    key = make_cache_key(context.board);
+    probe = probe_tt(key, &context.timing);
+    if (probe.status == TTProbeStatus::HIT) {
+        children = make_children_from_probe(node, probe);
+        node->children.swap(children);          // publication complete
+        work.reservation.publish(NodeState::Expanded);
+        continue;                                // meme descente
+    }
+    // vraie feuille : capturer tenseur, coups, cle, transferer la garde
+    context.board.getAlphaZeroTensor(work.tensor);
+    work.kind = LeafKind::Network;
+    return work;
+}
+// ... noeud Expanded : selection PUCT, reserve de l'enfant, coup joue ...
+\end{lstlisting}
+
+Les permis bornent la vague : \code{slots = min(lot, restant)}, un CAS
+d\'ecr\'emente \code{available}, une collision le rend, un r\'esultat final le
+consomme. Le nombre de tentatives est plafonn\'e \`a $4 \times \text{slots} +
+\text{workers}$. Les vectors de r\'esultats restent locaux \`a chaque worker
+et sont fusionn\'es apr\`es le rendez-vous dans un ordre stable
+\code{(worker, ordinal)}. Deux tests d\'ecisifs ont \'et\'e \'ecrits \`a ce
+moment : la comparaison du tenseur captur\'e avec le tenseur obtenu en
+rejouant r\'eellement l'historique, et la publication atomique depuis la
+table avec un point de crochet avant publication. Cent ex\'ecutions
+concurrentes ont valid\'e l'ensemble. Commit \code{2772087}.
+
+\subsection{T\^ache 7 : le coordinateur et l'API}
+\label{sec:t7}
+
+\code{run\_search\_waves} orchestre les vagues : copie du plateau racine dans
+les seuls contextes actifs, collecte, fusion, une inf\'erence si au moins une
+feuille r\'eseau, validation des dimensions et des valeurs finies, puis
+expansion et remont\'ees dans l'ordre. Les compteurs nouveaux
+(\code{waves}, \code{leaf\_collisions}, \code{completed\_simulations}) sont
+expos\'es c\^ot\'e Python. Le param\`etre \code{worker\_count} est ajout\'e
+aux deux points d'entr\'ee publics, avec une valeur par d\'efaut de 1 qui
+pr\'eserve tous les appelants existants ; une configuration
+multi\oe{}ur avec un lot nul est refus\'ee avant toute mutation.
+
+Le verrou de session est d\'esormais tenu pendant tout l'appel, pas par
+simulation : les workers d\'etiennent des pointeurs bruts vers l'arbre, donc
+\code{update\_root} ne peut pas d\'etruire la racine sous eux. Les tests
+int\'egr\'es couvrent les workers 2, 4 et 8, les lots 1 et 8, les budgets 0,
+1, 3, 8, 17 et 100, les racines terminales, les erreurs de dimensions de
+l'\'evaluateur, l'immobilit\'e des workers pendant une inf\'erence bloqu\'ee,
+et la s\'erialisation de \code{update\_root} par un \'evaluateur retenu.
+Commit \code{3b42dd2}.
+
+\subsection{T\^ache 8 : le stress et le self-play partag\'e}
+\label{sec:t8}
+
+Cette t\^ache ne changeait pas l'algorithme : elle cherchait \`a casser le
+nouveau noyau. Trois positions, workers $\{2, 4, 8\}$, lots $\{1, 8\}$, cent
+recherches par configuration, en alternant racines neuves et r\'eutilis\'ees,
+puis en alternant $8 \to 2 \to 1 \to 4$ : 1\,800 recherches et 115\,200
+simulations, invariants v\'erifi\'es apr\`es chaque appel. Le self-play
+partag\'e a \'et\'e exerc\'e avec huit racines priv\'ees sur une instance
+MCTS et une table minuscule, puis avec deux parties compl\`etes du manager.
+
+\begin{piege}[Le contrat de dimensions, silencieux]
+Le test \code{selfplay\_shared\_core} a termin\'e ses deux parties puis
+\'echou\'e : le faux \'evaluateur recevait un vecteur d'entr\'ee plus grand que
+\code{batch\_size} $\times 119 \times 64$. La cause \'etait un buffer
+d'entr\'ee r\'eutilis\'e, redimensionn\'e une fois pour le nombre maximal de
+parties, mais jamais ramen\'e \`a la taille r\'eelle du lot en cours de
+traitement. Un vrai \'evaluateur ONNX ne se plaint pas de cette diff\'erence :
+le contrat de dimensions n'\'etait v\'erifi\'e que par le faux r\'eseau, et
+c'est pr\'ecis\'ement pour cela que le bug a \'et\'e vu.
+\end{piege}
+
+Deux corrections ont suivi : redimensionner le buffer juste avant chaque
+appel dans les deux chemins du manager, et faire d\'ependre
+\code{SelfPlayManager} de l'interface \code{Evaluator} plut\`o\`ut que de la
+classe ONNX concr\`ete, ce qui \'etait la seule adaptation de production
+n\'ecessaire. Deux tests de mutation ont \'et\'e pratiqu\'es : neutraliser la
+remise \`a z\'ero de \code{Pending} doit faire \'echouer le test d'exception,
+et neutraliser le CAS de propri\'et\'e doit faire \'echouer le test de
+collision. Commits \code{ef327e2} et \code{9ad2dcb}.
+
+\subsection{T\^ache 9 : les bancs comparables}
+\label{sec:t9}
+
+Les bancs existants mesuraient un arbre neuf par mesure, sans notion de
+workers ni de pool. Ils ont gagn\'e quatre capacit\'es : un balayage de
+\code{--worker-counts}, un mode \code{--warmup-pool} qui r\'eutilise l'objet
+MCTS entre les mesures en remettant arbre et table \`a froid hors
+chronom\'etrage, une jambe GPU pour le banc de puzzles avec
+\code{--search-workers} et \code{--search-seconds}, et un sidecar de
+contexte par CSV (hash du mod\`ele et du banc, budget, provider, workers,
+crit\`ere fig\'e). La comparaison de campagnes a re\c{c}u son propre module,
+\code{multicore\_comparison.py} : refus des doublons, des lignes manquantes et
+des m\'etadonn\'ees incompatibles, bootstrap appari\'e \`a 20\,000 tirages,
+paires discordantes, McNemar, et verdict formel. Une passe de durcissement a
+ensuite ajout\'e le statut d'\'echec de campagne quand un puzzle est en
+erreur, les bornes exactes des verdicts, et l'alternance de l'ordre des
+workers entre passages. Commits \code{7bde9e3}, \code{7cef664} et
+\code{9840fa8}.
+
+\begin{piege}[Le premier test d'\'equivalence du pool chaud \'etait faux]
+Pour v\'erifier qu'un \code{clear\_evaluation\_cache()} ram\`ene bien un
+objet au m\^eme \'etat qu'un objet neuf, un test comparait la deuxi\`eme
+recherche de l'objet r\'eutilis\'e \`a la deuxi\`eme recherche d'un objet
+neuf. Il a \'echou\'e proprement, et pour la bonne raison : la deuxi\`eme
+recherche de l'objet neuf b\'en\'eficiait de sa propre table d\'ej\`a
+remplie, avec dix succ\`es de table contre z\'ero apr\`es le clear. La
+r\'ef\'erence correcte est la \emph{premi\`ere} recherche d'un objet neuf.
+Une fois corrig\'e, politiques et compteurs sont identiques au bit pr\`es,
+ce qui valide \`a la fois le clear et la conception du banc.
+\end{piege}
+
+\subsection{T\^ache 10 : mesures et activation}
+\label{sec:t10}
+
+La derni\`ere t\^ache n'ajoute pas de m\'ecanisme : elle ex\'ecute les
+campagnes, compare l'ancien et le nouveau binaire, mesure la qualit\'e,
+r\'edige le rapport de r\'esultats et active le r\'eglage UCI. Le
+chapitre~6 d\'etaille toutes les mesures. Commit \code{412b5d4} pour
+l'activation, \code{0aaeeb1} pour les cases du plan.

@@ -1,0 +1,126 @@
+\section{Introduction}
+\label{sec:introduction}
+
+\subsection{Le projet LapZero-Chess}
+
+LapZero-Chess est un moteur d'\'echecs de type AlphaZero, d\'evelopp\'e pour
+tenir sur une seule machine personnelle. L'architecture suit le sch\'ema
+classique du papier de DeepMind \cite{alpha0316} : un r\'eseau r\'esiduel
+pr\'edit une politique de coups et une valeur de position, et une recherche
+arborescente de Monte-Carlo (MCTS) combine ces pr\'edictions avec des
+statistiques de visite pour produire \`a la fois les coups jou\'es et les
+cibles d'entra\^inement.
+
+Le pipeline comporte trois \'etages. D'abord un pr\'e-entra\^inement supervis\'e
+sur des parties de ma\^itres et de joueurs Lichess, qui donne au r\'eseau les
+rudiments tactiques et positionnels. Ensuite une boucle de self-play : le
+moteur joue contre lui-m\^eme, chaque partie produit des couples
+(\'etat, politique de visites, r\'esultat) qui servent \`a r\'eentra\^iner le
+r\'eseau. Enfin un bot UCI, d\'eploy\'e sur Lichess, qui utilise le m\^eme
+moteur de recherche en partie r\'eelle.
+
+Le c\oe{}ur du moteur est \'ecrit en C++17 et expos\'e \`a Python par pybind11.
+Le r\'eseau est ex\'ecut\'e par ONNX Runtime, sur GPU CUDA quand il est
+disponible, avec un repli CPU. Le MCTS, la g\'en\'eration de coups, la table de
+transposition et le code de self-play vivent tous dans ce c\oe{}ur C++, ce qui
+permet d'atteindre environ 1,8 million de n\oe{}uds par seconde en perft
+mono-thread, et de garder la boucle d'entra\^inement en Python l\'eger.
+
+\subsection{Le probl\`eme : le GPU attend le CPU}
+
+La recherche MCTS \'evalue le r\'eseau sur des positions feuilles. Jusqu'en
+septembre 2026, chaque simulation d\'eclenchait une inf\'erence sur une seule
+position. La cons\'equence a \'et\'e mesur\'ee avec pr\'ecision : le d\'ebit
+\'etait de 286 \`a 299 simulations par seconde, ind\'ependamment de la
+position, du nombre de coups l\'egaux (14 en finale, 48 en milieu de jeu) et
+de la profondeur de l'arbre. Une telle insensibilit\'e \`a la forme du travail
+d\'enonce un co\^ut domin\'e par une latence fixe : environ 3,4\,ms pour lancer
+un noyau GPU sur une position.
+
+Le premier chantier, le batching par virtual loss, a group\'e jusqu'\`a huit
+feuilles dans une seule inf\'erence. Le d\'ebit est mont\'e jusqu'\`a environ
+850 simulations par seconde en ouverture, et un lot de 8 a \'et\'e valid\'e
+comme le meilleur compromis qualit\'e-d\'ebit. Mais une fois ce travail fait,
+le profil du temps a chang\'e de nature : l'inf\'erence elle-m\^eme repr\'esente
+d\'esormais 96 \`a 99\,\% du temps total, et le reste est domin\'e par une
+\'etape que le batching n'avait pas parall\'elis\'ee, la pr\'eparation s\'erielle
+des descentes.
+
+Concr\`etement, la boucle batch\'ee est la suivante : pendant qu'un unique
+c\oe{}ur descend l'arbre huit fois de suite pour collecter huit feuilles, le
+GPU ne fait rien ; puis, pendant que le GPU \'evalue le lot, ce c\oe{}ur attend.
+Chaque vague paie donc deux attentes altern\'ees. Un indice suppl\'ementaire
+est le remplissage : les lots contiennent souvent 5 \`a 7 positions utiles au
+lieu de 8, parce qu'une collision ou une fin d'arbre ferme le lot en cours de
+route. Chaque appel GPU partiellement rempli co\^ute sa latence fixe pour moins
+de travail.
+
+\subsection{La question pos\'ee}
+
+Ce rapport r\'epond \`a une question d'ing\'enierie pr\'ecise : peut-on faire
+pr\'eparer les descentes par plusieurs c\oe{}urs CPU sur un arbre partag\'e,
+sans corruption silencieuse, sans casser le self-play, et pour quel gain
+r\'eel de d\'ebit et de qualit\'e ?
+
+La difficult\'e n'est pas d'\'ecrire une boucle parall\`ele, mais de rendre
+correcte la cohabitation de plusieurs descentes dans une m\^eme structure de
+donn\'ees qui n'a jamais \'et\'e con\c{c}ue pour cela. L'arbre est mut\'e en
+permanence (visites, valeurs, enfants), la table de transposition est un
+vecteur partag\'e, et le plateau d'\'echecs lui-m\^eme se modifie pendant la
+g\'en\'eration des coups. Chaque acc\`es concurrent doit \^etre soit rendu
+invisible, soit prot\'eg\'e par un protocole explicite. C'est ce travail
+d'architecture, plus que le gain brut, qui constitue le sujet de fond de ce
+document.
+
+\subsection{Contributions}
+
+Le chantier a produit quatre choses que ce rapport documente en d\'etail.
+
+\begin{enumerate}[leftmargin=1.4em]
+  \item \textbf{Une architecture par vagues} : les workers collectent en
+  parall\`ele sans jamais \'ecrire les statistiques de l'arbre, puis le
+  coordinateur traite le lot entier s\'equentiellement. La correction est
+  obtenue par s\'eparation stricte des phases plut\`ot que par verrouillage
+  g\'en\'eralis\'e.
+  \item \textbf{Cinq composants r\'eutilisables et testables isol\'ement} :
+  un \'evaluateur injectable, une table de transposition par snapshots, une
+  garde de r\'eservation RAII sur des \'etats de n\oe{}ud atomiques, un
+  ex\'ecuteur de workers persistant, et un collecteur de feuilles born\'e.
+  \item \textbf{Une instrumentation et un harnais de mesure} capables de
+  s\'eparer les temps par phase, de comparer des campagnes appari\'ees, et de
+  d\'etecter une r\'egression de qualit\'e \`a $0,1$ point pr\`es sur
+  2\,500 puzzles.
+  \item \textbf{Un verdict mesur\'e} : le multi\oe{}ur apporte $+8$ \`a
+  $+26\,\%$ selon la position, plafonne d\`es deux workers, ne d\'egrade pas la
+  queue de latence ni la qualit\'e, et a \'et\'e activ\'e dans le bot UCI \`a
+  huit workers.
+\end{enumerate}
+
+\subsection{Ce que ce document ne couvre pas}
+
+Trois sujets voisins sont volontairement laiss\'es de c\^ot\'e. La
+\emph{production continue}, qui ferait descendre les workers pendant les
+inf\'erences et les remont\'ees, est l'\'etape~2 de la conception ; elle n'est
+pas impl\'ement\'ee et les mesures de ce rapport servent pr\'ecis\'ement \`a
+d\'ecider si elle vaut son co\^ut. L'\emph{assainissement de l'appel \`a
+l'\'evaluateur} (forme de lot fixe, buffers r\'eutilis\'es, quantification) est
+un chantier ind\'ependant, document\'e dans
+\code{2026-09-19-cout-calcul-cpu-gpu.md}. Enfin la parall\'elisation du
+self-play n'est pas concern\'ee : il parall\'elise d\'ej\`a des parties
+ind\'ependantes et n'a pas besoin d'un arbre partag\'e.
+
+\subsection{Conventions de lecture}
+
+Les mesures de d\'ebit sont exprim\'ees en \emph{simulations par seconde}
+(sims/s). Une simulation est une remont\'ee de valeur compl\`ete, qu'elle ait
+co\^ut\'e une inf\'erence ou non (une simulation qui s'arr\^ete sur un n\oe{}ud
+terminal ou sur un succ\`es de table n'appelle pas le r\'eseau). Les trois
+positions de r\'ef\'erence du banc sont appel\'ees \emph{ouverture},
+\emph{milieu} et \emph{finale} ; leurs FEN sont donn\'ees en annexe~C. Le
+\emph{remplissage} est le nombre de positions r\'eellement \'evalu\'ees par
+appel GPU. La \emph{table de transposition} est not\'ee TT, et la politique
+\code{h0} d\'esigne la cl\'e s\'emantique du cache d\'ecrite au
+chapitre~2. Les sessions de mesure varient de 15 \`a 30\,\% entre elles
+(horloge et thermique du GPU) : sauf mention contraire, seules les
+comparaisons intra-session sont utilis\'ees, et les protocoles sont con\c{c}us
+pour annuler la d\'erive.

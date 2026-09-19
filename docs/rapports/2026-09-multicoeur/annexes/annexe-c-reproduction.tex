@@ -1,0 +1,94 @@
+\section{Reproduction des campagnes}
+\label{annexe:reproduction}
+
+Toutes les commandes s'ex\'ecutent depuis la racine du d\'ep\^ot. La variable
+\code{\$m} d\'esigne le mod\`ele de r\'ef\'erence :
+
+\begin{lstlisting}[language=bash, caption={Variables et construction.}]
+$m = 'python_src/checkpoints_onnx/2026_04_23_23h25_iter316_unsupervised.onnx'
+uv run pytest python_src/tests -q
+ctest --test-dir build -C Release --output-on-failure
+\end{lstlisting}
+
+\subsection*{D\'ebit et phases}
+
+\begin{lstlisting}[language=bash, caption={\'Etape 10 du plan, campagne
+principale et campagne de phases.}]
+uv run python python_src/search_bench.py --model $m --gpu \
+  --simulations 700 --passages 5 --repetitions 6 --batch-sizes 8 \
+  --worker-counts 1 2 4 8 --cache-history-depths 0 --tt-size 8192 \
+  --warmup-pool --out-json out/multicore/after.json \
+  --out-rapport out/multicore/after.md
+
+uv run python python_src/search_bench.py --model $m --gpu \
+  --simulations 700 --passages 1 --repetitions 3 --batch-sizes 8 \
+  --worker-counts 1 2 4 8 --cache-history-depths 0 --timings \
+  --warmup-pool --out-json out/multicore/phases.json \
+  --out-rapport out/multicore/phases.md
+\end{lstlisting}
+
+La campagne de queue utilise les m\^emes options avec
+\code{--passages 50 --repetitions 1 --worker-counts 1 2 8} et
+\code{--out-json out/multicore/queue.json}.
+
+\subsection*{Qualit\'e}
+
+\begin{lstlisting}[language=bash, caption={Pr\'efiltre, campagne compl\`ete et
+temps \'egal.}]
+# prefiltre 500 puzzles
+uv run python python_src/puzzle_bench.py --model $m \
+  --banc data/puzzles_bench.txt --gpu --travailleurs 1 \
+  --search-workers 1 --batch-size 8 --cache-history-depth 0 \
+  --simulations 700 --limite 500 \
+  --out-csv out/multicore/prefilter-w1.csv
+
+# campagne complete 2500 (idem pour --search-workers 8)
+uv run python python_src/puzzle_bench.py --model $m \
+  --banc data/puzzles_bench.txt --gpu --travailleurs 1 \
+  --search-workers 8 --batch-size 8 --cache-history-depth 0 \
+  --simulations 700 --limite 2500 \
+  --out-csv out/multicore/full-w8.csv
+
+# temps egal, budget median observe de 700 simulations mono-worker
+uv run python python_src/puzzle_bench.py --model $m \
+  --banc data/puzzles_bench.txt --gpu --travailleurs 1 \
+  --search-workers 8 --batch-size 8 --cache-history-depth 0 \
+  --search-seconds 1.5 --limite 500 \
+  --out-csv out/multicore/temps-w8.csv
+
+# comparaison appariee (sidecar obligatoire a cote de chaque CSV)
+uv run python python_src/multicore_comparison.py \
+  --baseline out/multicore/full-w1.csv \
+  --candidate out/multicore/full-w8.csv \
+  --out-report out/multicore/full-comparison.md --seed 42
+\end{lstlisting}
+
+\subsection*{Self-play partag\'e}
+
+\begin{lstlisting}[language=bash, caption={Banc self-play. Le dossier
+\code{torch/lib} doit \^etre dans \code{PATH} pour que le provider CUDA trouve
+\code{cublasLt}.}]
+build/Release/selfplay_phase_bench.exe --fake \
+  > out/multicore/selfplay-after-fake.json
+
+$env:PATH = ".venv\Lib\site-packages\torch\lib;$env:PATH"
+build/Release/selfplay_phase_bench.exe --model $m --gpu \
+  > out/multicore/selfplay-after-gpu.json
+\end{lstlisting}
+
+\subsection*{Positions de r\'ef\'erence}
+
+\begin{center}
+\small
+\begin{tabular}{llp{8.2cm}}
+\toprule
+Nom & R\^ole & FEN \\
+\midrule
+ouverture & attaque italienne & \code{r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/} \\
+ & & \code{5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4} \\
+milieu & position de Kiwipete & \code{r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/} \\
+ & & \code{2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1} \\
+finale & finale de tours & \code{8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1} \\
+\bottomrule
+\end{tabular}
+\end{center}

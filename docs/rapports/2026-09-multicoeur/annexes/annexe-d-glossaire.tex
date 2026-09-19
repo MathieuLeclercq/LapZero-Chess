@@ -1,0 +1,72 @@
+\section{Glossaire}
+\label{annexe:glossaire}
+
+\begin{description}[leftmargin=0pt,style=nextline,itemsep=4pt]
+  \item[MCTS] Recherche arborescente de Monte-Carlo. Ici, un PUCT : chaque
+  it\'eration descend l'arbre en maximisant un score qui m\'elange valeur
+  moyenne et prior, atteint une feuille, l'\'evalue par le r\'eseau et
+  remonte la valeur sur le chemin.
+
+  \item[PUCT] Formule de s\'election utilis\'ee : exploitation $W/N$ plus
+  exploration $c_{\text{puct}} \cdot P \cdot \sqrt{N_p}/(1+N+V)$.
+
+  \item[FPU] First Play Urgency. Un enfant jamais visit\'e h\'erite de la
+  valeur du parent, r\'eduite d'une p\'enalit\'e, au lieu de z\'ero.
+
+  \item[Virtual loss] Compteur $V$ pos\'e sur le chemin d'une descente en
+  cours. Il ne modifie que le terme d'exploration, jamais $Q$.
+
+  \item[Table de transposition (TT)] Cache des \'evaluations par position.
+
+  \item[h0] Politique de cl\'e de la table qui v\'erifie le compteur des
+  cinquante coups, le contexte courant et l'historique courant.
+
+  \item[Snapshot] Copie locale d'une entr\'ee de table, prise sous verrou,
+  qui reste valide m\^eme si l'entr\'ee est \'ecras\'ee ensuite.
+
+  \item[Bande (stripe)] Mutex parmi un groupe qui prot\`ege un sous-ensemble
+  d'entr\'ees. Ici, 4096 bandes au plus, d\'eduites de l'index physique.
+
+  \item[RAII] Resource Acquisition Is Initialization. La garde
+  \code{PathReservation} lib\`ere ses compteurs et son \'etat dans son
+  destructeur, y compris sur exception.
+
+  \item[\'Etat de n\oe{}ud] \code{Unexpanded}, \code{Pending},
+  \code{Expanded} ou \code{Terminal}. La propri\'et\'e d'une feuille est une
+  transition atomique entre les deux premiers.
+
+  \item[Remplissage] Nombre de positions r\'eellement \'evalu\'ees par appel
+  r\'eseau. Inf\'erieur \`a la taille de lot quand un lot partiel se ferme.
+
+  \item[Lot partiel] Lot qui part avec moins de positions que la capacit\'e,
+  parce que des collisions ont ferm\'e la collecte. Il garantit le progr\`es.
+
+  \item[Quiescence] \'Etat d'un arbre au repos : aucun \code{Pending}, aucun
+  \code{n\_in\_flight} non nul, aucune r\'eservation vivante.
+
+  \item[Pool chaud] Mode du banc o\`u l'objet MCTS est conserv\'e entre les
+  mesures, les threads \'etant cr\'e\'es une seule fois ; arbre et table sont
+  remis \`a froid hors chronom\'etrage.
+
+  \item[Sidecar] Fichier JSON de contexte associ\'e \`a un CSV de campagne :
+  hashes, budget, provider, workers. La comparaison refuse de comparer sans
+  lui.
+
+  \item[Bootstrap appari\'e] M\'ethode qui r\'e\'echantillonne les paires de
+  puzzles avec remise pour estimer l'intervalle de confiance de la diff\'erence
+  de taux. Ici, 20\,000 tirages, seed 42.
+
+  \item[McNemar] Test de comparaison appari\'ee sur les paires discordantes.
+
+  \item[p95 de latence] 95\ieme{} centile du temps d'une recherche. Comme la
+  latence est l'inverse du d\'ebit, il correspond au 5\ieme{} centile du
+  d\'ebit.
+
+  \item[Self-play] Le moteur joue contre lui-m\^eme pour produire les
+  donn\'ees d'entra\^inement. Il utilise plusieurs parties ind\'ependantes en
+  OpenMP et un lot GPU de taille 512.
+
+  \item[Production continue] \'Etape 2 de la conception : les workers
+  descendent pendant les inf\'erences et les remont\'ees, au lieu de
+  s'arr\^eter \`a une barri\`ere.
+\end{description}

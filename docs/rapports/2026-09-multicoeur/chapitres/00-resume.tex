@@ -1,0 +1,97 @@
+\section*{R\'esum\'e}
+\addcontentsline{toc}{section}{R\'esum\'e}
+
+Ce rapport retrace la conception, l'impl\'ementation et l'\'evaluation d'une
+recherche MCTS multi\oe{}ur dans LapZero-Chess, un moteur d'\'echecs de type
+AlphaZero entra\^in\'e sur une machine personnelle. Avant ce chantier, le
+moteur savait d\'ej\`a regrouper plusieurs positions dans une seule inf\'erence
+GPU gr\^ace \`a un virtual loss de type Leela Chess Zero, mais un seul c\oe{}ur
+CPU pr\'eparait les descentes. L'objectif \'etait de faire pr\'eparer ces
+descentes par plusieurs c\oe{}urs sur un arbre partag\'e, sans corruption
+silencieuse et sans perte mesurable de qualit\'e de recherche.
+
+La solution retenue est une recherche \emph{par vagues} : des collecteurs
+persistants descendent en parall\`ele avec des plateaux priv\'es, d\'eposent
+leurs feuilles sous r\'eservation atomique, s'arr\^etent \`a une barri\`ere, puis
+le coordinateur ex\'ecute une seule inf\'erence group\'ee, d\'eveloppe les
+feuilles et effectue les remont\'ees de valeur. La correction repose sur des
+\'etats de n\oe{}ud atomiques, une garde RAII qui poss\`ede le chemin r\'eserv\'e,
+une table de transposition par snapshots et verrous ray\'es, et un budget
+exact de simulations. La production continue, qui ferait descendre les
+workers pendant les inf\'erences, est rest\'ee hors p\'erim\`etre : elle fera
+l'objet d'une d\'ecision s\'epar\'ee.
+
+Le gain mesur\'e est modeste mais reproductible : de $+7\,\%$ \`a $+26\,\%$ de
+simulations par seconde selon la position, avec un plafond d\`es deux workers,
+un p95 de latence qui ne se d\'egrade pas, et une qualit\'e non inf\'erieure sur
+2\,500 puzzles. La raison de ce plafond est claire dans les mesures :
+l'inf\'erence r\'eseau occupe 96 \`a 99\,\% du temps, donc parall\'eliser la
+pr\'eparation CPU ne peut pas faire davantage. Le r\'eglage
+\code{MCTS\_WORKER\_COUNT = 8} a \'et\'e activ\'e dans le bot UCI.
+
+\vspace{0.6cm}
+
+\begin{essentiel}
+\textbf{L'essentiel en dix points.}
+\begin{enumerate}[leftmargin=1.4em,itemsep=2pt]
+  \item Avant le multi\oe{}ur, chaque simulation payait une latence fixe
+  d'environ 3,4\,ms, et le d\'ebit \'etait plat (286 \`a 299 simulations par
+  seconde) quelles que soient la position et la profondeur. Le batching par
+  virtual loss a fait monter ce d\'ebit \`a 320--850 selon la position et la
+  taille de lot, et un lot de 8 a \'et\'e valid\'e pour la qualit\'e.
+  \item Apr\`es le batching, l'inf\'erence repr\'esente 96 \`a 99\,\% du temps
+  de recherche. Le goulot restant est m\'ecanique : un seul c\oe{}ur pr\'epare
+  les descentes de chaque lot, et les lots partiels co\^utent cher en latence.
+  \item L'architecture livr\'ee s\'epare strictement deux phases : collecte
+  parall\`ele sans \'ecriture des statistiques d'arbre, puis traitement
+  s\'equentiel apr\`es barri\`ere (inf\'erence unique, expansion, remont\'ees).
+  \item La propri\'et\'e d'une feuille passe par une transition atomique
+  \code{Unexpanded -> Pending}. Une seule descente gagne ; les autres d\'eclarent
+  une collision, rendent leur permis et recommencent.
+  \item Le virtual loss devient visible pendant la s\'election, pas apr\`es la
+  collecte, et une garde RAII le restaure en cas de collision, d'exception ou
+  de lot partiel. Aucun chemin d'erreur ne d\'epend d'une boucle manuelle.
+  \item La table de transposition ne rend plus jamais de pointeur vers une
+  entr\'ee modifiable : chaque lecture copie un \emph{snapshot} sous verrou de
+  bande, index\'e sur l'index physique r\'eel.
+  \item Le budget est exact : chaque simulation demand\'ee produit exactement
+  une remont\'ee de valeur, et aucune r\'eservation ne survit au repos.
+  \item La validation combine tests d\'eterministes avec faux r\'eseau, points
+  de crochet pour forcer les entrelacements, tests de mutation, stress de
+  1\,800 recherches et self-play partag\'e. Sous MSVC, faute de
+  ThreadSanitizer, cette discipline est le filet principal.
+  \item Mesures : m\'ediane de d\'ebit $+8$ \`a $+26\,\%$ selon la position pour
+  8 workers, p95 de latence sous $+5\,\%$ partout, et qualit\'e non
+  inf\'erieure sur 2\,500 puzzles (delta $-0,28$ point, IC95
+  $[-0,8\,;+0,24]$).
+  \item La production continue, l'assainissement de l'appel \`a l'\'evaluateur
+  et le cas de l'arbre chaud restent des chantiers s\'epar\'es, document\'es en
+  fin de rapport.
+\end{enumerate}
+\end{essentiel}
+
+\vspace{0.4cm}
+
+\noindent\textbf{Mots-cl\'es :} MCTS, recherche parall\`ele, arbre partag\'e,
+virtual loss, table de transposition, C++17, ONNX Runtime, AlphaZero,
+test-driven development.
+
+\subsection*{Comment lire ce document}
+
+Le rapport suit un ordre narratif. Le chapitre~1 pose le probl\`eme et la
+question. Le chapitre~2 d\'ecrit l'\'etat du moteur juste avant le chantier,
+avec les mesures qui ont motiv\'e la conception. Le chapitre~3 est le c\oe{}ur
+conceptuel : chaque m\'ecanisme y est justifi\'e, alternatives \'ecart\'ees
+comprises. Le chapitre~4 raconte l'impl\'ementation en dix t\^aches, avec les
+pi\`eges rencontr\'es et les extraits de code d\'ecisifs. Le chapitre~5 d\'ecrit
+la strat\'egie de validation. Le chapitre~6 pr\'esente toutes les campagnes de
+mesure. Le chapitre~7 discute les r\'esultats, leurs limites et les le\c{c}ons.
+Le chapitre~8 conclut et ouvre les perspectives. Les annexes contiennent la
+chronologie des commits, l'inventaire des fichiers, les commandes de
+reproduction et un glossaire.
+
+Les encadr\'es bleus r\'esument chaque section importante, les encadr\'es ambre
+signalent des pi\`eges v\'ecus, et les encadr\'es gris d\'ecrivent les
+protocoles de mesure. Les valeurs num\'eriques proviennent des fichiers
+\code{out/multicore/} conserv\'es hors du d\'ep\^ot (ils sont volumineux) ; les
+rapports agr\'eg\'es cit\'es, eux, sont commit\'es.

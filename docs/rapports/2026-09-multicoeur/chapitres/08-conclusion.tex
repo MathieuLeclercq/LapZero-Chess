@@ -1,0 +1,80 @@
+\section{Conclusion et perspectives}
+\label{sec:conclusion}
+
+\begin{resume}
+La recherche multic\oe{}ur par vagues est livr\'ee, test\'ee, mesur\'ee et
+active dans le bot. Elle apporte $+8$ \`a $+26\,\%$ de d\'ebit selon la
+position, sans d\'egradation de la queue de latence ni de la qualit\'e de
+recherche, et sans r\'egression du self-play. Le plafond observ\'e est
+intrins\`eque : l'inf\'erence r\'eseau est le goulot. La suite naturelle n'est
+donc pas davantage de workers, mais l'assainissement de l'appel \`a
+l'\'evaluateur et, seulement apr\`es, la production continue.
+\end{resume}
+
+\subsection{Bilan}
+
+Le chantier a transform\'e une boucle strictement s\'erielle en une
+architecture \`a deux phases, avec une surface concurrente volontairement
+r\'eduite : quatre \'etats de n\oe{}ud atomiques, un compteur de virtual loss,
+des snapshots de table sous verrous ray\'es, et une garde RAII qui poss\`ede
+le chemin r\'eserv\'e. La d\'emonstration de correction repose sur des
+invariants v\'erifi\'es apr\`es chaque recherche, des entrelacements forc\'es
+et des tests de mutation, faute de ThreadSanitizer sous MSVC.
+
+Sur le plan des performances, le verdict est mesur\'e et le m\'ecanisme est
+compris : deux workers capturent l'essentiel du gain, huit l'emportent
+l\'eg\`erement sur les m\'edianes et sur la queue, et la zone gagnante est la
+finale. Sur le plan de la qualit\'e, la non-inf\'eriorit\'e est acquise sur
+2\,500 puzzles, avec une r\'eserve assum\'ee : la r\'ep\'etition du candidat
+n'a pas \'et\'e faite.
+
+\subsection{Ce que la production continue peut reprendre}
+
+L'\'etape~2 de la conception, la production continue, ferait descendre les
+workers pendant les inf\'erences et les remont\'ees, au lieu de les arr\^eter
+\`a une barri\`ere. Tous ses composants existent d\'ej\`a : contextes priv\'es,
+r\'esultats immuables, garde RAII, propri\'et\'e \code{Pending}, cache
+thread-safe, \'evaluateur contr\^olable, ex\'ecuteur persistant. Ce qui
+manque est la synchronisation des statistiques et de la structure d'arbre
+pendant que d'autres threads lisent.
+
+Les mesures de ce rapport permettent d'en estimer l'enjeu : l'attente de
+barri\`ere ne repr\'esente que 1,5 \`a 2,3\,\% du temps, et le remplissage
+plafonne d\'ej\`a vers 7. Autrement dit, la production continue ne peut pas
+cr\'e\'er beaucoup plus de parall\'elisme utile \`a lot de 8 ; son int\'er\^et
+d\'epend de la possibilit\'e de former des lots plus gros, ce qui est pr\'ecis\'ement
+la question du chantier suivant.
+
+\subsection{Assainir l'appel \`a l'\'evaluateur}
+
+L'\'etude \code{2026-09-19-cout-calcul-cpu-gpu.md} a mis en \'evidence un
+\'ecart inattendu : le banc self-play \'evalue huit positions en 3,0\,ms,
+alors que la recherche paie 10 \`a 14\,ms par appel \`a remplissage
+comparable. La diff\'erence est attribu\'ee \`a la forme variable des lots et
+aux allocations par appel c\^ot\'e ONNX Runtime. Le test T1b de cette \'etude
+(forme de lot fixe, buffers r\'eutilis\'es) est l'exp\'erience la plus
+rentable identifi\'ee \`a ce jour, avec un potentiel de facteur 3 \`a 5 sur
+l'appel. Si elle se confirme, la production continue devient beaucoup plus
+int\'eressante, parce que de plus gros lots deviendront utiles. C'est
+l'ordre logique : d'abord l'appel, ensuite l'ordonnancement.
+
+\subsection{Autres pistes consign\'ees}
+
+Mesurer le cas chaud (arbre r\'eutilis\'e, table de 4\,000\,000 d'entr\'ees)
+pour chiffrer la part de simulations qui \'evitent le r\'eseau en partie
+r\'eelle. Revoir la taille de table maintenant que la recherche tourne \`a
+des budgets plus \'elev\'es. Envisager FP16 ou TensorRT pour le r\'eseau,
+apr\`es T1b. Pour le self-play, une file d'inf\'erence centrale pourrait
+lisser les vagues GPU, mais les mesures montrent qu'il est d\'ej\`a efficace
+par parties ind\'ependantes.
+
+\subsection{Mot de la fin}
+
+Ce chantier aura surtout montr\'e une chose : la performance d'un moteur
+d'\'echecs neuronal ne se joue pas l\`a o\`u l'intuition la place. Le
+multic\oe{}ur \'etait la suite logique du batching, et il rend bien ce qu'il
+peut rendre, environ 10\,\% de m\'ediane, parce que 97\,\% du temps est
+d\'ej\`a dans le GPU. La vraie r\'eserve de performance est dans la
+plomberie de l'appel \`a l'\'evaluateur, pas dans le nombre de c\oe{}urs.
+Mesurer avant d'optimiser, et mesurer le r\'egime r\'eel plut\^ot que le
+r\'egime commode, aura \'et\'e la boussole de tout le chantier.

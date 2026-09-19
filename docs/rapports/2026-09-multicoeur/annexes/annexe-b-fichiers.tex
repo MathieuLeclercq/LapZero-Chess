@@ -1,0 +1,58 @@
+\section{Fichiers et responsabilit\'es}
+\label{annexe:fichiers}
+
+\begin{center}
+\footnotesize
+\begin{longtable}{p{5.3cm}p{8.5cm}}
+\toprule
+Fichier & Responsabilit\'e \\
+\midrule
+\endhead
+\chemin{src/search\_timing.hpp/.cpp} & Phases, accumulateurs par thread,
+\code{PhaseTimer} sans co\^ut d\'esactiv\'e \\
+\chemin{src/evaluator.hpp} & Contrat d'\'evaluation par lot, sans d\'ependance
+ONNX \\
+\chemin{src/evaluation\_cache.hpp/.cpp} & Table par snapshots, verrous ray\'es,
+ordre des rejets h0 \\
+\chemin{src/mcts\_reservation.hpp/.cpp} & \code{NodeState}, garde
+\code{PathReservation}, virtual loss \\
+\chemin{src/search\_executor.hpp/.cpp} & Pool de workers persistant, rendez-vous
+C++17 \\
+\chemin{src/mcts\_wave.hpp/.cpp} & \code{LeafWork}, collecte parall\`ele,
+coordinateur des vagues \\
+\chemin{src/mcts.hpp/.cpp} & Structures de n\oe{}ud, s\'election, expansion,
+backup, analyse continue \\
+\chemin{src/mcts\_batch.cpp} & Boucle s\'equentielle et boucle batch\'ee
+historiques \\
+\chemin{src/mcts\_observe.cpp} & Compteurs, \code{inspect\_tree} \\
+\chemin{src/bindings.cpp} & Interface pybind11, \code{worker\_count},
+\code{clear\_evaluation\_cache} \\
+\chemin{src/selfplay\_manager.cpp} & Self-play OpenMP, batching par parties,
+d\'epend d'\code{Evaluator} \\
+\chemin{tests/cpp/controlled\_evaluator.hpp} & Faux r\'eseau contr\^olable \\
+\chemin{tests/cpp/test\_support.hpp} & \code{require\_test} actif en Release \\
+\chemin{tests/cpp/test\_*.cpp} & Tests de composants, d'entrelacement et
+d'int\'egration \\
+\chemin{tests/cpp/selfplay\_phase\_bench.cpp} & Banc de r\'ef\'erence du chemin
+self-play partag\'e \\
+\chemin{python\_src/search\_bench.py} & Banc de d\'ebit UCI, workers, pool
+chaud, chronom\'etrages \\
+\chemin{python\_src/puzzle\_bench.py} & Banc de qualit\'e par puzzles, mode
+temps, jambe GPU, sidecar \\
+\chemin{python\_src/bench\_metrics.py} & Noyau de scoring, agr\'egation,
+rapport \\
+\chemin{python\_src/multicore\_comparison.py} & Comparaison appari\'ee, bootstrap,
+verdicts \\
+\chemin{python\_src/uci.py} & Bot UCI, \code{MCTS\_BATCH\_SIZE} et
+\code{MCTS\_WORKER\_COUNT} \\
+\chemin{docs/superpowers/specs/2026-09-14-mcts-multicore-design.md} & Spec de
+conception \\
+\chemin{docs/superpowers/plans/2026-09-16-mcts-multicore-waves.md} & Plan des
+dix t\^aches \\
+\chemin{docs/superpowers/specs/2026-09-16-multicore-waves-results.md} & Rapport
+de mesures et d\'ecision \\
+\chemin{docs/superpowers/specs/2026-09-19-cout-calcul-cpu-gpu.md} & \'Etude des
+co\^uts CPU et GPU \\
+\bottomrule
+\end{longtable}
+\end{center}
