@@ -485,6 +485,56 @@ def test_main_balaie_toutes_les_profondeurs_demandees(
     ]
 
 
+def test_main_alterne_l_ordre_des_workers_entre_passages(monkeypatch, tmp_path):
+    """Passage 1 puis passage 2 dans l'ordre inverse : une derive thermique ne
+    doit pas se confondre avec l'effet du nombre de workers."""
+    import search_bench
+    import puzzle_bench
+
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"modele factice")
+    appels = []
+
+    class Chauffe:
+        def __init__(self, evaluateur, taille_tt, depth):
+            pass
+
+        def mcts_search(self, *args):
+            pass
+
+    def mesurer_recherche(*args, **kwargs):
+        appels.append(("mcts_search", kwargs["worker_count"]))
+        return _m(worker_count=kwargs["worker_count"])
+
+    def mesurer_analyse(*args, **kwargs):
+        appels.append(("step_analysis", kwargs["worker_count"]))
+        return _m(chemin="step_analysis", worker_count=kwargs["worker_count"])
+
+    monkeypatch.setattr(search_bench, "POSITIONS", (("depart", "fen"),))
+    monkeypatch.setattr(search_bench.chess_engine, "MCTS", Chauffe)
+    monkeypatch.setattr(search_bench.chess_engine, "ONNXEvaluator",
+                        lambda *args: object())
+    monkeypatch.setattr(search_bench, "charger_position", lambda fen: object())
+    monkeypatch.setattr(search_bench, "mesurer_mcts_search", mesurer_recherche)
+    monkeypatch.setattr(search_bench, "mesurer_step_analysis", mesurer_analyse)
+    monkeypatch.setattr(puzzle_bench, "resoudre_modele",
+                        lambda *args: (model, {}))
+    monkeypatch.setattr(sys, "argv", [
+        "search_bench.py", "--model", str(model), "--passages", "2",
+        "--repetitions", "1", "--simulations", "8", "--batch-sizes", "8",
+        "--worker-counts", "1", "2",
+        "--out-rapport", str(tmp_path / "r.md"),
+    ])
+
+    assert search_bench.main() == 0
+    assert appels == [
+        ("mcts_search", 1), ("step_analysis", 1),
+        ("mcts_search", 2), ("step_analysis", 2),
+        ("mcts_search", 2), ("step_analysis", 2),
+        ("mcts_search", 1), ("step_analysis", 1),
+    ]
+
+
 def test_main_reutilise_le_pool_chaud_et_efface_la_tt(monkeypatch, tmp_path):
     """Le pool chaud doit garder ses threads et oublier la TT entre deux
     mesures : sans clear, la seconde mesure serait un banc de hits de table,

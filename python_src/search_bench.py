@@ -515,11 +515,17 @@ def main() -> int:
                               f"profondeur {r.max_depth}, {etat}")
     else:
         for passage in range(args.passages):
+            # L'ordre des configurations tourne d'un passage a l'autre : derive
+            # thermique et horloge GPU ne doivent pas se confondre avec l'effet
+            # du nombre de workers.
+            decalage = passage % len(args.worker_counts)
+            ordre_workers = (args.worker_counts[decalage:]
+                             + args.worker_counts[:decalage])
             for repetition_locale in range(args.repetitions):
                 repetition = passage * args.repetitions + repetition_locale
                 for depth in args.cache_history_depths:
                     for batch_size in args.batch_sizes:
-                        for worker_count in args.worker_counts:
+                        for worker_count in ordre_workers:
                             for nom, fen in POSITIONS:
                                 if args.warmup_pool:
                                     pool, pool_etat = mcts_du_pool(
