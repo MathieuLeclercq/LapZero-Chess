@@ -88,3 +88,39 @@ def test_le_constructeur_accepte_des_dependances_injectees():
 
     assert moteur.mcts is faux
     assert isinstance(moteur.board, chess_engine.Chessboard)
+
+
+def test_la_boucle_uci_transmet_le_nombre_de_workers():
+    """Le cinquieme argument reel de step_analysis doit etre le reglage
+    MCTS_WORKER_COUNT, pas une valeur par defaut implicite."""
+    import threading
+
+    appels = []
+    premier = threading.Event()
+
+    class FauxMCTSTransmission:
+        def step_analysis(self, board, simulations, c_puct, batch_size,
+                          worker_count):
+            appels.append((simulations, batch_size, worker_count))
+            premier.set()
+
+        def get_analysis_results(self):
+            return []
+
+        def reset_analysis(self):
+            pass
+
+        def update_root(self, move_idx):
+            pass
+
+    moteur = UCIEngine(evaluator=object(), mcts=FauxMCTSTransmission())
+    moteur.start_search(["go", "movetime", "10000"])
+    try:
+        assert premier.wait(timeout=5), "step_analysis n'a jamais ete appele"
+    finally:
+        moteur.stop_search()
+
+    assert appels
+    _simulations, batch_size, worker_count = appels[0]
+    assert batch_size == uci.MCTS_BATCH_SIZE
+    assert worker_count == uci.MCTS_WORKER_COUNT == 8

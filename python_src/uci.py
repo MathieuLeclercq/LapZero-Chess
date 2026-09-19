@@ -26,6 +26,12 @@ BATCH_SIZE = 64
 # grace au virtual loss. Le banc de puzzles valide 8, le meilleur compromis
 # entre debit et qualite sur les trois positions mesurees.
 MCTS_BATCH_SIZE = 8
+
+# Workers CPU internes au C++ par recherche, mesures par la campagne
+# multicœur du 2026-09-19 : mediane +8 a +26 % selon la position, p95 de
+# latence sous +5 %, qualite non-inferieure sur 2500 puzzles. Voir
+# docs/superpowers/specs/2026-09-16-multicore-waves-results.md.
+MCTS_WORKER_COUNT = 8
 SNAPSHOT_INTERVAL = 0.1
 NB_FAST_PLIES_OPENING = 10
 
@@ -321,7 +327,8 @@ class UCIEngine:
             # 1b. Exécution des simulations
             if total_sims < max_sims:
                 sims_to_do = min(BATCH_SIZE, max_sims - total_sims)
-                self.mcts.step_analysis(self.board, sims_to_do, 1.4, MCTS_BATCH_SIZE)
+                self.mcts.step_analysis(self.board, sims_to_do, 1.4,
+                                        MCTS_BATCH_SIZE, MCTS_WORKER_COUNT)
                 total_sims += sims_to_do
 
                 # Détermine ce qu'il faut faire avec les stats actuelles

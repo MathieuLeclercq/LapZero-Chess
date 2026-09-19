@@ -50,6 +50,15 @@ l'expansion paresseuse depuis la TT et continue à descendre, donc une feuille c
 recevoir des enfants pendant la même collecte et `expand_and_backup` en créerait un second
 jeu. Il faut un drapeau `is_pending` sur `MCTSNode`.
 
+**Fait.** Le batching par virtual loss est entré le 2026-09-15 (lot 8 validé), puis
+la recherche multicœur par vagues le 2026-09-19. Mesures sur GPU, 700 simulations,
+h0 : médiane de +8 à +26 % selon la position, p95 de latence sous +5 %, qualité
+non-inférieure sur 2500 puzzles, self-play sans régression. `uci.py` utilise
+`MCTS_WORKER_COUNT = 8` depuis cette date. Rapport complet :
+`superpowers/specs/2026-09-16-multicore-waves-results.md`. La production continue
+n'est pas décidée et attend le test T1b de
+`superpowers/specs/2026-09-19-cout-calcul-cpu-gpu.md`.
+
 ## 2. Corriger la clé de la table de transposition
 
 L'entrée du réseau contient 8 plies d'historique, les plans de répétition, le compteur
