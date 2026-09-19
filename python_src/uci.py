@@ -437,15 +437,24 @@ class UCIEngine:
         o_f, o_r, d_f, d_r, promo = decode_move_index(self.board, my_best.move_idx, is_black)
         my_best_uci = coords_to_uci(o_f, o_r, d_f, d_r, promo)
 
-        # Bilan par coup : nombre de simulations, coup choisi et visites.
-        # Permet de diagnostiquer un coup faible a posteriori sans dependre du
-        # log de lichess-bot.
+        # Bilan par coup : numero de coup, simulations, coup choisi, deuxieme
+        # coup et visites. Permet de diagnostiquer un coup faible a posteriori
+        # sans dependre du log de lichess-bot.
         visites_racine = sum(s.visits for s in best_stats)
+        deuxieme = ""
+        if len(best_stats) > 1:
+            second = best_stats[1]
+            s_f, s_r, s_df, s_dr, s_promo = decode_move_index(
+                self.board, second.move_idx, is_black)
+            deuxieme = (f", 2e {coords_to_uci(s_f, s_r, s_df, s_dr, s_promo)}"
+                        f" ({second.visits}/{visites_racine})")
+        trait = "noirs" if is_black else "blancs"
         _journaliser(
-            f"recherche : {total_sims} sims en "
+            f"recherche : coup {self.real_ply // 2 + 1} {trait}, "
+            f"{total_sims} sims en "
             f"{time.time() - self.search_start_time:.1f} s, "
-            f"best {my_best_uci} ({my_best.visits}/{visites_racine} visites), "
-            f"workers {MCTS_WORKER_COUNT}, {self.provider}, "
+            f"best {my_best_uci} ({my_best.visits}/{visites_racine})"
+            f"{deuxieme}, workers {MCTS_WORKER_COUNT}, {self.provider}, "
             f"{'arretee' if self.stop_event.is_set() else 'terminee'}")
 
         # Si la GUI a forcé l'arrêt OU si on est en analyse libre, on coupe net.

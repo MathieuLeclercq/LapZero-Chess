@@ -137,15 +137,16 @@ def test_la_recherche_journalise_le_bilan(capsys, tmp_path, monkeypatch):
     premier = threading.Event()
 
     class FauxMCTSRecherche:
-        index = 0
+        indices = ()
 
         def step_analysis(self, board, simulations, c_puct, batch_size,
                           worker_count):
             premier.set()
 
         def get_analysis_results(self):
-            return [SimpleNamespace(move_idx=FauxMCTSRecherche.index, visits=7,
-                                    q_value=0.25, prior=0.5)]
+            return [SimpleNamespace(move_idx=index, visits=7 - rang,
+                                    q_value=0.25, prior=0.5)
+                    for rang, index in enumerate(FauxMCTSRecherche.indices)]
 
         def reset_analysis(self):
             pass
@@ -155,7 +156,7 @@ def test_la_recherche_journalise_le_bilan(capsys, tmp_path, monkeypatch):
 
     moteur = UCIEngine(evaluator=object(), mcts=FauxMCTSRecherche())
     moteur.board.set_startup_pieces()
-    FauxMCTSRecherche.index = moteur.board.get_legal_move_indices()[0]
+    FauxMCTSRecherche.indices = moteur.board.get_legal_move_indices()[:2]
     moteur.start_search(["go", "movetime", "10000"])
     try:
         assert premier.wait(timeout=5), "step_analysis n'a jamais ete appele"
@@ -167,7 +168,8 @@ def test_la_recherche_journalise_le_bilan(capsys, tmp_path, monkeypatch):
 
     contenu = journal.read_text(encoding="utf-8")
     assert "recherche :" in contenu
-    assert "visites" in contenu
+    assert "coup 1 blancs" in contenu
+    assert "2e" in contenu
     assert "workers" in contenu
     assert str(uci.MCTS_WORKER_COUNT) in contenu
 
