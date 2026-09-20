@@ -1,7 +1,8 @@
 # Repartition du cout de calcul : CPU, GPU, et pistes d'optimisation
 
 Date : 2026-09-19
-Statut : etude, a completer par les tests proposes en section 9
+Statut : taches 1 et 3 du plan executees et mesurees (lot fixe active dans `uci.py`) ;
+taches 2, 4, 5, 6 et rapport final restants.
 Portee : recherche UCI par vagues, modele iter316, GPU RTX PRO 2000 Blackwell 8 Gio
 
 ## 1. But
@@ -239,6 +240,34 @@ de l'appel. Le lot d'un seul arbre plafonnant vers 7, les frais fixes restent am
 7 positions, pas sur 128 : le gain total realiste de ce chantier est de l'ordre de x3 a
 x6, pas de x30.
 
+### 6.2 Cause confirmee : le changement de forme du lot
+
+Le banc de la tache 1 (`tests/cpp/evaluator_batch_bench.cpp`) a isole la cause. Meme
+evaluateur, meme modele, meme GPU, lots fixes contre lots 1 a 8 alternee (`--variable`) :
+
+| mode | ms par appel | run ONNX |
+|---|---|---|
+| lot fixe 3 | 3.43 | 2.70 |
+| lot fixe 5 | 3.38 | 2.70 |
+| lot fixe 8 | 3.3 a 5.1 selon la session | 2.7 a 3.7 |
+| lot fixe 32 | 5.86 | 4.15 |
+| lot fixe 128 | 13.18 | 9.77 |
+| lots 1 a 8 alternee | 13.5 | 13.4 |
+| A/B interleaved fixe 8 contre variable | 3.3 contre 13.0 | x4 |
+
+En mode alterne, chaque `session->Run` coute 13.4 ms quel que soit le lot, contre 2.7 a
+3.7 ms a forme fixe. ONNX Runtime re-planifie donc son graphe et sa memoire des que la
+forme change. C'est exactement le motif de la recherche, qui alterne une racine a 1 et des
+vagues partielles, et pas celui du banc self-play, toujours a 8.
+
+Le lot de forme fixe, obtenu en dupliquant le dernier tenseur et en ignorant ses sorties,
+supprime le probleme sans changer la recherche : les positions reelles occupent les memes
+indices dans le lot, donc leurs sorties sont identiques. Mesure interleaved sur le moteur
+reel, workers 8, 700 simulations : x2.0 en ouverture, x3.1 en milieu, x2.5 en finale, et
+le p95 de latence divise par 2 a 3. Le chemin mono gagne x2.0 a x3.3. Le modele `F + M*N`
+de la section 6 decrit donc un regime a forme fixe ; la recherche reelle payait en plus un
+`F` de re-planification d'environ 10 ms par appel.
+
 ## 7. Zones de calcul, synthese
 
 | zone | part du temps | ce qui la borne | levier principal |
@@ -391,9 +420,9 @@ que l'appel lui-meme est le gisement principal.
 
 ## 10. Questions en suspens
 
-1. Pourquoi le banc self-play evalue 8 positions en 3.0 ms alors que la recherche en paie
-   10 a 14 a remplissage comparable. Forme de lot, allocations, ou autre. T1b et T2
-   doivent trancher.
+1. [resolu] Le banc self-play evalue 8 positions en 3.0 ms contre 10 a 14 pour la
+   recherche : la cause est la re-planification d'ONNX Runtime a chaque changement de
+   forme de lot, confirmee par la section 6.2 et corrigee par le lot fixe.
 2. Pourquoi M varie d'un facteur deux entre positions (0.9 a 1.9 ms) alors que le reseau
    est le meme. Bruit de session, ou comportement dependant des donnees du couple
    ONNX Runtime et GPU.
@@ -411,16 +440,17 @@ que l'appel lui-meme est le gisement principal.
 
 ## 11. Plafond realiste
 
-Etat actuel : 10 a 14 ms par appel, 1.4 a 2 ms par position, evaluateur a 96 a 98 % du
-temps de recherche.
+Etat au 2026-09-19, apres la tache 3 : 3.3 a 5.1 ms par appel de 8 a forme fixe, soit 0.4
+a 0.6 ms par position, et 1 500 a 2 100 simulations par seconde en vagues workers 8 sur
+les trois positions. Le lot fixe est active dans `uci.py`.
 
 Etat du chantier multicœur : les gains des vagues sont mesures et `MCTS_WORKER_COUNT = 8`
 est active dans `uci.py` ; la qualite est non-inferieure a 2500 puzzles, delta -0.28 point,
 IC95 [-0.8 ; +0.24] (`2026-09-16-multicore-waves-results.md`). Le present document porte
 sur les leviers suivants, pas sur ce qui a deja ete gagne.
 
-- Meme reseau, meme GPU, autre harnais : 3.0 ms par appel de 8, soit 0.38 ms par position.
-  Le premier facteur 3 a 5 est donc dans l'appel, pas dans le reseau.
+- Le facteur 3 a 5 venait du changement de forme du lot, pas du reseau, et il est corrige :
+  le lot fixe ramene la recherche au niveau du banc self-play (section 6.2).
 - Apres assainissement des appels, un cout de 0.1 a 0.3 ms par position est envisageable
   avec FP16 et fusion des couches.
 - Ce qui borne : le lot d'un seul arbre plafonne vers 7, donc les frais fixes restent
