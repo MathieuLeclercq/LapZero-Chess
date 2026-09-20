@@ -241,6 +241,7 @@ std::pair<MCTSNode*, int> MCTS::select_leaf(MCTSNode* root, Chessboard& board,
                     continue;
                 }
                 record_tt_probe(probe.status);
+                node->network_value = probe.value;
                 PhaseTimer timer(timing, SearchPhase::Expansion);
                 NodeChildren children = make_children_from_probe(node, probe);
                 node->children.swap(children);

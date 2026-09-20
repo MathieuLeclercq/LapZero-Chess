@@ -178,6 +178,7 @@ LeafWork MCTS::collect_wave_leaf(
             record_tt_probe(probe.status);
 
             if (probe.status == TTProbeStatus::HIT) {
+                node->network_value = probe.value;
                 NodeChildren children = make_children_from_probe(node, probe);
                 if (hooks && hooks->before_tt_publish) {
                     hooks->before_tt_publish(node);
