@@ -129,9 +129,11 @@ latence sous +5 %, invariants verifies, non-inferiorite qualite a 2500 puzzles.
 
 Reserves consignees :
 
-- le taux de hits de table en partie reelle n'est pas mesure ; le banc est a
-  arbre froid (9.2 % de hits en finale) et la reutilisation de racine augmente
-  ce taux, ce qui reduirait le gain par la loi d'Amdahl ;
+- le taux de hits de table en partie reelle a ete mesure le 2026-09-19 (cas chaud,
+  `out/multicore/hot-tree.json`) : le taux monte de 8 a 81 % mais les appels reseau
+  restent a 700 pour 700 simulations, car un hit de table materialise les enfants et la
+  descente continue vers une feuille reseau. La reserve Amdahl est donc sans objet ; voir
+  `2026-09-19-cout-calcul-cpu-gpu.md`, section 8.4 ;
 - chaque recherche paie une inference d'expansion de racine, incluse dans les
   mesures ;
 - le bot utilise une table de 4 000 000 d'entrees (environ 4.16 Gio), les

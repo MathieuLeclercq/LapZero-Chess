@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-19-cout-calcul-cpu-gpu.md`. Mesures et decision du chantier precedent : `docs/superpowers/specs/2026-09-16-multicore-waves-results.md`.
 
+**Statut d'execution (2026-09-19) :** taches 1 et 3 faites, plus l'extension du lot fixe au chemin mono. Tache 5 tranchee par la mesure : FP16 rejete. Taches 2, 4, 6 et 7 restantes. Resultats : `2026-09-19-cout-calcul-resultats.md`.
+
 ## Contraintes globales
 
 - Conserver `worker_count=1` par defaut et le noyau sequentiel inchange.

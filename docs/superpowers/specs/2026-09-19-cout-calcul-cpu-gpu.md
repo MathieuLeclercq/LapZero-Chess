@@ -332,10 +332,18 @@ qui remplit 119x64 flottants et parcourt l'historique.
 
 ### 8.4 Le cas chaud
 
-Toutes les mesures ci-dessus sont a arbre froid. En partie reelle, `update_root` conserve
-le sous-arbre et toutes ses positions dans la table. Une fraction des simulations evite
-alors le reseau, et par la loi d'Amdahl le gain du batching et de la production continue
-diminue. Ce cas n'est pas mesure.
+Mesure du 2026-09-19, parties auto-jouees sur ouverture et finale, 12 coups, 700
+simulations par coup, tranches de 64, lot fixe (`out/multicore/hot-tree.json`) : 2 000 a
+2 200 simulations par seconde, et **environ 700 appels reseau pour 700 simulations a
+chaque coup**, meme quand le taux de hits de table monte de 8 a 81 pour cent.
+
+Conclusion importante : dans ce moteur, un hit de table n'evite pas l'inference. Il
+materialise les enfants depuis la table et la descente continue, donc chaque simulation
+finit sur une feuille reseau, exactement comme a arbre froid. La reutilisation d'arbre
+approfondit la recherche, elle ne reduit pas le travail reseau par simulation. La reserve
+Amdahl des rapports precedents est donc sans objet, et les gains mesures s'appliquent tels
+quels en partie reelle. Seuls les terminaux evitent le reseau, et ils sont rares hors
+positions tactiques.
 
 ### 8.5 Le reseau et la quantification
 
