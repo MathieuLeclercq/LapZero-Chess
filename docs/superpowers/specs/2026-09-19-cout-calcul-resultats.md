@@ -133,12 +133,9 @@ seuls les terminaux evitent le reseau.
 
 ## 8. Taches restantes
 
-- Tache 2, buffers persistants : la mesure a montre que le facteur dominant etait la
-  forme du lot, pas les allocations. Faible valeur attendue desormais.
-- Tache 6, cible commitee `hot_tree_bench` : la mesure a ete faite par script ; la cible
-  testable reste a ecrire.
-- Tache 7 complete : mesures finales et decision sur les reglages et la production
-  continue.
+- Tache 2, buffers persistants : non retenue. La mesure a montre que le facteur dominant
+  etait la forme du lot, pas les allocations par appel.
+- Tache 6 : la cible `python_src/hot_tree_bench.py` est commitee avec son test.
 
 ## 9. Verdict provisoire sur la production continue
 
@@ -171,3 +168,5 @@ vagues.
 - `6606d97` Padde aussi les lots du chemin mono
 - `4461d80` Consigne la cause du decrochage et le gain du lot fixe
 - `3515f00` Rend la divergence de collecte parametrable
+- `0c41d6f` Consigne le balayage de divergence et son rejet qualite
+- `aed5f1a` Mesure le cas chaud de l arbre UCI

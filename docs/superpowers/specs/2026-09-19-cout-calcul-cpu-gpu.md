@@ -1,8 +1,9 @@
 # Repartition du cout de calcul : CPU, GPU, et pistes d'optimisation
 
 Date : 2026-09-19
-Statut : taches 1 et 3 du plan executees et mesurees (lot fixe active dans `uci.py`) ;
-taches 2, 4, 5, 6 et rapport final restants.
+Statut : taches 1, 3, 4, 5 et 6 du plan executees ; lot fixe active dans `uci.py` ;
+reglages de divergence refuses par la barriere qualite ; FP16 rejete par la mesure. La
+tache 2 (buffers) n'est pas retenue. Mesures : `2026-09-19-cout-calcul-resultats.md`.
 Portee : recherche UCI par vagues, modele iter316, GPU RTX PRO 2000 Blackwell 8 Gio
 
 ## 1. But
