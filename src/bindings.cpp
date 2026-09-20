@@ -295,9 +295,11 @@ PYBIND11_MODULE(chess_engine, m) {
         int concurrent_games,
         int slow_sims, int fast_sims,
         int total_games, float slow_ratio,
-        size_t tt_size = 2097143) {
+        size_t tt_size = 2097143,
+        const std::string& puzzles_path = "../training_data/puzzles_train.txt") {
             SelfPlayManager manager(
-                evaluator, concurrent_games, slow_sims, fast_sims, slow_ratio, tt_size);
+                evaluator, concurrent_games, slow_sims, fast_sims, slow_ratio,
+                tt_size, puzzles_path);
             return manager.generate_games(total_games);
         },
         py::call_guard<py::gil_scoped_release>(),
@@ -308,5 +310,6 @@ PYBIND11_MODULE(chess_engine, m) {
         py::arg("total_games"),
         py::arg("slow_ratio") = 0.25f,
         py::arg("tt_size") = 2097143,
+        py::arg("puzzles_path") = "../training_data/puzzles_train.txt",
         "Génère un dataset de parties en self-play en utilisant un batching GPU massif.");
 }

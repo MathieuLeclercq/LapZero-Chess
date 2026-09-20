@@ -97,14 +97,20 @@ interpreter, set `Python3_EXECUTABLE` in a `CMakeUserPresets.json` at the root.
 
 ## Usage
 
-| Command                                          | Description                          |
-| ------------------------------------------------ | ------------------------------------ |
-| `uv run python python_src/train_supervised.py` | supervised training                  |
-| `uv run python python_src/train_self_play.py`  | self-play training loop              |
-| `uv run python python_src/tournament_elo.py`   | tournament with Whole History Rating |
-| `uv run python python_src/play_against_bot.py` | Pygame GUI to play against a model   |
-| `python python_src/uci.py`                     | UCI engine, for any chess interface  |
-| `run_lichess_bot.bat`                          | Lichess bot                          |
+Run the training, tournament and GUI scripts from `python_src`: they use paths
+relative to that directory, such as `checkpoints/` and `replay_buffer/`.
+
+| Command                                    | Description                          |
+| ------------------------------------------ | ------------------------------------ |
+| `uv run python train_supervised.py`        | supervised training                  |
+| `uv run python train_self_play.py`         | self-play training loop              |
+| `uv run python tournament_elo.py`          | tournament with Whole History Rating |
+| `uv run python play_against_bot.py`        | Pygame GUI to play against a model   |
+| `python uci.py`                            | UCI engine, for any chess interface  |
+| `run_lichess_bot.bat`                      | Lichess bot, from any directory      |
+
+`train_supervised.py` still holds the dataset and checkpoint paths of the
+original machine (`C:/Users/M47h1/...`); update them before a supervised pass.
 
 For an external chess interface (Arena, Cute Chess, Nibbler, and others),
 configure the engine with the virtual environment interpreter and `uci.py`:

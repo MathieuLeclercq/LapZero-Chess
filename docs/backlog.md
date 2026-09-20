@@ -319,6 +319,42 @@ fois, sur une machine qui a déjà 4 Go de table de transposition.
   à 14 Mo). La règle `*.dll` du `.gitignore` ne s'applique pas aux fichiers déjà indexés.
 - `id name Lc0 Custom` dans le handshake UCI (`uci.py:64`).
 
+## 10. Mesurer le désapprentissage du confondant historique / tactique
+
+Contexte : jusqu'à l'itération 300 environ, les puzzles injectés en self-play
+n'avaient pas d'historique, et le réseau a appris que « pas d'historique =
+position tactique ». Le pipeline d'août corrige les données (puzzles rejoués
+depuis la position initiale, donc historique réel), mais le modèle actuel
+(iter436, avril) porte encore le raccourci, et aucune campagne n'a encore été
+faite sur les données corrigées. Voir la section 4 pour l'analyse du
+confondant lui-même.
+
+Mesure du raccourci sur une position réelle (partie `O7KXpd5v`, après
+11...Nf5, modèle iter436, 25 000 simulations) :
+
+| passe | prior de Qxa8, seul coup gagnant | Q racine |
+|---|---|---|
+| FEN nu, sans historique | 39,0 % | +0,11 |
+| historique réel | 0,05 % | -0,87 |
+
+Facteur 800 sur le prior du coup solution, et une value fausse d'environ
+1,3 pion dans le second cas. En partie, l'historique est toujours présent :
+le modèle est donc bien plus faible tactiquement que ne le suggéraient les
+tests en FEN nu.
+
+Travail proposé : ajouter au banc de puzzles (`python_src/puzzle_bench.py`)
+une seconde passe qui rejoue les mêmes positions avec un historique vidé, et
+rapporter l'écart des métriques entre les deux passes (prior du coup solution,
+coup choisi, accord avec la recherche). Un chiffre unique à suivre d'une
+campagne à l'autre, qui doit converger vers zéro quand le raccourci est
+désappris. Attention à ne pas conclure sur le seul prior : une position facile
+peut le faire monter sans rapport avec le confondant, d'où la comparaison de
+plusieurs métriques.
+
+Le banc doit rester disjoint de l'entraînement, c'est le cas aujourd'hui
+(0 recouvrement entre les 5 000 puzzles du banc et les 100 000 de
+`training_data/puzzles_train.txt`).
+
 ## Phase 2 du perft, non faite
 
 Voir la section « Phasage » de `superpowers/specs/2026-08-07-perft-design.md` :

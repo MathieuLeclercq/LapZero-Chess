@@ -430,7 +430,7 @@ class TreeReport:
     @property
     def violations(self) -> int:
         ...
-def generate_self_play_games(evaluator: ONNXEvaluator, concurrent_games: typing.SupportsInt | typing.SupportsIndex, slow_sims: typing.SupportsInt | typing.SupportsIndex, fast_sims: typing.SupportsInt | typing.SupportsIndex, total_games: typing.SupportsInt | typing.SupportsIndex, slow_ratio: typing.SupportsFloat | typing.SupportsIndex = 0.25, tt_size: typing.SupportsInt | typing.SupportsIndex = 2097143) -> list[GameResult]:
+def generate_self_play_games(evaluator: ONNXEvaluator, concurrent_games: typing.SupportsInt | typing.SupportsIndex, slow_sims: typing.SupportsInt | typing.SupportsIndex, fast_sims: typing.SupportsInt | typing.SupportsIndex, total_games: typing.SupportsInt | typing.SupportsIndex, slow_ratio: typing.SupportsFloat | typing.SupportsIndex = 0.25, tt_size: typing.SupportsInt | typing.SupportsIndex = 2097143, puzzles_path: str = '../training_data/puzzles_train.txt') -> list[GameResult]:
     """
     Génère un dataset de parties en self-play en utilisant un batching GPU massif.
     """

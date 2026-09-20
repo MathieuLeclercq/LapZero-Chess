@@ -13,7 +13,8 @@ SelfPlayManager::SelfPlayManager(
     Evaluator* evaluator,
     int num_concurrent_games,
     int slow_sims, int fast_sims, float slow_ratio,
-    size_t tt_size)
+    size_t tt_size,
+    const std::string& puzzles_path)
     : m_evaluator(evaluator),
     m_num_concurrent_games(num_concurrent_games),
     m_slow_sims(slow_sims),
@@ -36,7 +37,7 @@ SelfPlayManager::SelfPlayManager(
     m_shared_mcts = std::make_unique<MCTS>(m_evaluator, tt_size);
 
     m_tactical_boost.resize(num_concurrent_games, false);
-    load_tactical_puzzles("../training_data/puzzles_train.txt");
+    load_tactical_puzzles(puzzles_path);
 
     for (int i = 0; i < num_concurrent_games; ++i) {
         reset_game(i);
@@ -478,6 +479,15 @@ void SelfPlayManager::load_tactical_puzzles(const std::string& filepath) {
     std::ifstream file(filepath);
     std::string line;
     int malformed = 0;
+
+    // Un chemin relatif depend du repertoire de lancement : une erreur ici
+    // desactive silencieusement l'injection de puzzles pendant toute la
+    // campagne, donc on la signale fort.
+    if (!file.is_open()) {
+        std::cerr << "ATTENTION : puzzles tactiques illisibles ("
+                  << filepath << "), injection desactivee." << std::endl;
+        return;
+    }
 
     // Format : <fen_initiale>|<coups_uci>|<solution>|<rating>|<themes>
     // Seuls les deux premiers champs nous concernent.

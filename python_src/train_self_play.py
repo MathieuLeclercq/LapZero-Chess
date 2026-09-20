@@ -3,6 +3,7 @@ import logging
 import time
 import gc
 import os.path
+from pathlib import Path
 
 import numpy as np
 
@@ -19,6 +20,11 @@ from lib import (append_to_disk_buffer, export_model_to_onnx,
                  calculate_performance_rating, convert_game_results, run_with_interrupt)
 from stockfish_player import evaluate_against_anchor
 from model import ChessNet
+
+# Chemin absolu : l'injection de puzzles est chargee cote C++ et un chemin
+# relatif dependrait du repertoire de lancement.
+PUZZLES_PATH = str(Path(__file__).resolve().parents[1]
+                   / "training_data" / "puzzles_train.txt")
 
 
 # ============================================================
@@ -68,7 +74,8 @@ def generate_games(
         fast_sims,
         games_per_iter,
         slow_ratio,
-        tt_size
+        tt_size,
+        PUZZLES_PATH
     )
 
     data, stats = convert_game_results(game_results)
