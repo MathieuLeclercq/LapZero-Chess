@@ -160,6 +160,21 @@ set_tests_properties(selfplay_phase_bench_smoke PROPERTIES
     PASS_REGULAR_EXPRESSION
         "\\\"nn_calls\\\": 16, \\\"nn_batches\\\": 2, \\\"tt_hits\\\": [0-9]+, \\\"tt_misses\\\": [0-9]+, \\\"tt_position_matches\\\":")
 
+add_executable(evaluator_batch_bench tests/cpp/evaluator_batch_bench.cpp)
+target_link_libraries(evaluator_batch_bench PRIVATE chess_core)
+copy_onnx_runtime(evaluator_batch_bench)
+add_custom_command(TARGET evaluator_batch_bench POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${ONNXRUNTIME_SHARED_DLL} $<TARGET_FILE_DIR:evaluator_batch_bench>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${ONNXRUNTIME_CUDA_DLL} $<TARGET_FILE_DIR:evaluator_batch_bench>)
+add_test(NAME evaluator_batch_bench_smoke
+    COMMAND evaluator_batch_bench --fake --batches 1 4 8
+            --repetitions 2 --rounds 2)
+set_tests_properties(evaluator_batch_bench_smoke PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "\\\"batch\\\": 8, \\\"repetition\\\": 1, \\\"calls\\\": 2")
+
 # ==========================================
 # 3. Configuration Python & Pybind11
 # ==========================================

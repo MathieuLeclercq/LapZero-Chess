@@ -1,5 +1,6 @@
 #include "onnx_evaluator.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 
@@ -47,6 +48,9 @@ void ONNXEvaluator::evaluate_batch(
     //);
 
     std::vector<Ort::Value> output_tensors;
+    const auto run_start = m_timing_enabled
+        ? std::chrono::steady_clock::now()
+        : std::chrono::steady_clock::time_point{};
     try {
         output_tensors = session->Run(Ort::RunOptions{ nullptr }, input_names, &input_ort, 1, output_names, 2);
     }
@@ -54,12 +58,21 @@ void ONNXEvaluator::evaluate_batch(
         std::cerr << "\n[ERREUR FATALE ONNX RUNTIME] : " << e.what() << std::endl;
         throw std::runtime_error(e.what());
     }
+    if (m_timing_enabled) {
+        m_last_timing.run_ns = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - run_start).count());
+    }
 
     const float* policy_data = output_tensors[0].GetTensorData<float>();
     const float* value_data = output_tensors[1].GetTensorData<float>();
 
     policies.resize(batch_size * 4672);
     values.resize(batch_size);
+
+    const auto softmax_start = m_timing_enabled
+        ? std::chrono::steady_clock::now()
+        : std::chrono::steady_clock::time_point{};
 
     // Softmax indépendant pour CHAQUE position du batch
     for (int b = 0; b < batch_size; ++b) {
@@ -81,5 +94,11 @@ void ONNXEvaluator::evaluate_batch(
 
         // Copie de la valeur
         values[b] = value_data[b];
+    }
+
+    if (m_timing_enabled) {
+        m_last_timing.softmax_ns = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - softmax_start).count());
     }
 }
