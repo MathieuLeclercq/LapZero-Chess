@@ -218,6 +218,22 @@ void test_fixed_batch_pads_wave_calls_and_keeps_budget() {
                  "le lot fixe a modifie le plateau d'entree");
 }
 
+void test_fixed_batch_pads_mono_batch() {
+    ControlledEvaluator evaluator;
+    MCTS mcts(&evaluator, 8192, 0);
+    mcts.set_fixed_batch(true);
+    Chessboard board = startup_board();
+    mcts.mcts_search(board, 17, 1.4f, false, 8, 1);
+
+    require_test(!evaluator.batch_sizes.empty(), "evaluateur jamais appele");
+    require_test(evaluator.batch_sizes.front() == 1,
+                 "l'expansion de racine doit rester a batch 1");
+    for (std::size_t i = 1; i < evaluator.batch_sizes.size(); ++i) {
+        require_test(evaluator.batch_sizes[i] == 8,
+                     "un lot mono n'a pas la forme fixe");
+    }
+}
+
 void test_gpu_phase_is_quiet_and_update_root_waits_for_session() {
     ControlledEvaluator evaluator;
     EvaluationGate gate;
@@ -274,6 +290,7 @@ int main() {
         test_evaluator_failure_cleans_session_and_allows_recovery();
         test_invalid_evaluator_outputs_clean_session();
         test_fixed_batch_pads_wave_calls_and_keeps_budget();
+        test_fixed_batch_pads_mono_batch();
         test_gpu_phase_is_quiet_and_update_root_waits_for_session();
         return 0;
     }

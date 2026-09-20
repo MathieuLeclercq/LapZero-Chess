@@ -190,11 +190,32 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
         if (batch.empty()) continue;
 
         const int batch_count = static_cast<int>(batch.size());
+        int eval_batch = batch_count;
+        if (m_fixed_batch && batch_count < batch_size) {
+            // Meme raison que dans les vagues : garder la forme du lot pour
+            // eviter la re-planification d'ONNX Runtime.
+            constexpr std::size_t TENSOR_SIZE = 119 * 64;
+            eval_batch = batch_size;
+            const std::size_t target =
+                static_cast<std::size_t>(batch_size) * TENSOR_SIZE;
+            tensors.reserve(target);
+            const std::vector<float> dernier(
+                tensors.end() - TENSOR_SIZE, tensors.end());
+            while (tensors.size() < target) {
+                tensors.insert(tensors.end(), dernier.begin(), dernier.end());
+            }
+        }
+
         m_nn_calls.fetch_add(batch_count, std::memory_order_relaxed);
         m_nn_batches.fetch_add(1, std::memory_order_relaxed);
         {
             PhaseTimer timer(timing, SearchPhase::Evaluator);
-            m_evaluator->evaluate_batch(tensors, policies, values, batch_count);
+            m_evaluator->evaluate_batch(tensors, policies, values, eval_batch);
+        }
+        if (policies.size() != static_cast<std::size_t>(eval_batch) * 4672
+            || values.size() != static_cast<std::size_t>(eval_batch)) {
+            throw std::runtime_error(
+                "evaluateur : dimensions de sortie invalides");
         }
 
         for (int i = 0; i < batch_count; ++i) {
