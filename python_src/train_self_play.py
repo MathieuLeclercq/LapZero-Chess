@@ -355,7 +355,7 @@ if __name__ == "__main__":
         pipeline(
             num_iterations=150,
             games_per_iter=512,
-            concurrent_games=512,
+            concurrent_games=256,
             slow_sims=700,
             fast_sims=100,
             slow_ratio=0.25,
