@@ -1,0 +1,58 @@
+\section{Sources et reproduction}
+
+\subsection{D'où viennent les chiffres}
+
+\begin{itemize}[leftmargin=1.2em,itemsep=3pt,topsep=2pt]
+  \item \textbf{Checkpoints supervisés} (Lightning) : les champs
+        \code{epoch}, \code{global\_step} et l'état des boucles
+        (\code{loops.fit\_loop}) donnent le nombre exact de steps, le nombre
+        de lots par époque et les compteurs d'époque. Lecture par
+        \code{torch.load} avec \code{weights\_only=False}.
+  \item \textbf{Checkpoints self-play} (\code{.pt}) : les clés
+        \code{iteration} et \code{global\_step} donnent l'état exact de chaque
+        jalon (par exemple \code{iteration=436}, \code{global\_step=26356}).
+  \item \textbf{Shards binaires} : les tailles et les tenseurs lus dans
+        \chemin{Downloads/dataset\_shards} donnent la taille d'époque du
+        prétraining (chaque shard de 500 parties contient environ 16\,600
+        positions).
+  \item \textbf{Wandb} : le projet
+        \href{https://wandb.ai/leclercqmathieu14/alphazero-chess}{%
+        leclercqmathieu14/alphazero-chess} contient les 68 runs de mars et
+        avril. Un export local complet a été réalisé dans
+        \chemin{out/wandb\_export} (configurations, résumés, historiques CSV,
+        journaux de sortie).
+\end{itemize}
+
+\subsection{Exporter wandb en local}
+
+L'export a été produit par \chemin{out/fetch\_wandb.py} (clé API lue depuis
+\chemin{out/wandb\_key.txt}, ce dossier est ignoré par git), puis agrégé par
+\chemin{out/aggregate.py} en deux fichiers de travail :
+\chemin{merged\_selfplay.csv} (une ligne par itération) et
+\chemin{runs\_augmented.json} (une entrée par lancement, avec la plage
+d'itérations couverte).
+
+\subsection{Regénérer les figures}
+
+Depuis le dossier \chemin{docs/rapports/2026-04-entrainement-iter436} :
+
+\begin{verbatim}
+python figures/generer_figures.py
+\end{verbatim}
+
+Le script lit \chemin{out/wandb\_export} et écrit les neuf figures PDF dans
+\chemin{figures/}. Il demande \code{matplotlib} et \code{numpy}
+(\code{python3} sur la machine de rédaction).
+
+\subsection{Documentation liée}
+
+\begin{itemize}[leftmargin=1.2em,itemsep=2pt,topsep=2pt]
+  \item \chemin{docs/training-history.md} : la même reconstitution en
+        anglais, au format court.
+  \item \chemin{python\_src/train\_supervised.py} et
+        \chemin{python\_src/train\_self\_play.py} : les deux scripts
+        d'entraînement.
+  \item \chemin{python\_src/checkpoints/} : les jalons conservés de la
+        génération 1 et de la génération 2.
+  \item \chemin{CHANGELOG.md} : les jalons techniques du projet depuis 2022.
+\end{itemize}

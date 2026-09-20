@@ -171,6 +171,23 @@ to point to your specific interpreter:
 - Self-Play (RL): ```uv run python python_src/train_self_play.py```
 - Run Tournament: ```uv run python python_src/tournament_elo.py```
 - Play against Bot: ```uv run python python_src/play_against_bot.py```
+- Run Lichess Bot: ```run_lichess_bot.bat```
+
+### 🤖 Lichess Bot
+
+The bot plays on Lichess through a vendored copy of
+[lichess-bot](https://github.com/lichess-bot-devs/lichess-bot) (upstream 2026.8.9.2, AGPLv3)
+in `python_src/lichess_bot/`, with `python_src/uci.py` as the engine. The configuration lives
+in `python_src/lichess_bot/config.yml` (gitignored, it holds the Lichess OAuth token).
+
+```bash
+run_lichess_bot.bat    # cd's into python_src/lichess_bot, uses .venv, forwards extra args
+```
+
+Game preferences: blitz and rapid only (3 to 10 minutes, increment up to 2 s), bot opponents
+first, matchmaking offers 5+0, 5+2, 10+0 and 10+2. Bot games are saved as PGN under
+`python_src/lichess_bot/game_records/`.
+
 
 ## 🔮 Future Work & Roadmap
 

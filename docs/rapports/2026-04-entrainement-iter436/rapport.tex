@@ -1,0 +1,175 @@
+% Rapport : historique d'entrainement du modele iter436
+% Compilation : pdflatex rapport.tex (deux passes pour la table des matieres)
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{newpxtext}
+\usepackage{newpxmath}
+\usepackage{microtype}
+\usepackage[a4paper,top=2.6cm,bottom=2.8cm,left=2.7cm,right=2.7cm]{geometry}
+
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{titlesec}
+\usepackage{titletoc}
+\usepackage{fancyhdr}
+\usepackage{xcolor}
+\usepackage[most]{tcolorbox}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,
+  backgrounds,calc,patterns}
+\usepackage{enumitem}
+\usepackage{amsmath}
+\usepackage{seqsplit}
+\usepackage[hidelinks]{hyperref}
+
+\setlength{\emergencystretch}{2em}
+
+% ---------------------------------------------------------------------------
+% Palette et style
+% ---------------------------------------------------------------------------
+\definecolor{bleu}{HTML}{0B3C5D}
+\definecolor{bleuclair}{HTML}{E8F0F5}
+\definecolor{gris}{HTML}{444444}
+\definecolor{grisfond}{HTML}{F4F4F4}
+\definecolor{vert}{HTML}{2E7D32}
+\definecolor{rouge}{HTML}{B3261E}
+\definecolor{ambre}{HTML}{8A5A00}
+\definecolor{ambrefond}{HTML}{FFF6E0}
+
+\captionsetup{font=small,labelfont={bf,color=bleu}}
+\addto\captionsfrench{\renewcommand{\figurename}{Figure}}
+\addto\captionsfrench{\renewcommand{\tablename}{Tableau}}
+
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{bleu}}{\thesection}{0.8em}{}
+\titleformat{\subsection}
+  {\normalfont\large\bfseries\color{bleu}}{\thesubsection}{0.7em}{}
+\titleformat{\subsubsection}
+  {\normalfont\normalsize\bfseries\color{gris}}{\thesubsubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{1.6em}{0.8em}
+\titlespacing*{\subsection}{0pt}{1.2em}{0.5em}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{gris}\leftmark}
+\fancyhead[R]{\small\color{gris}\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{bleu!40}\leaders\hrule height \headrulewidth\hfill}}
+\setlength{\headheight}{24pt}
+
+% ---------------------------------------------------------------------------
+% Encadres
+% ---------------------------------------------------------------------------
+\newtcolorbox{resume}[1][En résumé]{
+  enhanced, breakable, colback=bleuclair, colframe=bleu,
+  boxrule=0.8pt, arc=2pt, left=8pt, right=8pt, top=6pt, bottom=6pt,
+  fonttitle=\bfseries\small, title={#1},
+  attach boxed title to top left={yshift=-2mm, xshift=4mm},
+  boxed title style={colback=bleu, arc=1pt, boxrule=0pt},
+  before skip=10pt, after skip=10pt}
+
+\newtcolorbox{chiffres}[1][Chiffres clés]{
+  enhanced, breakable, colback=white, colframe=bleu,
+  boxrule=1pt, arc=2pt, left=10pt, right=10pt, top=8pt, bottom=8pt,
+  fonttitle=\bfseries\small, title={#1},
+  attach boxed title to top left={yshift=-2mm, xshift=4mm},
+  boxed title style={colback=bleu, arc=1pt, boxrule=0pt},
+  before skip=10pt, after skip=10pt}
+
+\newtcolorbox{attention}[1][À retenir]{
+  enhanced, breakable, colback=ambrefond, colframe=ambre,
+  boxrule=0.8pt, arc=2pt, left=8pt, right=8pt, top=6pt, bottom=6pt,
+  fonttitle=\bfseries\small, title={#1},
+  attach boxed title to top left={yshift=-2mm, xshift=4mm},
+  boxed title style={colback=ambre, arc=1pt, boxrule=0pt},
+  before skip=10pt, after skip=10pt}
+
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\chemin}[1]{\texttt{\small\seqsplit{#1}}}
+\newcommand{\ok}{\textcolor{vert}{\textbf{OK}}}
+
+% ---------------------------------------------------------------------------
+% Metadonnees du document
+% ---------------------------------------------------------------------------
+\newcommand{\docTitre}{Entraînement du modèle iter436}
+\newcommand{\docSousTitre}{1,6 million de parties, 225 millions de positions,
+436 itérations de self-play}
+\newcommand{\docAuteur}{Mathieu Leclercq}
+\newcommand{\docDate}{20 septembre 2026}
+\newcommand{\docVersion}{Version 1.0}
+
+\hypersetup{
+  pdftitle={\docTitre},
+  pdfauthor={\docAuteur},
+  pdfsubject={Historique d'entraînement, moteur d'échecs AlphaZero},
+  pdfkeywords={AlphaZero, self-play, MCTS, Lichess, ONNX, entraînement}
+}
+
+\begin{document}
+
+% ---------------------------------------------------------------------------
+% Page de titre
+% ---------------------------------------------------------------------------
+\begin{titlepage}
+\centering
+\vspace*{1.5cm}
+{\color{bleu}\rule{\textwidth}{1.2pt}}
+\vspace{0.8cm}
+
+{\Huge\bfseries\color{bleu} \docTitre\par}
+\vspace{0.5cm}
+{\Large\color{gris} \docSousTitre\par}
+
+\vspace{0.6cm}
+{\large Historique d'entraînement\par}
+
+\vspace{0.4cm}
+{\color{bleu}\rule{\textwidth}{0.6pt}}
+\vspace{1.2cm}
+
+{\large \docAuteur\par}
+{\large \docDate\par}
+\vspace{0.3cm}
+{\small \docVersion\par}
+
+\vfill
+
+\begin{tcolorbox}[enhanced, colback=grisfond, colframe=gris!50,
+  boxrule=0.5pt, arc=2pt, width=0.88\textwidth]
+\small
+Ce document reconstitue l'entraînement du modèle
+\code{2026\_04\_30\_09h53\_iter436\_unsupervised}, celui que le bot utilise
+sur Lichess. Il raconte la lignée complète : la première génération de mars,
+abandonnée ; le changement d'architecture du 6 avril et la reprise de zéro ;
+puis les trois phases qui ont produit le modèle actuel, prétraining Lichess,
+affinage sur parties de grands maîtres, et self-play. Tous les chiffres
+proviennent des métadonnées des checkpoints, des scripts du dépôt et des
+68 runs du projet wandb \code{leclercqmathieu14/alphazero-chess}.
+\end{tcolorbox}
+\vspace{1cm}
+\end{titlepage}
+
+% ---------------------------------------------------------------------------
+\tableofcontents
+\newpage
+
+\input{chapitres/00-resume}
+\input{chapitres/01-chronologie}
+\input{chapitres/02-supervise}
+\input{chapitres/03-selfplay}
+\input{chapitres/04-lecture}
+\input{chapitres/05-limites}
+
+\appendix
+\input{annexes/annexe-a-runs}
+\input{annexes/annexe-c-sources}
+
+\end{document}

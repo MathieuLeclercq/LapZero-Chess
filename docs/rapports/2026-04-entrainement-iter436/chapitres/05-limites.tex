@@ -1,0 +1,44 @@
+\section{Limites et zones d'ombre}
+
+\begin{itemize}[leftmargin=1.2em,itemsep=3pt,topsep=2pt]
+  \item \textbf{Taille exacte du jeu Lichess.} Le fichier PGN conservé
+        contient 1\,000\,000 de parties, mais la longueur d'époque lue dans le
+        checkpoint implique environ 2\,400 shards, soit environ 1,2 M de
+        parties. L'entrée de conversion était donc légèrement plus grande que
+        le fichier conservé, ou celui-ci a été ré-extrait plus tard avec un
+        plafond à 1 M.
+
+  \item \textbf{Parties de grands maîtres.} L'archive
+        \chemin{docs/clean\_pgns.7z} ne contient que 56\,562 parties, un
+        instantané de mars. Le nombre d'environ 210\,000 parties est estimé à
+        partir des 19,45 M de positions par époque et de la longueur moyenne
+        mesurée sur l'archive (91,5 plies).
+
+  \item \textbf{Checkpoints intermédiaires manquants.} Plusieurs checkpoints
+        intermédiaires cités par les runs (iter180, iter346, iter347, etc.) ne
+        sont plus présents dans \chemin{python\_src/checkpoints}. Seuls les
+        jalons conservés par l'auteur sont disponibles.
+
+  \item \textbf{Itérations sans journal.} Neuf itérations n'ont pas de
+        données wandb (42, 82, 83, 179, 251 à 254 et 347), en général après un
+        run interrompu. La chaîne des runs a été reconstituée par le champ
+        \code{checkpoint\_path} de chaque configuration ; les volumes cumulés
+        sont donc des minorants stricts.
+
+  \item \textbf{Elo estimé, pas Elo mesuré.} Les évaluations font 16 parties
+        contre un Stockfish limité en nœuds (200\,000). Le bruit est de
+        l'ordre de $\pm 150$ Elo par point, et l'ancre change quatre fois en
+        cours de route, ce qui décale l'échelle. Le chiffre de 2\,665 Elo est
+        une estimation face à cette ancre, pas un classement de tournoi.
+
+  \item \textbf{Pertes non comparables entre phases.} La perte policy du
+        self-play dépend de la politique de recherche du modèle, qui évolue
+        avec lui ; elle ne se compare ni à celle du supervisé, ni d'une
+        itération à l'autre. Seules les pertes value du supervisé et les
+        taux de victoire sont directement interprétables.
+
+  \item \textbf{Ancienne génération.} Les chiffres de la génération de mars
+        sont exacts (lus dans les checkpoints) mais son historique de runs
+        n'a pas été audité en détail ici : elle n'a servi qu'à documenter
+        l'origine du transfert abandonné.
+\end{itemize}

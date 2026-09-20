@@ -1,0 +1,83 @@
+\section{Runs du self-play de la génération retenue}
+
+Les 26 lancements de self-play, dans l'ordre chronologique. Les heures sont
+locales (UTC+2). Les itérations indiquent la plage réellement journalisée dans
+chaque run. Le code est l'identifiant wandb du run.
+
+\begin{longtable}{l r r r l r l}
+\caption{Runs de self-play de la génération retenue.}
+\label{tab:runs-selfplay} \\
+\toprule
+Date & Itér. début & Itér. fin & Parties/itér. & LR & Lot & Run \\
+\midrule
+\endfirsthead
+\toprule
+Date & Itér. début & Itér. fin & Parties/itér. & LR & Lot & Run \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+07 avril 00:34 & 1 & 7 & 512 & 5e-6 & 1024 & \code{m8pz5otu} \\
+08 avril 12:43 & 8 & 26 & 256 & 5e-5 & 2048 & \code{vpbjbf7j} \\
+09 avril 16:44 & 27 & 30 & 256 & 2e-5 & 2048 & \code{uqrzrwut} \\
+12 avril 19:17 & 31 & 34 & 256 & 2e-5 & 2048 & \code{nsgcxhaj} \\
+13 avril 17:39 & 35 & 36 & 256 & 2e-5 & 2048 & \code{17lj9pqz} \\
+13 avril 22:46 & 37 & 37 & 32 & 2e-5 & 2048 & \code{hus8s590} \\
+13 avril 23:12 & 37 & 37 & 512 & 2e-5 & 2048 & \code{m1mi6ixe} \\
+14 avril 13:33 & 38 & 40 & 512 & 2e-5 & 2048 & \code{csggla4i} \\
+14 avril 17:50 & 41 & 41 & 512 & 4e-5 & 4096 & \code{ys4kv1lb} \\
+14 avril 21:05 & 43 & 69 & 512 & 4e-5 & 4096 & \code{ef1nhupv} \\
+16 avril 00:37 & 70 & 81 & 512 & 4e-5 & 4096 & \code{x664bpmu} \\
+16 avril 13:44 & 84 & 96 & 512 & 4e-5 & 4096 & \code{ecxcsfro} \\
+17 avril 00:34 & 97 & 110 & 512 & 4e-5 & 4096 & \code{44q8hjkp} \\
+17 avril 13:07 & 111 & 145 & 512 & 4e-5 & 4096 & \code{wy05jkb6} \\
+18 avril 20:33 & 146 & 178 & 512 & 4e-5 & 4096 & \code{ousba3tl} \\
+20 avril 13:45 & 180 & 180 & 512 & 4e-5 & 4096 & \code{4z3j86bz} \\
+20 avril 14:34 & 181 & 208 & 512 & 4e-5 & 4096 & \code{04jv9d6n} \\
+21 avril 21:12 & 209 & 213 & 512 & 4e-5 & 4096 & \code{x0h5194i} \\
+22 avril 01:31 & 214 & 236 & 512 & 4e-5 & 4096 & \code{s6aa010p} \\
+23 avril 00:44 & 237 & 250 & 512 & 4e-5 & 4096 & \code{l4hysg2e} \\
+23 avril 17:08 & - & - & 512 & 4e-5 & 4096 & \code{t6t1x00e} \\
+23 avril 17:23 & 255 & 261 & 512 & 4e-5 & 4096 & \code{oghdwvmm} \\
+23 avril 23:25 & 262 & 316 & 512 & 4e-5 & 4096 & \code{g2el0853} \\
+26 avril 18:18 & 317 & 346 & 512 & 4e-5 & 4096 & \code{24gfg9iw} \\
+27 avril 21:03 & 348 & 405 & 512 & 4e-5 & 4096 & \code{tsndt3dr} \\
+30 avril 09:53 & 406 & 436 & 512 & 4e-5 & 4096 & \code{225nnvy4} \\
+\end{longtable}
+
+\section{Runs supervisés et génération précédente}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Les quatre runs supervisés du 6 avril.}
+\label{tab:runs-supervise}
+\begin{tabular}{l l r r r}
+\toprule
+Run & Initialisation & Steps & Précision & Perte value \\
+\midrule
+\code{hamgvtvc} & poids transférés & 3\,199 & 39,0 \% $\to$ 50,1 \% & 1,88 $\to$ 1,98 \\
+\code{c3t86nnd} & poids transférés & 1\,799 & 40,1 \% $\to$ 49,7 \% & 1,95 $\to$ 1,94 \\
+\code{jhqhhx5q} & aléatoire (retenu) & 19\,495 & 5,0 \% $\to$ 50,0 \% & 0,91 $\to$ 0,82 \\
+\code{ifvh81l0} & affinage GM (retenu) & 18\,996 & 40,4 \% $\to$ 49,3 \% & 0,58 $\to$ 0,58 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Génération précédente (premier réseau, sans blocs SE), conservée
+comme référence.}
+\label{tab:gen1}
+\begin{tabular}{l l r}
+\toprule
+Date & Étape & Steps (cumulés) \\
+\midrule
+7 mars 2026  & supervisé, grands maîtres seuls & 4\,749 \\
+9 mars 2026  & ajout du jeu Lichess & 9\,755 \\
+11 mars 2026 & correctif de la tête de policy & 15\,752 \\
+10 mars au 4 avril 2026 & self-play, 431 itérations & 25\,429 \\
+\bottomrule
+\end{tabular}
+\end{table}

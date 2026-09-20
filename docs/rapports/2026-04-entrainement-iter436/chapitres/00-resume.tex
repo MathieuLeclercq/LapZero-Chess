@@ -1,0 +1,34 @@
+\section{Résumé}
+
+Le modèle \code{2026\_04\_30\_09h53\_iter436\_unsupervised} est la deuxième
+génération du réseau de LapZero-Chess. Il a été entraîné du 6 au 30 avril 2026
+en trois temps : un prétraining supervisé sur des parties Lichess, un court
+affinage sur des parties de grands maîtres, puis 436 itérations de self-play.
+C'est ce modèle que \code{uci.py} charge aujourd'hui pour jouer sur Lichess
+(compte \code{Mboobot}, environ 2\,290 en rapide au moment de la rédaction).
+
+La lignée complète compte en réalité deux générations. La première, entraînée
+en mars, a été abandonnée le 6 avril après un changement d'architecture. Une
+piste de transfert de poids a été testée ce soir-là, puis écartée : la lignée
+retenue est repartie de poids aléatoires, comme le montre la section~2.3.
+
+\begin{chiffres}
+\begin{itemize}[leftmargin=1.1em,itemsep=1pt,topsep=2pt]
+  \item \textbf{Architecture} : ResNet 10 blocs, 128 filtres, blocs
+        Squeeze-and-Excitation, entrée $119 \times 8 \times 8$, policy 4\,672 coups.
+  \item \textbf{Parties utilisées} : environ 1,2 million de parties Lichess,
+        environ 210\,000 parties de grands maîtres et 211\,000 parties de
+        self-play, soit près de 1,6 million.
+  \item \textbf{Positions} : 39,9 M uniques pour Lichess, 19,5 M pour les
+        grands maîtres, 5,93 M générées par le self-play.
+  \item \textbf{Échantillons vus à l'entraînement} (positions présentées au
+        réseau, soit lots $\times$ steps) : 79,8 M (Lichess) +
+        38,9 M (grands maîtres) + 105,9 M (self-play), soit 224,6 M.
+  \item \textbf{Self-play} : 436 itérations, 26\,356 steps d'optimiseur,
+        21,7 M coups joués, 5,93 M positions conservées.
+  \item \textbf{Niveau estimé} : environ 2\,665 Elo, avec un pic à 2\,892,
+        face à Stockfish 2\,600 limité à 200\,000 nœuds.
+  \item \textbf{Durée} : du 6 avril 18 h 49 au 30 avril 09 h 53 (heure
+        locale), soit environ 23 jours.
+\end{itemize}
+\end{chiffres}
