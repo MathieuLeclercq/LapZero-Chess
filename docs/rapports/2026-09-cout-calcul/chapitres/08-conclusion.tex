@@ -1,0 +1,36 @@
+\section{Conclusion}
+
+Ce chantier a commenc\'e par une anomalie : deux chemins qui partagent le
+m\^eme r\'eseau, le m\^eme GPU et le m\^eme \'evaluateur, mais un facteur
+quatre de vitesse par position. Il se termine par une correction de quelques
+lignes, s\'emantiquement neutre, qui ram\`ene la recherche UCI au niveau du
+self-play.
+
+La d\'emarche compte autant que le r\'esultat. Un banc hors arbre a mesur\'e
+l'\'evaluateur seul, avec un mode qui reproduit fid\`element la fa\c con dont
+la recherche alterne les tailles de lot. Ce mode a r\'ev\'el\'e que
+\code{session->Run} passe de 3 \`a 13\,ms selon que la forme du lot est stable
+ou non. Le reste en d\'ecoule : padder les lots \`a une forme fixe, ignorer les
+sorties dupliqu\'ees, et laisser la racine au lot 1.
+
+Les mesures interleaved donnent $\times 2{,}0$ en ouverture, $\times 3{,}2$ en
+milieu et $\times 2{,}55$ en finale pour huit workers, avec un p95 de latence
+divis\'e par deux \`a trois. Le m\^eme gain s'applique au chemin mono, donc au
+banc de puzzles et aux tournois. Le bot UCI active le r\'eglage.
+
+Deux pistes ont \'et\'e refus\'ees sur preuves : FP16, plus lent de 18 \`a
+28\,\%, et les r\'eglages de divergence, plus rapides de 13 \`a 25\,\% mais
+moins pr\'ecis de 1,8 \`a 2,4 points. Cette seconde r\'efutation est aussi
+instructive que le gain : elle montre que la barri\`ere qualit\'e du projet
+fonctionne et qu'un d\'ebit plus \'elev\'e n'est pas une fin en soi.
+
+Enfin, la mesure du cas chaud a corrig\'e une erreur de raisonnement des
+rapports pr\'ec\'edents : un succ\`es de table n'\'evite pas l'inf\'erence, car
+la descente continue vers une feuille r\'eseau. La r\'eutilisation d'arbre
+approfondit la recherche, elle n'all\`ege pas le travail GPU, et la r\'eserve
+Amdahl est lev\'ee.
+
+Il reste du chemin vers Leela Chess Zero : une file d'inf\'erence continue
+pour remplir des lots plus gros ($\times 1{,}3$ \`a $\times 1{,}7$), et un
+backend mieux adapt\'e aux cartes 8$\times$8. Le prochain jalon naturel est un
+microbenchmark de file, puis un plan s\'epar\'e pour la production continue.

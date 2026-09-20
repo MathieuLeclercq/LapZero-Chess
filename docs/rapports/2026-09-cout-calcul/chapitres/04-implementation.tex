@@ -1,0 +1,162 @@
+\section{Impl\'ementation}
+
+\subsection{Vue d'ensemble}
+
+Le chantier suit le plan \code{2026-09-19-cout-calcul-optimisations.md} en six
+t\^aches : banc hors arbre, buffers, lot fixe, divergence, FP16, cas chaud,
+puis mesures et d\'ecision. L'ordre a \'et\'e adapt\'e en cours de route : la
+d\'ecouverte du facteur quatre a fait passer le lot fixe avant les buffers,
+devenus marginaux.
+
+\begin{table}[h]
+\centering
+\small
+\caption{T\^aches et \'etat.}
+\label{tab:taches}
+\begin{tabularx}{\textwidth}{llX}
+\toprule
+T\^ache & \'Etat & Livrable \\
+\midrule
+1. Banc \'evaluateur & faite & \code{evaluator\_batch\_bench}, courbes du lot \\
+2. Buffers persistants & non retenue & mesure : la forme domine \\
+3. Lot fixe & faite & vagues et mono, activ\'e dans l'UCI \\
+4. Divergence param\'etrable & faite, candidats rejet\'es & \code{SearchTuning}, balayage \\
+5. FP16 & rejet\'ee par la mesure & conversion test\'ee, non adopt\'ee \\
+6. Cas chaud & faite & \code{hot\_tree\_bench.py} \\
+7. Mesures et d\'ecision & faite & \code{2026-09-19-cout-calcul-resultats.md} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Le banc \'evaluateur}
+
+Le nouveau binaire \code{evaluator\_batch\_bench} reprend la structure de
+\code{selfplay\_phase\_bench} : options pars\'ees \`a la main, sortie JSON sur
+la sortie standard, cible CMake avec copie des DLL ONNX et des providers. Il
+accepte \code{--fake} pour valider le harnais sans mod\`ele, \code{--batches},
+\code{--repetitions}, \code{--rounds}, \code{--variable} et \code{--out-json}.
+
+Les chronom\`etres internes sont ajout\'es \`a \code{ONNXEvaluator}, d\'esactiv\'es
+par d\'efaut pour que la production ne paie rien :
+
+\begin{lstlisting}[caption={Chronom\'etrage interne optionnel (\code{onnx\_evaluator.cpp}).}]
+const auto run_start = m_timing_enabled
+    ? std::chrono::steady_clock::now()
+    : std::chrono::steady_clock::time_point{};
+try {
+    output_tensors = session->Run(Ort::RunOptions{ nullptr },
+                                  input_names, &input_ort, 1,
+                                  output_names, 2);
+}
+...
+if (m_timing_enabled) {
+    m_last_timing.run_ns = ...;
+}
+\end{lstlisting}
+
+Un CTest \code{evaluator\_batch\_bench\_smoke} lance le mode faux sur les lots
+1, 4 et 8 et v\'erifie par expression r\'eguli\`ere la pr\'esence du lot 8, de
+la deuxi\`eme r\'ep\'etition et des deux appels par mesure.
+
+\subsection{Le lot fixe dans les vagues}
+
+\code{MCTS} gagne un drapeau par session, \code{m\_fixed\_batch}, faux par
+d\'efaut, et deux accesseurs \code{set\_fixed\_batch} / \code{fixed\_batch}
+prot\'eg\'es par le verrou de session. Le coordinateur des vagues padde le lot
+comme montr\'e au chapitre~3, puis dimensionne sa v\'erification sur
+\code{eval\_batch} au lieu de \code{network\_count}. Les compteurs gardent leur
+sens : \code{nn\_calls} compte les positions r\'eelles, \code{nn\_batches} les
+appels physiques.
+
+\begin{lstlisting}[caption={Compteurs et v\'erification de sortie dans les vagues.}]
+m_nn_calls.fetch_add(network_count, std::memory_order_relaxed);
+m_nn_batches.fetch_add(1, std::memory_order_relaxed);
+{
+    PhaseTimer evaluator_timer(timing, SearchPhase::Evaluator);
+    m_evaluator->evaluate_batch(batch_input, policies, values, eval_batch);
+}
+const std::size_t expected_policy =
+    static_cast<std::size_t>(eval_batch) * 4672;
+if (policies.size() != expected_policy
+    || values.size() != static_cast<std::size_t>(eval_batch)) {
+    throw std::runtime_error("evaluateur : dimensions de sortie invalides");
+}
+\end{lstlisting}
+
+\subsection{Le chemin mono}
+
+Le chemin mono-worker du noyau batch\'e souffre du m\^eme mal : sa boucle
+ferme le lot au premier n\oe{}ud d\'ej\`a collect\'e et \'evalue donc des lots
+de tailles variables. Le m\^eme padding y est appliqu\'e, avec une v\'erification
+de dimensions ajout\'ee au passage, ce qui acc\'el\`ere aussi le banc de puzzles
+et les tournois qui appellent \code{mcts\_search}.
+
+\begin{piege}[Le binding oubli\'e]
+La premi\`ere campagne \code{--fixed-batch} a \'echou\'e imm\'ediatement : le
+drapeau existait en C++ et dans le banc Python, mais \code{set\_fixed\_batch}
+n'\'etait pas expos\'e par pybind11, d'o\`u une \code{AttributeError} c\^ot\'e
+Python. Le binding a \'et\'e ajout\'e avec \code{set\_tuning} et
+\code{get\_tuning}, puis l'extension reconstruite. Les tests Python utilisant
+des faux \code{MCTS} ont \'et\'e compl\'et\'es en cons\'equence.
+\end{piege}
+
+\subsection{L'activation UCI}
+
+Le bot active le drapeau \`a la construction, uniquement sur le chemin de
+production, pour ne pas casser les tests qui injectent un faux MCTS :
+
+\begin{lstlisting}[caption={\code{uci.py} : activation et journal.}]
+MCTS_FIXED_BATCH = True
+...
+self.mcts = (mcts if mcts is not None
+             else chess_engine.MCTS(self.evaluator, tt_size=4_000_000))
+if mcts is None:
+    self.mcts.set_fixed_batch(MCTS_FIXED_BATCH)
+...
+f"uci.py pret : modele {Path(MODEL_PATH).name}, "
+f"{self.provider}, lot {MCTS_BATCH_SIZE}, "
+f"lot fixe {MCTS_FIXED_BATCH}, "
+f"workers {MCTS_WORKER_COUNT}, TT 4000000"
+\end{lstlisting}
+
+\subsection{La divergence param\'etrable}
+
+Pour pouvoir balayer la divergence sans recompiler, \code{MCTS} expose un
+petit contrat \code{SearchTuning} (amplitude du virtual loss, coefficient FPU,
+facteur de tentatives de collision), valid\'e \`a l'entr\'ee et de valeurs par
+d\'efaut inchang\'ees. La garde de r\'eservation prend d\'esormais un nombre
+d'unit\'es par descente, et les deux collecteurs lisent le coefficient FPU
+dans les r\'eglages. Les bancs gagnent \code{--virtual-loss}, \code{--fpu},
+\code{--collision-attempts} et \code{--slices}, ce dernier d\'ecoupant une
+recherche en tranches de $N$ simulations pour mesurer le r\'egime r\'eel du
+bot.
+
+\subsection{Le cas chaud}
+
+\code{hot\_tree\_bench.py} joue une s\'equence de coups avec un MCTS
+persistant, en tranches, et applique \code{update\_root} apr\`es chaque coup
+comme le bot. Il rapporte par coup le d\'ebit, les appels r\'eseau, les succ\`es
+de table et la fraction de simulations sans inf\'erence, puis r\'esume par
+position. La logique d'agr\'egation est pure et test\'ee sans moteur.
+
+\subsection{Les commits}
+
+\begin{center}
+\small
+\begin{tabular}{ll}
+\toprule
+Commit & Objet \\
+\midrule
+\code{4161cd5} & banc \'evaluateur et timings internes \\
+\code{29f9458} & lot fixe dans les vagues \\
+\code{74122ac} & activation dans l'UCI \\
+\code{6606d97} & lot fixe dans le chemin mono \\
+\code{4461d80} & cause du d\'ecrochage consign\'ee \\
+\code{3515f00} & divergence param\'etrable \\
+\code{0c41d6f} & balayage et rejet qualit\'e \\
+\code{aed5f1a} & banc du cas chaud \\
+\code{84bae7e} & r\'esultats, FP16 rejet\'e, cas chaud \\
+\code{fb2ca71} & cl\^oture du plan \\
+\bottomrule
+\end{tabular}
+\end{center}

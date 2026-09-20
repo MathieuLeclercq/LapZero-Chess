@@ -1,0 +1,87 @@
+\section{Introduction : deux chemins, un m\^eme r\'eseau}
+
+\subsection{L'observation}
+
+\`A la fin du chantier multic\oe{}ur, la recherche UCI de LapZero-Chess
+tournait entre 500 et 850 simulations par seconde selon la position et le
+nombre de workers. Le r\'eseau \'etait un ResNet de 10 blocs et 128 filtres,
+export\'e en ONNX, ex\'ecut\'e sur un GPU RTX PRO 2000 Blackwell portable avec
+le provider CUDA d'ONNX Runtime. Le banc self-play, lui, mesurait 3,05\,ms pour
+un lot de 8 positions, soit 0,38\,ms par position et environ 2\,600
+\'evaluations par seconde, avec exactement le m\^eme mod\`ele et le m\^eme GPU.
+
+Le tableau~\ref{tab:observation} r\'esume l'\'ecart : par position, la
+recherche payait 1,4 \`a 2,9\,ms l\`a o\`u le self-play payait 0,38\,ms, un
+facteur quatre \`a huit.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Co\^ut par position avant le chantier. Recherche : phase
+\'evaluateur de 700 simulations, chemin \code{step\_analysis}, lot 8, workers
+8. Self-play : banc partag\'e, 8 plateaux, 100 vagues.}
+\label{tab:observation}
+\begin{tabular}{lrrr}
+\toprule
+Chemin & ms par position & sims/s & Source \\
+\midrule
+Self-play, lot 8 fixe & 0,38 & $\approx 2\,600$ & \code{selfplay-after-gpu.json} \\
+Recherche, ouverture & 1,19 & 847 & \code{after.json} \\
+Recherche, milieu & 2,87 & 349 & \code{after.json} \\
+Recherche, finale & 1,77 & 565 & \code{after.json} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{La question}
+
+L'\'evaluateur est le m\^eme objet \code{ONNXEvaluator} dans les deux cas. La
+diff\'erence ne pouvait donc pas venir du r\'eseau lui-m\^eme. Trois familles
+d'hypoth\`eses restaient :
+
+\begin{enumerate}[leftmargin=1.4em,itemsep=3pt]
+  \item \textbf{La plomberie de l'appel.} La recherche reconstruit un vecteur
+  d'entr\'ee par vague, redimensionne les sorties et appelle le m\^eme
+  \code{evaluate\_batch}, mais avec des tailles de lot variables et des
+  buffers diff\'erents \`a chaque appel. Le self-play appelle en boucle serr\'ee
+  avec un buffer fixe.
+  \item \textbf{Les allocations.} Chaque vague alloue un vecteur d'entr\'ee
+  d'environ 200\,kio et laisse \code{evaluate\_batch} redimensionner les
+  sorties. Le self-play r\'eutilise tout.
+  \item \textbf{L'occupation GPU.} Le r\'eseau est minuscule : cartes 8$\times$8,
+  128 filtres, environ 0,4\,GFLOP par position. Le GPU pouvait \^etre sous-occup\'e,
+  et le co\^ut r\'eel pouvait venir des noyaux et non des donn\'ees.
+\end{enumerate}
+
+Les trois hypoth\`eses ne s'excluent pas, et l'\'etude de co\^ut
+\chemin{2026-09-19-cout-calcul-cpu-gpu.md} les avait list\'ees sans pouvoir
+trancher, faute de mesure qui s\'epare l'appel de l'arbre.
+
+\subsection{La m\'ethode et les contributions}
+
+La d\'emarche retenue est exp\'erimentale et hi\'erarchis\'ee : mesurer d'abord
+l'\'evaluateur \emph{hors arbre}, puis ne corriger que la cause d\'emontr\'ee,
+et refuser par la mesure toute piste qui ne passe pas la barri\`ere qualit\'e.
+
+\begin{resume}[Les contributions de ce chantier]
+\begin{itemize}[leftmargin=1.2em,itemsep=2pt]
+  \item un banc C++ \code{evaluator\_batch\_bench} qui mesure la courbe du lot
+  hors arbre, GPU et CPU, avec un mode \og lots altern\'es \fg{} qui reproduit
+  la recherche, et des chronom\`etres internes s\'eparant \code{session->Run}
+  du softmax ;
+  \item la d\'ecouverte et la quantification de la re-planification d'ONNX
+  Runtime au changement de forme : facteur quatre sur l'appel ;
+  \item le lot de forme fixe, appliqu\'e aux vagues multic\oe{}ur et au chemin
+  mono, s\'emantiquement neutre et activ\'e dans le bot UCI ;
+  \item l'\'evaluation de deux pistes concurrentes, FP16 et r\'eglages de
+  divergence, toutes deux refus\'ees sur preuves ;
+  \item la mesure du cas chaud, qui corrige une r\'eserve des rapports
+  pr\'ec\'edents sur la loi d'Amdahl ;
+  \item un verdict chiffr\'e sur la production continue et le plafond restant.
+\end{itemize}
+\end{resume}
+
+Le reste du rapport suit l'ordre : contexte et hypoth\`eses (chapitre~2),
+conception et d\'ecouverte (chapitre~3), impl\'ementation (chapitre~4),
+validation (chapitre~5), mesures (chapitre~6), discussion (chapitre~7),
+conclusion (chapitre~8).

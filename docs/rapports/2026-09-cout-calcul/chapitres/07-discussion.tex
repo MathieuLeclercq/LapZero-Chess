@@ -1,0 +1,93 @@
+\section{Discussion}
+
+\subsection{Ce que le gain signifie}
+
+Le lot fixe ram\`ene la recherche au niveau du self-play : environ 0,4 \`a
+0,6\,ms par position contre 0,38\,ms pour le banc self-play \`a lot fixe 8,
+l\`a o\`u la recherche en payait 1,4 \`a 2,9. Les trois positions convergent
+vers 1\,500 \`a 2\,100 simulations par seconde, alors qu'elles s'\'etalonnaient
+de 350 \`a 850 auparavant. Le bot b\'en\'eficie directement de ce facteur, car
+l'\'evaluateur occupait 96 \`a 98\,\% du temps.
+
+Le r\'esultat d\'epasse l'estimation de l'\'etude de co\^ut, qui annon\c cait
+$\times 3$ \`a $\times 6$ pour l'ensemble du chantier mais pla\c cait la
+premi\`ere \'etape, la plomberie, \`a $\times 3$ \`a $\times 5$ au mieux : elle
+\'etait juste, et elle est d\'esormais acquise.
+
+\subsection{Le plafond restant}
+
+Le banc \'evaluateur montre que le co\^ut par position continue de baisser
+jusqu'au lot 128 : 0,10\,ms contre 0,63\,ms au lot 8, soit un facteur six. Mais
+l'arbre d'un seul coup ne fournit que 5 \`a 7 feuilles par vague, et le
+padding \'evalue donc des doublons : au remplissage observ\'e de 6,6, environ
+17\,\% des rang\'ees d'un lot sont des duplications. Deux directions restent :
+
+\begin{enumerate}[leftmargin=1.4em,itemsep=3pt]
+  \item \textbf{Remplir plus.} La divergence a montr\'e qu'on ne remplit pas
+  plus sans casser la qualit\'e. Une file d'inf\'erence continue, qui
+  accumulerait les requ\^etes pendant le Run, ne forcerait rien et pourrait
+  remplir 12 \`a 16 feuilles. Gain estim\'e : $\times 1{,}3$ \`a $\times 1{,}7$
+  sur l'\'evaluateur, donc sur la recherche.
+  \item \textbf{Descendre le co\^ut par position.} M\^eme \`a forme fixe, le
+  GPU reste sous-occup\'e : 0,4\,GFLOP par position pour 3,4\,ms par appel de
+  8, soit quelques pour cent de la puissance cr\^ete. Le chemin passe par des
+  noyaux mieux adapt\'es au 8$\times$8 (TensorRT, fusion des couches), pas par
+  la quantification, qui a empir\'e les choses.
+\end{enumerate}
+
+Par rapport \`a Leela Chess Zero, l'\'ecart s'est r\'eduit sans dispara\^itre.
+lc0 reste devant sur la taille de lot effective (32 \`a 256 contre 8), le
+backend et la file asynchrone. Le pr\'esent chantier a supprim\'e le facteur
+qui n'\'etait ni algorithmique ni mat\'eriel : le contrat de forme impos\'e par
+ONNX Runtime.
+
+\subsection{Les le\c cons}
+
+\begin{resume}[Quatre le\c cons transf\'erables]
+\begin{enumerate}[leftmargin=1.4em,itemsep=2pt]
+  \item \textbf{Un contrat implicite peut co\^uter plus cher que
+  l'algorithme.} Rien dans le code ne disait que la forme du lot devait \^etre
+  stable ; le runtime, lui, la re-planifiait \`a chaque changement.
+  \item \textbf{Mesurer hors de l'arbre.} Tant que l'appel est mesur\'e au
+  milieu de la recherche, la cause reste noy\'ee. Un banc d'API isol\'e a
+  tranch\'e en quelques minutes ce que trois hypoth\`eses se disputaient
+  depuis des semaines.
+  \item \textbf{Le protocole interleaved n'est pas un luxe.} La d\'erive entre
+  sessions est du m\^eme ordre que les gains cherch\'es ; sans alternance, les
+  conclusions auraient pu \^etre invers\'ees.
+  \item \textbf{La barri\`ere qualit\'e prot\`ege des victoires empoisonn\'ees.}
+  Le balayage de divergence offrait 13 \`a 25\,\% de d\'ebit pour 2 points de
+  r\'esolution ; seule la comparaison appari\'ee pouvait le montrer.
+\end{enumerate}
+\end{resume}
+
+\subsection{Les limites}
+
+\begin{itemize}[leftmargin=1.2em,itemsep=2pt]
+  \item Une seule machine et une seule carte ; les rapports absolus ne se
+  transposent pas telles quelles, mais le m\'ecanisme de re-planification est
+  une propri\'et\'e d'ONNX Runtime, pas du GPU.
+  \item Le balayage de divergence repose sur 6 observations par position et le
+  pr\'efiltre qualit\'e sur 500 puzzles ; une diff\'erence de moins d'un point
+  n'aurait pas \'et\'e distingu\'ee du bruit.
+  \item Le lot fixe \'evalue des doublons : \`a remplissage 6,6, environ
+  17\,\% des rang\'ees sont perdues. C'est le prix de la forme stable, tr\`es
+  inf\'erieur au facteur quatre gagn\'e.
+  \item Le chemin mono est acc\'el\'er\'e mais reste le fallback ; le
+  self-play, qui \'evaluait d\'ej\`a des lots fixes de 128 \`a 512, n'avait
+  rien \`a corriger.
+  \item Le bot utilise un mod\`ele plus r\'ecent que celui des mesures ; le
+  lot fixe ne change pas la recherche, donc la conclusion se transpose, mais
+  les d\'ebits absolus diff\`erent.
+\end{itemize}
+
+\subsection{La production continue}
+
+Le verdict provisoire, \'etabli dans le rapport de r\'esultats, est le
+suivant : la production continue peut viser un remplissage de 12 \`a 16
+feuilles et un gain de $\times 1{,}3$ \`a $\times 1{,}7$, pas davantage. Elle
+exige de synchroniser les statistiques lues pendant les backups, un co\^ut et
+un risque de correction qui m\'eritent un microbenchmark de file avant tout
+chantier. La recommandation est d'\'ecrire ce microbenchmark, puis un plan
+s\'epar\'e avec les m\^emes crit\`eres de m\'ediane, de p95 et de qualit\'e que
+les vagues.

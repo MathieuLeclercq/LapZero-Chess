@@ -1,0 +1,86 @@
+\section{Reproduction des mesures}
+
+\subsection{Compilation et suites}
+
+\begin{lstlisting}[language={},caption={Depuis la racine du d\'ep\^ot.}]
+cmake -S . -B build
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+uv run pytest python_src/tests -q
+\end{lstlisting}
+
+\subsection{Banc \'evaluateur}
+
+\begin{lstlisting}[language={},caption={Courbe du lot et A/B alternance.}]
+build/Release/evaluator_batch_bench.exe \
+  --model python_src/checkpoints_onnx/2026_04_23_23h25_iter316_unsupervised.onnx \
+  --gpu --batches 1 2 4 8 16 32 64 128 256 --repetitions 30 --rounds 20 \
+  > out/multicore/evaluator-batch-gpu.json
+
+build/Release/evaluator_batch_bench.exe --model <modele> --gpu \
+  --variable --repetitions 30 --rounds 20 \
+  > out/multicore/evaluator-variable-gpu.json
+\end{lstlisting}
+
+\subsection{Lot fixe sur la recherche}
+
+\begin{lstlisting}[language={},caption={A/B interleaved, 8 workers puis mono.}]
+uv run python python_src/search_bench.py --model <modele> --gpu \
+  --simulations 700 --passages 2 --repetitions 6 --batch-sizes 8 \
+  --worker-counts 8 --cache-history-depths 0 --tt-size 8192 \
+  --warmup-pool --out-json out/multicore/fixed-off-r1.json
+
+uv run python python_src/search_bench.py --model <modele> --gpu \
+  --simulations 700 --passages 2 --repetitions 6 --batch-sizes 8 \
+  --worker-counts 8 --cache-history-depths 0 --tt-size 8192 \
+  --warmup-pool --fixed-batch --out-json out/multicore/fixed-on-r1.json
+\end{lstlisting}
+
+R\'ep\'eter l'alternance pour deux rounds, puis refaire la paire avec un seul
+worker pour le chemin mono.
+
+\subsection{Balayage de divergence et qualit\'e}
+
+\begin{lstlisting}[language={},caption={Balayage, tranches de 64.}]
+uv run python python_src/search_bench.py --model <modele> --gpu \
+  --simulations 700 --slices 64 --passages 2 --repetitions 3 \
+  --batch-sizes 8 --worker-counts 8 --cache-history-depths 0 \
+  --tt-size 8192 --warmup-pool --fixed-batch \
+  --virtual-loss 2 --fpu 0.45 \
+  --out-json out/multicore/sweep-vl2fpu45.json
+
+uv run python python_src/puzzle_bench.py --model <modele> \
+  --banc data/puzzles_bench.txt --gpu --travailleurs 1 --search-workers 8 \
+  --batch-size 8 --cache-history-depth 0 --simulations 700 --limite 500 \
+  --virtual-loss 2 --fpu 0.45 \
+  --out-csv out/multicore/tune-vl2fpu45.csv
+
+uv run python python_src/multicore_comparison.py \
+  --baseline out/multicore/tune-base.csv \
+  --candidate out/multicore/tune-vl2fpu45.csv \
+  --out-report out/multicore/tune-comparison.md --seed 42
+\end{lstlisting}
+
+\subsection{FP16 et cas chaud}
+
+\begin{lstlisting}[language={},caption={Conversion et cas chaud.}]
+uv run python -c "
+import onnx
+from onnxruntime.transformers.float16 import convert_float_to_float16
+m = onnx.load('python_src/checkpoints_onnx/<modele>.onnx')
+onnx.save(convert_float_to_float16(m, keep_io_types=True),
+          'python_src/checkpoints_onnx/<modele>.fp16.onnx')
+"
+
+uv run python python_src/hot_tree_bench.py --model <modele> --gpu \
+  --moves 12 --simulations 700 --slices 64 \
+  --out-json out/multicore/hot-tree.json
+\end{lstlisting}
+
+\subsection{Figures et rapport}
+
+\begin{lstlisting}[language={},caption={Depuis le dossier du rapport.}]
+uv run --with matplotlib python figures/generer_figures.py
+pdflatex rapport.tex
+pdflatex rapport.tex
+\end{lstlisting}

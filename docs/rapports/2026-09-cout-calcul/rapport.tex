@@ -1,0 +1,250 @@
+% Rapport d'ingenierie : cout de calcul de la recherche et lot de forme fixe
+% Compilation : pdflatex rapport.tex (deux passes pour la table des matieres)
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{newpxtext}
+\usepackage{newpxmath}
+\usepackage{microtype}
+\usepackage[a4paper,top=2.6cm,bottom=2.8cm,left=2.7cm,right=2.7cm]{geometry}
+
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{titlesec}
+\usepackage{titletoc}
+\usepackage{fancyhdr}
+\usepackage{xcolor}
+\usepackage[most]{tcolorbox}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,
+  backgrounds,calc,patterns}
+\usepackage{enumitem}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{seqsplit}
+\usepackage[hidelinks]{hyperref}
+
+\setlength{\emergencystretch}{2em}
+
+% ---------------------------------------------------------------------------
+% Palette et style
+% ---------------------------------------------------------------------------
+\definecolor{bleu}{HTML}{0B3C5D}
+\definecolor{bleuclair}{HTML}{E8F0F5}
+\definecolor{gris}{HTML}{444444}
+\definecolor{grisfond}{HTML}{F4F4F4}
+\definecolor{vert}{HTML}{2E7D32}
+\definecolor{rouge}{HTML}{B3261E}
+\definecolor{ambre}{HTML}{8A5A00}
+\definecolor{ambrefond}{HTML}{FFF6E0}
+
+\captionsetup{font=small,labelfont={bf,color=bleu}}
+\addto\captionsfrench{\renewcommand{\figurename}{Figure}}
+\addto\captionsfrench{\renewcommand{\tablename}{Tableau}}
+
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{bleu}}{\thesection}{0.8em}{}
+\titleformat{\subsection}
+  {\normalfont\large\bfseries\color{bleu}}{\thesubsection}{0.7em}{}
+\titleformat{\subsubsection}
+  {\normalfont\normalsize\bfseries\color{gris}}{\thesubsubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{1.6em}{0.8em}
+\titlespacing*{\subsection}{0pt}{1.2em}{0.5em}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{gris}\leftmark}
+\fancyhead[R]{\small\color{gris}\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{bleu!40}\leaders\hrule height \headrulewidth\hfill}}
+\setlength{\headheight}{22pt}
+
+% ---------------------------------------------------------------------------
+% Encadres
+% ---------------------------------------------------------------------------
+\newtcolorbox{resume}[1][En resume]{
+  enhanced, breakable, colback=bleuclair, colframe=bleu,
+  boxrule=0.8pt, arc=2pt, left=8pt, right=8pt, top=6pt, bottom=6pt,
+  fonttitle=\bfseries\small, title={#1},
+  attach boxed title to top left={yshift=-2mm, xshift=4mm},
+  boxed title style={colback=bleu, arc=1pt, boxrule=0pt},
+  before skip=10pt, after skip=10pt}
+
+\newtcolorbox{piege}[1][Le piege]{
+  enhanced, breakable, colback=ambrefond, colframe=ambre,
+  boxrule=0.8pt, arc=2pt, left=8pt, right=8pt, top=6pt, bottom=6pt,
+  fonttitle=\bfseries\small, title={#1},
+  attach boxed title to top left={yshift=-2mm, xshift=4mm},
+  boxed title style={colback=ambre, arc=1pt, boxrule=0pt},
+  before skip=10pt, after skip=10pt}
+
+\newtcolorbox{mesure}[1][Methode]{
+  enhanced, breakable, colback=grisfond, colframe=gris,
+  boxrule=0.6pt, arc=2pt, left=8pt, right=8pt, top=6pt, bottom=6pt,
+  fonttitle=\bfseries\small, title={#1},
+  attach boxed title to top left={yshift=-2mm, xshift=4mm},
+  boxed title style={colback=gris, arc=1pt, boxrule=0pt},
+  before skip=10pt, after skip=10pt}
+
+\newenvironment{essentiel}{
+  \begin{tcolorbox}[enhanced, breakable, colback=white,
+    colframe=bleu, boxrule=1pt, arc=2pt,
+    left=10pt, right=10pt, top=8pt, bottom=8pt]}{\end{tcolorbox}}
+
+% ---------------------------------------------------------------------------
+% Code
+% ---------------------------------------------------------------------------
+\lstdefinestyle{cpp}{
+  language=C++,
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{bleu}\bfseries,
+  commentstyle=\color{gris}\itshape,
+  stringstyle=\color{rouge},
+  numberstyle=\ttfamily\tiny\color{gris},
+  backgroundcolor=\color{grisfond},
+  frame=single, rulecolor=\color{gris!40},
+  framesep=4pt, xleftmargin=6pt, xrightmargin=4pt,
+  numbers=left, numbersep=6pt,
+  breaklines=true, showstringspaces=false,
+  captionpos=b, tabsize=4,
+  morekeywords={size_t,uint32_t,uint64_t,uint8_t,int32_t,
+    std,atomic,memory_order_relaxed,memory_order_acquire,
+    memory_order_release,memory_order_acq_rel,nullptr,constexpr}
+}
+\lstset{style=cpp}
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\chemin}[1]{\texttt{\small\seqsplit{#1}}}
+
+\newcommand{\ok}{\textcolor{vert}{\textbf{OK}}}
+\newcommand{\echec}{\textcolor{rouge}{\textbf{echec}}}
+\newcommand{\indetermine}{\textcolor{ambre}{\textbf{indetermine}}}
+
+% ---------------------------------------------------------------------------
+% Metadonnees du document
+% ---------------------------------------------------------------------------
+\newcommand{\docTitre}{Cout de calcul de la recherche}
+\newcommand{\docSousTitre}{Du decrochage self-play au lot de forme fixe
+dans LapZero-Chess}
+\newcommand{\docAuteur}{Mathieu Leclercq}
+\newcommand{\docDate}{19 septembre 2026}
+\newcommand{\docVersion}{Version 1.0}
+\newcommand{\docCommit}{fb2ca71 (branche \code{main})}
+
+\hypersetup{
+  pdftitle={\docTitre},
+  pdfauthor={\docAuteur},
+  pdfsubject={Rapport d'ingenierie, moteur d'echecs AlphaZero},
+  pdfkeywords={MCTS, ONNX Runtime, lot, performance, C++, AlphaZero}
+}
+
+\begin{document}
+
+% ---------------------------------------------------------------------------
+% Page de titre
+% ---------------------------------------------------------------------------
+\begin{titlepage}
+\centering
+\vspace*{1.5cm}
+{\color{bleu}\rule{\textwidth}{1.2pt}}
+\vspace{0.8cm}
+
+{\Huge\bfseries\color{bleu} \docTitre\par}
+\vspace{0.5cm}
+{\Large\color{gris} \docSousTitre\par}
+
+\vspace{0.6cm}
+{\large Rapport d'ingenierie\par}
+
+\vspace{0.4cm}
+{\color{bleu}\rule{\textwidth}{0.6pt}}
+\vspace{1.2cm}
+
+{\large \docAuteur\par}
+{\large \docDate\par}
+\vspace{0.3cm}
+{\small \docVersion\par}
+{\small Dernier commit cite : \docCommit\par}
+
+\vfill
+
+\begin{tcolorbox}[enhanced, colback=grisfond, colframe=gris!50,
+  boxrule=0.5pt, arc=2pt, width=0.88\textwidth]
+\small
+Ce document raconte comment la recherche MCTS de LapZero-Chess, quatre fois
+plus lente par position que le self-play a reseau et materiel identiques, a
+retrouve le niveau du self-play en corrigeant une seule chose : la forme du
+lot envoyee a ONNX Runtime. Il decrit la demarche de mesure qui a isole la
+cause, la correction, les pistes essayees et refusees, et ce que les chiffres
+disent du plafond restant. Toutes les valeurs proviennent de campagnes
+conservees dans \code{out/multicore/} ; les commits cites sont dans
+l'historique Git du depot.
+\end{tcolorbox}
+\vspace{1cm}
+\end{titlepage}
+
+% ---------------------------------------------------------------------------
+\tableofcontents
+\newpage
+
+\input{chapitres/00-resume}
+\input{chapitres/01-introduction}
+\input{chapitres/02-contexte}
+\input{chapitres/03-conception}
+\input{chapitres/04-implementation}
+\input{chapitres/05-validation}
+\input{chapitres/06-mesures}
+\input{chapitres/07-discussion}
+\input{chapitres/08-conclusion}
+
+\appendix
+\input{annexes/annexe-a-chronologie}
+\input{annexes/annexe-b-fichiers}
+\input{annexes/annexe-c-reproduction}
+\input{annexes/annexe-d-glossaire}
+
+\begin{thebibliography}{9}
+\bibitem{alpha0316}
+D. Silver et al. \emph{Mastering Chess and Shogi by Self-Play with a
+General Reinforcement Learning Algorithm}. arXiv:1712.01815, 2017.
+\bibitem{cost-spec}
+LapZero-Chess. \emph{Repartition du cout de calcul : CPU, GPU, et pistes
+d'optimisation}. \chemin{docs/superpowers/specs/2026-09-19-cout-calcul-cpu-gpu.md},
+2026.
+\bibitem{cost-plan}
+LapZero-Chess. \emph{Cout de calcul de la recherche : plan d'implementation}.
+\chemin{docs/superpowers/plans/2026-09-19-cout-calcul-optimisations.md}, 2026.
+\bibitem{cost-results}
+LapZero-Chess. \emph{Cout de calcul de la recherche : resultats de
+l'assainissement}. \chemin{docs/superpowers/specs/2026-09-19-cout-calcul-resultats.md},
+2026.
+\bibitem{multicore-results}
+LapZero-Chess. \emph{Recherche MCTS multicoeur par vagues : mesures et
+decision}. \chemin{docs/superpowers/specs/2026-09-16-multicore-waves-results.md},
+2026.
+\bibitem{multicore-report}
+LapZero-Chess. \emph{Recherche MCTS multic\oe{}ur par vagues : rapport
+d'ingenierie}. \chemin{docs/rapports/2026-09-multicoeur/rapport.pdf}, 2026.
+\bibitem{onnxruntime}
+Microsoft. \emph{ONNX Runtime : documentation et sources}, version 1.24.3.
+\url{https://onnxruntime.ai}.
+\bibitem{lc0}
+Leela Chess Zero. \emph{Sources du moteur, branche master}.
+\url{https://github.com/LeelaChessZero/lc0}.
+\bibitem{katago}
+KataGo. \emph{Sources du moteur}.
+\url{https://github.com/lightvector/KataGo}.
+\bibitem{amdahl}
+G. Amdahl. \emph{Validity of the single processor approach to achieving
+large scale computing capabilities}. AFIPS, 1967.
+\bibitem{ieee754}
+IEEE. \emph{IEEE Standard for Floating-Point Arithmetic (IEEE 754)}, 2019.
+\end{thebibliography}
+
+\end{document}

@@ -1,0 +1,50 @@
+\section{Inventaire des fichiers}
+
+\begin{center}
+\footnotesize
+\begin{longtable}{p{5.3cm}p{8.5cm}}
+\toprule
+Fichier & R\^ole \\
+\midrule
+\endhead
+\chemin{src/onnx\_evaluator.hpp/.cpp} & Contrat d'\'evaluation, appel ONNX,
+softmax, timings internes optionnels \\
+\chemin{src/mcts.hpp/.cpp} & \code{SearchTuning}, \code{set\_fixed\_batch},
+validation des r\'eglages, FPU, r\'eservation \\
+\chemin{src/mcts\_wave.cpp} & Padding des vagues, FPU, budget de tentatives \\
+\chemin{src/mcts\_batch.cpp} & Padding du chemin mono, v\'erification des
+dimensions de sortie \\
+\chemin{src/mcts\_reservation.hpp/.cpp} & R\'eservation en unit\'es de virtual
+loss \\
+\chemin{src/bindings.cpp} & \code{set\_fixed\_batch}, \code{set\_tuning},
+\code{get\_tuning} \\
+\chemin{python\_src/uci.py} & \code{MCTS\_FIXED\_BATCH}, garde du chemin de
+production, journal de d\'emarrage \\
+\chemin{python\_src/search\_bench.py} & Lots fixes, divergence, tranches,
+collisions dans les mesures \\
+\chemin{python\_src/puzzle\_bench.py} & Options de divergence du banc qualit\'e,
+lot fixe par d\'efaut \\
+\chemin{python\_src/hot\_tree\_bench.py} & Banc du cas chaud, agr\'egation pure \\
+\chemin{tests/cpp/evaluator\_batch\_bench.cpp} & Banc hors arbre, lots fixes et
+altern\'es, timings \\
+\chemin{tests/cpp/test\_wave\_search.cpp} & Padding vagues et mono, r\'eglages
+de divergence \\
+\chemin{python\_src/tests/test\_search\_bench.py} & Propagation du lot fixe, de
+la divergence et des tranches \\
+\chemin{python\_src/tests/test\_bench\_engine.py} & Propagation c\^ot\'e banc de
+puzzles \\
+\chemin{python\_src/tests/test\_uci\_race.py} & Activation du lot fixe dans
+l'UCI \\
+\chemin{python\_src/tests/test\_hot\_tree\_bench.py} & Agr\'egation du cas
+chaud \\
+\chemin{docs/superpowers/specs/2026-09-19-cout-calcul-cpu-gpu.md} & \'Etude de
+co\^ut, cause confirm\'ee en 6.2, cas chaud en 8.4 \\
+\chemin{docs/superpowers/plans/2026-09-19-cout-calcul-optimisations.md} & Plan
+ex\'ecut\'e et statut \\
+\chemin{docs/superpowers/specs/2026-09-19-cout-calcul-resultats.md} & Rapport
+de r\'esultats et verdicts \\
+\chemin{docs/superpowers/specs/2026-09-16-multicore-waves-results.md} &
+Correction de la r\'eserve Amdahl \\
+\bottomrule
+\end{longtable}
+\end{center}

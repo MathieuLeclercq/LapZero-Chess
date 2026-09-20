@@ -1,0 +1,39 @@
+\section{Glossaire}
+
+\begin{description}[leftmargin=0pt,style=nextline,itemsep=4pt]
+  \item[Appel (inference call)] Un passage \code{session->Run} avec un lot de
+  positions, soit une poign\'ee de noyaux sur le GPU, soit une \'evaluation CPU.
+  \item[Batch, lot] Ensemble de positions \'evalu\'ees dans un seul appel
+  r\'eseau. Dans la recherche, c'est aussi la largeur d'une vague de collecte.
+  \item[Fill, remplissage] Nombre de positions r\'eelles par appel, mesur\'e
+  par \code{nn\_calls / nn\_batches}. \`A lot demand\'e de 8, il tourne autour
+  de 5 \`a 7 selon la position.
+  \item[Fixed batch] Mode o\`u chaque appel de vague est padd\'e \`a
+  \code{batch\_size} avec des rang\'ees dupliqu\'ees, de sorties ignor\'ees.
+  \item[FP16] Format demi-pr\'ecision. La conversion du mod\`ele n'a pas
+  acc\'el\'er\'e ce r\'eseau dans ce runtime.
+  \item[FPU] \emph{First Play Urgency} : valeur attribu\'ee aux enfants non
+  visit\'es, ici parent moins une r\'eduction proportionnelle \`a la masse de
+  politique visit\'ee. Le coefficient est un r\'eglage de recherche.
+  \item[NNCache, TT] Table des \'evaluations pass\'ees, index\'ee par la cl\'e
+  s\'emantique h0. Un succ\`es mat\'erialise les enfants, mais la descente
+  continue : il n'\'evite pas l'inf\'erence.
+  \item[ONNX Runtime] Moteur d'ex\'ecution du r\'eseau export\'e, avec le
+  provider CUDA sur ce projet.
+  \item[Padding] Duplication du dernier tenseur pour garder une forme de lot
+  constante, avec sorties ignor\'ees.
+  \item[PUCT] R\`egle de s\'election de l'arbre, combinant exploitation,
+  exploration et prior r\'eseau, plus le virtual loss.
+  \item[Self-play] G\'en\'eration de parties par le moteur contre lui-m\^eme,
+  avec des centaines de parties ind\'ependantes et des lots de 128 \`a 512.
+  \item[Session] Objet \code{Ort::Session} qui encapsule le graphe et le plan
+  m\'emoire. C'est lui qui re-planifie quand la forme change.
+  \item[Slices, tranches] D\'ecoupage d'une recherche en appels de 64
+  simulations, pour garder la main sur l'horloge UCI.
+  \item[Tranche (slice)] Voir slice.
+  \item[Virtual loss] Compteur \code{n\_in\_flight} incr\'ement\'e le long du
+  chemin d'une descente, pour \'eviter que plusieurs descentes collectent la
+  m\^eme feuille. Il n'entre pas dans $Q$.
+  \item[Vague] Cycle complet : collecte parall\`ele d'un lot, barri\`ere,
+  inf\'erence unique, expansion, remont\'ees.
+\end{description}

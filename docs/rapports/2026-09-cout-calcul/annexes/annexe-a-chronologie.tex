@@ -1,0 +1,45 @@
+\section{Chronologie des commits}
+
+Le chantier occupe la journ\'ee du 19 septembre 2026, sur la branche
+\chemin{codex/cout-calcul-optimisations}, fusionn\'ee en fast-forward dans
+\code{main}.
+
+\begin{center}
+\footnotesize
+\begin{longtable}{p{2.0cm}p{4.2cm}p{7.6cm}}
+\toprule
+Commit & Message & Objet \\
+\midrule
+\endhead
+\code{07b9755} & Complete l etude du cout & mise \`a jour de l'\'etude avec le
+r\'egime r\'eel du bot et la comparaison lc0 \\
+\code{4cd91a4} & Planifie les optimisations & plan d'impl\'ementation en sept
+t\^aches \\
+\code{4161cd5} & Mesure la courbe du lot & banc \'evaluateur hors arbre et
+timings internes \\
+\code{29f9458} & Padde les lots d evaluation & lot de forme fixe dans les
+vagues, binding et options de banc \\
+\code{74122ac} & Active le lot fixe dans l UCI & \code{MCTS\_FIXED\_BATCH},
+test de construction \\
+\code{6606d97} & Padde aussi les lots du chemin mono & \code{mcts\_search},
+banc de puzzles et tournois \\
+\code{4461d80} & Consigne la cause du decrochage & section 6.2 de la spec,
+mise \`a jour du plafond \\
+\code{3515f00} & Rend la divergence parametrable & \code{SearchTuning},
+garde de r\'eservation, options de bancs \\
+\code{0c41d6f} & Consigne le balayage et son rejet & tableau du balayage et
+verdict qualit\'e \\
+\code{aed5f1a} & Mesure le cas chaud & \code{hot\_tree\_bench.py} et son test \\
+\code{84bae7e} & Documente les resultats & rejet FP16, correction Amdahl,
+rapport de r\'esultats \\
+\code{fb2ca71} & Cloture les taches & statuts de la spec et du plan \\
+\bottomrule
+\end{longtable}
+\end{center}
+
+\paragraph{Rep\`eres.} Le banc \'evaluateur a \'et\'e mesur\'e en trois
+campagnes (lots fixes 1 \`a 256, lots partiels, lots altern\'es) puis un A/B
+interleaved serr\'e. Le lot fixe a \'et\'e mesur\'e en A/B sur deux rounds pour
+huit workers et deux rounds pour le chemin mono. Le balayage de divergence a
+couvert neuf configurations, puis deux campagnes qualit\'e de 500 puzzles. Le
+cas chaud a \'et\'e mesur\'e sur deux positions et douze coups.

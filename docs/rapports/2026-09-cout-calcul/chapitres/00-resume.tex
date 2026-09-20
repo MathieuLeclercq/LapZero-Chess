@@ -1,0 +1,89 @@
+\section*{R\'esum\'e}
+\addcontentsline{toc}{section}{R\'esum\'e}
+
+Ce rapport raconte un diagnostic et sa correction. Apr\`es le chantier
+multic\oe{}ur, la recherche UCI de LapZero-Chess tournait entre 500 et
+850 simulations par seconde selon la position, alors que le m\^eme r\'eseau,
+sur le m\^eme GPU, \'etait \'evalu\'e en 0,38\,ms par position par le banc
+self-play, soit environ 2\,600 \'evaluations par seconde. Un facteur quatre
+s\'eparait deux chemins qui partagent pourtant le m\^eme \'evaluateur ONNX.
+Le moteur n'avait aucune explication, et trois hypoth\`eses se disputaient la
+cause : la plomberie de l'appel, les allocations par appel, ou l'occupation du
+GPU.
+
+La r\'eponse est venue d'un banc hors arbre : en lots de forme \emph{fixe},
+l'appel co\^ute 2,7 \`a 5,1\,ms selon la taille ; en lots \emph{altern\'es} de 1
+\`a 8, il co\^ute 13,4\,ms quel que soit le lot. ONNX Runtime re-planifie son
+graphe et sa m\'emoire d\`es que la forme du tenseur change, et la recherche
+alternait pr\'ecis\'ement une racine \`a 1 et des vagues partielles, alors que
+le self-play \'evaluait toujours 8. La correction tient en une id\'ee : padder
+chaque lot \`a la taille demand\'ee en dupliquant le dernier tenseur et ignorer
+les sorties dupliqu\'ees. La recherche est s\'emantiquement inchang\'ee, et le
+d\'ebit passe \`a 1\,500--2\,100 simulations par seconde, soit un facteur 2,0
+\`a 3,2 selon la position, avec un p95 de latence divis\'e par deux \`a trois.
+
+Le m\^eme chantier a \'evalu\'e deux autres pistes. La conversion FP16 est plus
+lente de 18 \`a 28\,\% et a \'et\'e rejet\'ee sans campagne qualit\'e. Le
+balayage de divergence gagne 13 \`a 25\,\% de d\'ebit mais d\'egrade la
+qualit\'e de 1,8 \`a 2,4 points sur 500 puzzles : les r\'eglages par d\'efaut
+sont conserv\'es. Enfin, la mesure du cas chaud a corrig\'e une croyance du
+projet : un succ\`es de table n'\'evite pas l'inf\'erence, car il mat\'erialise
+les enfants et la descente continue vers une feuille r\'eseau. La r\'eserve
+Amdahl des rapports pr\'ec\'edents est sans objet.
+
+\vspace{0.6cm}
+
+\begin{essentiel}
+\textbf{L'essentiel en dix points.}
+\begin{enumerate}[leftmargin=1.4em,itemsep=2pt]
+  \item Le d\'ecrochage entre self-play (0,38\,ms par position) et recherche
+  (1,4 \`a 2\,ms) venait du \emph{changement de forme du lot} \`a chaque appel
+  ONNX Runtime, pas du r\'eseau ni de l'occupation GPU.
+  \item En lots altern\'es 1 \`a 8, \code{session->Run} co\^ute 13,4\,ms
+  contre 2,7 \`a 3,7\,ms \`a forme fixe. A/B interleaved : 13,0\,ms contre
+  3,3\,ms, facteur quatre.
+  \item La correction padde les vagues \`a \code{batch\_size} en dupliquant le
+  dernier tenseur et n'utilise que les sorties des positions r\'eelles. Les
+  positions r\'eelles gardent leurs indices, donc leurs sorties sont
+  identiques : la recherche est inchang\'ee.
+  \item Gains mesur\'es en A/B interleaved, 700 simulations : $\times 2{,}00$ en
+  ouverture, $\times 3{,}18$ en milieu, $\times 2{,}55$ en finale pour 8
+  workers ; $\times 2{,}0$ \`a $\times 3{,}3$ pour le chemin mono.
+  \item Le p95 de latence est divis\'e par 2 \`a 3 (rapports 0,30 \`a 0,56),
+  pas d\'egrad\'e.
+  \item Le bot UCI active le lot fixe (\code{MCTS\_FIXED\_BATCH = True}) et
+  passe de 500--850 \`a 1\,500--2\,100 simulations par seconde, valid\'e par un
+  smoke en sous-processus.
+  \item Le softmax C++ sur 4\,672 sorties ne p\`ese que 0,2 \`a 2\,\% de
+  l'appel : ce n'\'etait pas un levier.
+  \item FP16 rejet\'e : 18 \`a 28\,\% plus lent en \code{keep\_io\_types}.
+  \item Divergence : vloss 2 et vloss 2 + FPU 0,45 gagnent 13 \`a 25\,\% de
+  d\'ebit mais co\^utent 1,8 \`a 2,4 points de r\'esolution sur 500 puzzles ;
+  les d\'efauts sont conserv\'es.
+  \item Cas chaud : le d\'ebit tient \`a 2\,000--2\,200 simulations par seconde
+  et les appels r\'eseau restent \`a 700 pour 700 simulations, m\^eme quand les
+  succ\`es de table montent de 8 \`a 81\,\%.
+\end{enumerate}
+\end{essentiel}
+
+\vspace{0.4cm}
+
+\noindent\textbf{Mots-cl\'es :} MCTS, ONNX Runtime, forme de lot, performance,
+C++17, GPU, virtual loss, self-play, AlphaZero.
+
+\subsection*{Comment lire ce document}
+
+Le chapitre~1 pose l'\'enigme et la m\'ethode. Le chapitre~2 d\'ecrit l'\'etat
+du moteur et les hypoth\`eses en pr\'esence. Le chapitre~3 est le c\oe{}ur : la
+conception du banc, la d\'ecouverte, la correction et les alternatives
+refus\'ees. Le chapitre~4 raconte l'impl\'ementation et ses pi\`eges. Le
+chapitre~5 d\'ecrit la validation. Le chapitre~6 rassemble les campagnes de
+mesure, avec leurs courbes. Le chapitre~7 discute la port\'ee des r\'esultats
+et le plafond restant. Le chapitre~8 conclut. Les annexes donnent la
+chronologie des commits, l'inventaire des fichiers, les commandes de
+reproduction et un glossaire.
+
+Les encadr\'es bleus r\'esument, les encadr\'es ambre signalent les pi\`eges
+v\'ecus, et les encadr\'es gris d\'ecrivent les protocoles de mesure. Les
+valeurs num\'eriques proviennent des fichiers \code{out/multicore/} conserv\'es
+hors du d\'ep\^ot.

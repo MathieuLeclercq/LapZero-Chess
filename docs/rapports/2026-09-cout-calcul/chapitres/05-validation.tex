@@ -1,0 +1,82 @@
+\section{Validation}
+
+\subsection{La strat\'egie}
+
+Trois filets ind\'ependants prot\`egent ce chantier :
+
+\begin{enumerate}[leftmargin=1.4em,itemsep=3pt]
+  \item des tests d\'eterministes avec faux r\'eseau, qui v\'erifient que le
+  padding ne change ni le budget, ni les invariants, ni la forme des appels ;
+  \item des campagnes A/B interleaved sur le moteur r\'eel, m\^eme session,
+  ordre altern\'e, pour s\'eparer l'effet mesur\'e de la d\'erive thermique et
+  d'horloge du GPU, qui atteint 15 \`a 30\,\% entre sessions ;
+  \item une barri\`ere qualit\'e par palette de 500 puzzles pour toute
+  modification de la recherche.
+\end{enumerate}
+
+\subsection{Le lot fixe}
+
+Un test C++ v\'erifie que, lot fixe activ\'e, une recherche multic\oe{}ur de
+17 simulations produit des appels tous de taille 8 apr\`es la racine (qui
+reste \`a 1), que le budget de visites est exact, que la session revient au
+repos et que le plateau d'entr\'ee est intact. Un second test fait de m\^eme
+sur le chemin mono. Un test Python v\'erifie la transmission du drapeau depuis
+le banc, et un test UCI v\'erifie que le constructeur de production active bien
+\code{MCTS\_FIXED\_BATCH}.
+
+\begin{resume}[Pourquoi aucune campagne qualit\'e n'est exig\'ee ici]
+Le padding ne modifie que les rang\'ees suppl\'ementaires du tenseur. Une
+rang\'ee dupliqu\'ee re\c coit une sortie qui est jet\'ee ; les rang\'ees
+r\'eelles gardent leur index et leur sortie. La recherche produit donc les
+m\^emes arbres, \`a l'ordonnancement pr\`es des collecteurs parall\`eles, qui
+est d\'ej\`a non d\'eterministe. C'est un changement de performance pure, pas
+un changement d'algorithme.
+\end{resume}
+
+\subsection{La divergence}
+
+Les r\'eglages par d\'efaut sont verrouill\'es par un test qui compare
+\code{get\_tuning()} aux valeurs historiques (1, 0,30, 4) et v\'erifie qu'une
+amplitude nulle est refus\'ee. Deux tests Python v\'erifient que les options
+des bancs transmettent bien le r\'eglage au moteur et que \code{--slices}
+d\'ecoupe correctement une recherche de 700 simulations en tranches de 64.
+
+\subsection{La barri\`ere qualit\'e}
+
+Le protocole de comparaison reprend celui du chantier multic\oe{}ur : un
+sous-\'echantillon r\'egulier et stratifi\'e de 500 puzzles, un MCTS neuf par
+puzzle, le m\^eme mod\`ele et le m\^eme mat\'eriel pour la r\'ef\'erence et le
+candidat, et une comparaison appari\'ee stricte. Les verdicts suivent la
+m\^eme marge : non-inf\'eriorit\'e si la borne basse de l'IC95 reste au-dessus
+de $-1$ point, r\'egression si la borne haute passe dessous, ind\'etermin\'e
+entre les deux.
+
+Deux candidats ont \'et\'e mesur\'es contre les d\'efauts, lot fixe des deux
+c\^ot\'es : vloss 2 + FPU 0,45 (delta $-1{,}8$ point, 21 pertes contre 12
+gains) et vloss 2 seul (delta $-2{,}4$ point, 27 pertes contre 15 gains). Les
+deux sont refus\'es, et les d\'efauts restent en place.
+
+\subsection{Les suites et le smoke}
+
+\begin{table}[h]
+\centering
+\small
+\caption{V\'erifications finales.}
+\label{tab:suites}
+\begin{tabularx}{\textwidth}{lXl}
+\toprule
+V\'erification & Contenu & R\'esultat \\
+\midrule
+CTest & 15 cibles, dont le smoke du banc \'evaluateur, les deux tests de
+padding et le stress multic\oe{}ur & 15/15 \\
+pytest & 261 tests, dont la propagation du lot fixe, la divergence, le
+comparateur et le cas chaud & 261/261 \\
+Smoke UCI & \code{uci}, \code{isready}, \code{position startpos},
+\code{go nodes 200}, \code{stop}, \code{quit} en sous-processus & bestmove
+\code{d2d4}, sortie propre \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Le smoke UCI confirme aussi le journal de d\'emarrage :
+\code{lot 8, lot fixe True, workers 8, TT 4000000}.

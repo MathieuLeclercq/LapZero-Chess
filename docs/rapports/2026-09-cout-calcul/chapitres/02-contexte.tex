@@ -1,0 +1,99 @@
+\section{Contexte : ce que le projet savait d\'ej\`a}
+
+\subsection{Batching et virtual loss}
+
+La recherche regroupe d\'ej\`a plusieurs feuilles dans une seule inf\'erence.
+Chaque descente pose un \emph{virtual loss} de type Leela Chess Zero : un
+compteur \code{n\_in\_flight} incr\'ement\'e le long du chemin, qui n'entre que
+dans le d\'enominateur du terme d'exploration et laisse $Q$ intact. Le noyau
+mono-worker collecte jusqu'\`a \code{batch\_size} feuilles, s'arr\^ete au
+premier n\oe{}ud d\'ej\`a r\'eserv\'e, puis appelle l'\'evaluateur une fois. Le
+balayage de batching du 14 septembre 2026 avait fix\'e le lot de production
+\`a 8, meilleur compromis entre d\'ebit et qualit\'e.
+
+\subsection{Vagues multic\oe{}ur}
+
+Le chantier multic\oe{}ur a remplac\'e la collecte mono-c\oe{}ur par des
+collecteurs persistants travaillant sur un arbre partag\'e, avec r\'eservation
+atomique des feuilles, table de transposition par snapshots, garde RAII et
+budget exact. Le rapport de r\'esultats \code{2026-09-16-multicore-waves-results.md}
+mesure :
+
+\begin{itemize}[leftmargin=1.2em,itemsep=2pt]
+  \item des gains de $+6$ \`a $+22\,\%$ de d\'ebit selon la position entre 1 et
+  8 workers, avec un plafond d\`es deux workers ;
+  \item un p95 de latence sous $+5\,\%$ partout, et m\^eme am\'elior\'e en
+  finale ;
+  \item une qualit\'e non inf\'erieure sur 2\,500 puzzles (delta $-0,28$ point,
+  IC95 $[-0,8\,;+0,24]$) ;
+  \item l'activation de \code{MCTS\_WORKER\_COUNT = 8} dans \code{uci.py}.
+\end{itemize}
+
+\subsection{R\'epartition par phase}
+
+Les chronom\^etrages internes (\code{phases.json}, 700 simulations, lot 8)
+montrent une domination \'ecrasante de l'\'evaluateur :
+
+\begin{table}[h]
+\centering
+\small
+\caption{Part de l'\'evaluateur dans le temps mur, 700 simulations.}
+\label{tab:phases}
+\begin{tabular}{lrrrr}
+\toprule
+Position & Total (ms) & \'Evaluateur (ms) & Part & CPU + barri\`ere \\
+\midrule
+Ouverture, w1 & 923,8 & 903,2 & 97,8\,\% & 20,6\,ms \\
+Milieu, w1 & 2\,063,5 & 2\,038,1 & 98,8\,\% & 25,4\,ms \\
+Finale, w1 & 1\,447,5 & 1\,426,4 & 98,5\,\% & 21,1\,ms \\
+Finale, w8 & 1\,300,4 & 1\,264,0 & 97,2\,\% & 36,4\,ms \\
+Milieu, w8 & 2\,335,3 & 2\,280,8 & 97,7\,\% & 54,5\,ms \\
+Ouverture, w8 & 853,3 & 824,2 & 96,6\,\% & 29,1\,ms \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Le travail CPU de recherche, coups compris, vaut 29 \`a 36 microsecondes par
+simulation, soit 1 \`a 1,5\,\% du temps. La barri\`ere des vagues co\^ute 1,5 \`a
+2,3\,\%. Autrement dit, tout gain durable ne peut venir que de l'appel
+r\'eseau.
+
+\subsection{Le mod\`ele \texorpdfstring{$F + M \cdot N$}{F + M x N}}
+
+Le balayage de lots du 14 septembre 2026, mesur\'e dans une seule session,
+montre que le d\'ebit plafonne d\`es le lot 8 : demander 64 positions n'en fait
+\'evaluer que 5 \`a 10, parce que l'arbre ne fournit pas plus de feuilles
+utiles. En ajustant $T(N) = F + M \cdot N$ sur le lot 1 et le lot 8, on trouve
+un co\^ut fixe $F$ d'environ 1 \`a 2\,ms et un co\^ut par position $M$ de 0,9 \`a
+1,9\,ms selon la position, d'o\`u un plafond du batching seul de
+$\times 1{,}6$ \`a $\times 3{,}4$.
+
+Ce mod\`ele d\'ecrivait bien les gains observ\'es, mais il laissait une
+incoh\'erence : le self-play, avec un lot plus grand mais surtout \emph{fixe},
+obtenait 0,38\,ms par position, incompr\'ehensible dans un mod\`ele o\`u $M$
+devrait \^etre une propri\'et\'e du r\'eseau.
+
+\subsection{L'\'etude de co\^ut et ses hypoth\`eses}
+
+L'\'etude \code{2026-09-19-cout-calcul-cpu-gpu.md} avait agr\'eg\'e les mesures
+et compar\'e le moteur \`a Leela Chess Zero. Elle estimait l'\'ecart \`a un
+facteur 15 \`a 200 selon quatre axes : taille de lot ($\times 3$ \`a $8$),
+ex\'ecution asynchrone ($\times 1{,}2$ \`a $1{,}5$), backend r\'eseau
+($\times 2$ \`a $4$) et cache (\`a $4$). Elle notait surtout que le premier
+facteur, la plomberie de l'appel, \'etait d\'ej\`a prouv\'e par le banc
+self-play, et que le lot d'un seul arbre plafonnant vers 7, le gain total
+r\'ealiste \'etait de $\times 3$ \`a $\times 6$, pas $\times 30$.
+
+C'est cette piste, et non le r\'eseau, que le plan
+\code{2026-09-19-cout-calcul-optimisations.md} a mise en premier, avec un banc
+hors arbre comme \'etape pr\'ealable.
+
+\subsection{Le r\'egime r\'eel du bot}
+
+Le bot n'appelle pas \code{step\_analysis} une fois pour 700 simulations : il
+d\'ecoupe en tranches de \code{BATCH\_SIZE = 64} pour garder la main sur
+l'horloge, avec arbre et pool persistants. Le rapport multic\^ur mesurait d\'ej\`a
+que le gain des workers d\'ependait de la tranche : $+5$ \`a $+27\,\%$ \`a 64
+simulations, mais $-19\,\%$ \`a 8, o\`u les arbres naissants provoquent environ
+970 collisions pour 800 simulations. Toutes les campagnes de ce rapport
+mesurent donc aussi aux tranches r\'eelles, en plus des appels longs.
