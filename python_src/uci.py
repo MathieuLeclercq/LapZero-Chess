@@ -32,6 +32,14 @@ MCTS_BATCH_SIZE = 8
 # latence sous +5 %, qualite non-inferieure sur 2500 puzzles. Voir
 # docs/superpowers/specs/2026-09-16-multicore-waves-results.md.
 MCTS_WORKER_COUNT = 8
+
+# Forme de lot fixe : chaque vague est paddee a MCTS_BATCH_SIZE avant l'appel
+# ONNX. Sur le banc du 2026-09-19, le changement de forme quadruplait le cout
+# de session->Run : x2.0 en ouverture, x3.1 en milieu, x2.5 en finale, et le
+# p95 de latence divise par 2 a 3. Les sorties des positions dupliquees sont
+# ignorees, donc la recherche est inchangee. Voir
+# docs/superpowers/specs/2026-09-19-cout-calcul-cpu-gpu.md.
+MCTS_FIXED_BATCH = True
 SNAPSHOT_INTERVAL = 0.1
 NB_FAST_PLIES_OPENING = 10
 
@@ -86,6 +94,8 @@ class UCIEngine:
             self.evaluator, self.provider = _construire_evaluateur()
         self.mcts = (mcts if mcts is not None
                      else chess_engine.MCTS(self.evaluator, tt_size=4_000_000))
+        if mcts is None:
+            self.mcts.set_fixed_batch(MCTS_FIXED_BATCH)
         self.search_thread = None
 
         self.stop_event = threading.Event()
@@ -130,6 +140,7 @@ class UCIEngine:
                 _journaliser(
                     f"uci.py pret : modele {Path(MODEL_PATH).name}, "
                     f"{self.provider}, lot {MCTS_BATCH_SIZE}, "
+                    f"lot fixe {MCTS_FIXED_BATCH}, "
                     f"workers {MCTS_WORKER_COUNT}, TT 4000000")
 
             elif command == "isready":

@@ -90,6 +90,27 @@ def test_le_constructeur_accepte_des_dependances_injectees():
     assert isinstance(moteur.board, chess_engine.Chessboard)
 
 
+def test_le_constructeur_active_le_lot_fixe_par_defaut(monkeypatch):
+    """Sur le chemin de production, le MCTS recoit le lot de forme fixe, qui
+    evitait un facteur 2 a 3 sur le banc du 2026-09-19."""
+    import uci
+
+    appels = []
+
+    class FauxMCTS:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def set_fixed_batch(self, enabled):
+            appels.append(enabled)
+
+    monkeypatch.setattr(uci.chess_engine, "MCTS", FauxMCTS)
+    uci.UCIEngine(evaluator=object())
+
+    assert appels == [uci.MCTS_FIXED_BATCH]
+    assert uci.MCTS_FIXED_BATCH is True
+
+
 def test_la_boucle_uci_transmet_le_nombre_de_workers():
     """Le cinquieme argument reel de step_analysis doit etre le reglage
     MCTS_WORKER_COUNT, pas une valeur par defaut implicite."""
