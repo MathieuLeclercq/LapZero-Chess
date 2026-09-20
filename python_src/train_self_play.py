@@ -25,6 +25,8 @@ from model import ChessNet
 # relatif dependrait du repertoire de lancement.
 PUZZLES_PATH = str(Path(__file__).resolve().parents[1]
                    / "training_data" / "puzzles_train.txt")
+STOCKFISH_PATH = str(Path(__file__).resolve().parent / "lichess_bot"
+                     / "stockfish" / "stockfish-windows-x86-64-universal.exe")
 
 
 # ============================================================
@@ -371,8 +373,8 @@ if __name__ == "__main__":
             max_buffer_size=750_000,
             target_sampling_ratio=14.0,
             eval_stockfish_every=8,
-            checkpoint_path="checkpoints/2026_04_26_18h18_iter346_avant_amnesie.pt",
-            stockfish_path=r"D:\logiciels\stockfish\stockfish.exe",
+            checkpoint_path="checkpoints/2026_04_30_09h53_iter436_unsupervised.pt",
+            stockfish_path=STOCKFISH_PATH,
             stockfish_elo=2600,
             stockfish_nodes=200_000
         )
