@@ -29,6 +29,9 @@ Campagnes utilisees :
   contre nouveau workers1.
 - `out/multicore/selfplay-after-fake.json`, `selfplay-after-gpu.json` : banc self-play
   partage, 8 plateaux, 100 vagues, 30 repetitions. Sert d'ancre pour le cout de l'appel.
+- `docs/superpowers/specs/2026-09-16-multicore-waves-results.md` : mesures et decision de
+  la tache 10, dont le regime reel du bot par tranches et la qualite a 2500 puzzles.
+- `docs/rapports/2026-09-multicoeur/` : rapport d'ingenierie du chantier multicœur.
 - `docs/superpowers/specs/2026-09-14-search-bench-batching-gpu.md` : balayage GPU du lot,
   lots 0 a 64, 400 simulations, une seule session.
 - `docs/superpowers/specs/2026-09-11-search-bench-resultats.md` : reference d'avant
@@ -81,10 +84,38 @@ milieu, 5.7 en finale. Au dela de 8, le debit est plat et le remplissage sature 
 | milieu | step_analysis | 328.7 | 340.7 | 356.1 | 348.8 |
 | finale | step_analysis | 462.2 | 583.8 | 579.2 | 565.1 |
 
-Le gain des vagues contre workers1 va de +21 pour cent (finale) a +7 pour cent (milieu,
-ouverture), et il plafonne des 2 workers. La comparaison interleaved avec l'ancien moteur
-ne montre pas de regression mono-worker reproductible ; l'ancien moteur fluctue de 700 a
-1200 sims/s selon l'etat d'horloge, le nouveau reste stable.
+Le gain des vagues contre workers1 va de +6 pour cent (milieu) a +22 pour cent (finale),
+avec +15 pour cent en ouverture, et il plafonne des 2 workers. La comparaison interleaved
+avec l'ancien moteur ne montre pas de regression mono-worker reproductible ; l'ancien
+moteur fluctue de 700 a 1200 sims/s selon l'etat d'horloge, le nouveau reste stable.
+
+### 3.4 Regime reel du bot
+
+Toutes les mesures ci-dessus portent sur un appel unique de 700 simulations. Le bot, lui,
+decoupe chaque recherche en tranches de `BATCH_SIZE = 64` simulations (`uci.py:23` et
+`uci.py:358`), avec arbre et pool persistants, et `MCTS_WORKER_COUNT = 8` depuis la
+tache 10. Le rapport `2026-09-16-multicore-waves-results.md` mesure ce regime :
+
+| tranche | position | w1 sims/s | w8 sims/s | collisions w8 |
+|---|---|---|---|---|
+| 64 | ouverture | 799.1 | 912.5 | 729 a 820 |
+| 64 | milieu | 373.1 | 462.8 | 3007 a 3307 |
+| 64 | finale | 582.5 | 580.0 | 1320 a 1592 |
+| 20 | ouverture | 503.9 | 572.4 | 607 a 649 |
+| 20 | milieu | 244.5 | 256.1 | 3225 a 3309 |
+| 20 | finale | 319.1 | 405.5 | 1125 a 1443 |
+
+Deux consequences pour la suite.
+
+- Le gain de w8 depend de la tranche : +5 a +27 pour cent a 64 simulations, mais -19 pour
+  cent a 8 simulations, ou les arbres naissants provoquent environ 970 collisions pour
+  800 simulations. Toute campagne d'optimisation doit se mesurer aux tranches reelles du
+  bot, pas a un appel unique ni a des tranches de 8.
+- Les collisions ne sont pas un detail : 3000 a 3300 par tranche de 704 simulations en
+  milieu, soit environ 4.5 par simulation. Elles ne coutent aucune inference, mais elles
+  avortent des descentes. Leur cout CPU n'apparait pas clairement dans les chronometrages
+  de la section 4, ce qui en fait une question ouverte (section 10). Elles deviendraient
+  un goulet de premier ordre apres l'assainissement de l'evaluateur.
 
 ## 4. Repartition par phase
 
@@ -198,6 +229,11 @@ Quand la forme du tenseur change, ONNX Runtime recalcule son plan memoire et peu
 des allocations GPU. `cudaMalloc` est couteux et synchronisant. Avec une forme fixe, tout
 est amorti. C'est l'explication la plus probable de l'ecart, et elle est testable (T1b).
 
+Nuance : ce banc utilise 8 plateaux. En production, `train_self_play.py` lance 128 ou 512
+parties concurrentes (`train_self_play.py:194` et `train_self_play.py:358`), donc des lots
+de 128 a 512 positions. L'ancre de 3.0 ms pour 8 est le bas de la plage, pas le regime de
+production ; elle prouve que la plomberie peut etre rapide meme avec un petit lot.
+
 Consequence : le premier facteur 3 a 5 n'est pas dans le reseau, il est dans la plomberie
 de l'appel. Le lot d'un seul arbre plafonnant vers 7, les frais fixes restent amortis sur
 7 positions, pas sur 128 : le gain total realiste de ce chantier est de l'ordre de x3 a
@@ -212,6 +248,11 @@ x6, pas de x30.
 | Tenseur et cle | 0.4 a 0.6 % | 119x64 flottants par feuille | marginal |
 | Expansion, backup, TT | moins de 0.3 % | structure de l'arbre | marginal |
 | Attente de barriere (vagues) | 1.5 a 2.3 % | worker le plus lent de la vague | production continue |
+
+Les collisions de collecte ne figurent pas dans ce tableau. Elles ne declenchent aucune
+inference mais avortent des descentes : 3000 a 3300 par tranche de 704 simulations en
+milieu avec 8 workers (section 3.4). C'est un cout CPU cache aujourd'hui, et un candidat
+au premier plan apres l'assainissement de l'evaluateur.
 
 ## 8. Pistes d'optimisation
 
@@ -233,8 +274,13 @@ pour un lot de 8).
 
 - Production continue : une file decouple la production des feuilles de l'inference et
   permet de remplir des lots plus gros que la largeur d'une vague. C'est le seul levier
-  qui peut reellement depasser le plafond des vagues.
-- Divergence des descentes, du moins invasif au plus invasif :
+  qui peut reellement depasser le plafond des vagues. lc0 utilise pour cela un
+  `MinibatchSize` de 32 a 256 et un `MaxPrefetch` (section 12).
+- Divergence des descentes. Motivation mesuree : en milieu, 8 workers produisent 3000 a
+  3300 collisions par tranche de 704 simulations, et w8 ne gagne que +6 pour cent sur
+  cette position dans le banc a 700 simulations (sections 3.3 et 3.4). La divergence est
+  le levier direct pour transformer ces descentes avortees en feuilles utiles. Du moins
+  invasif au plus invasif :
   - inclure `n_in_flight` du parent dans `exploration_factor` (`mcts.cpp:277`,
     `mcts_wave.cpp:222`), indique comme premiere variante dans la spec de batching ;
   - amplitude du virtual loss, aujourd'hui 1 par descente (`mcts_reservation.cpp:36`) ;
@@ -319,9 +365,10 @@ quelle part est GPU, et quelle part de l'ecart vient du changement de forme.
 
 Balayer amplitude de virtual loss {1, 2, 3} x c_puct {1.0, 1.4, 2.0, 3.0} x coefficient
 FPU {0.2, 0.3, 0.5} a 700 simulations, en mesurant remplissage, sims/s et temps
-evaluateur. Chaque configuration gagnante en debit passe ensuite le banc de puzzles, car
-ces parametres changent la recherche. Il faut d'abord rendre ces constantes
-parametrables.
+evaluateur. Mesurer aussi aux tranches de 64 et 20 simulations du bot (section 3.4), et
+rapporter les collisions, qui sont la cible directe de ces parametres. Chaque
+configuration gagnante en debit passe ensuite le banc de puzzles, car ces parametres
+changent la recherche. Il faut d'abord rendre ces constantes parametrables.
 
 ### T4 : cas chaud
 
@@ -357,11 +404,20 @@ que l'appel lui-meme est le gisement principal.
    qu'il ne depasse pas un facteur faible.
 6. Faut-il explorer la piste reseau (FP16, TensorRT) avant la piste ordonnancement, ou
    l'inverse. La reponse depend de T1b et T2.
+7. Combien coute reellement une collision de collecte, et pourquoi le milieu en produit-il
+   3000 a 3300 par tranche de 704 simulations alors que les chronometrages par phase ne
+   montrent pas ce travail. A mesurer separement, en isolant la selection des descentes
+   avortees, car ce cout deviendrait visible apres l'assainissement de l'evaluateur.
 
 ## 11. Plafond realiste
 
 Etat actuel : 10 a 14 ms par appel, 1.4 a 2 ms par position, evaluateur a 96 a 98 % du
 temps de recherche.
+
+Etat du chantier multicœur : les gains des vagues sont mesures et `MCTS_WORKER_COUNT = 8`
+est active dans `uci.py` ; la qualite est non-inferieure a 2500 puzzles, delta -0.28 point,
+IC95 [-0.8 ; +0.24] (`2026-09-16-multicore-waves-results.md`). Le present document porte
+sur les leviers suivants, pas sur ce qui a deja ete gagne.
 
 - Meme reseau, meme GPU, autre harnais : 3.0 ms par appel de 8, soit 0.38 ms par position.
   Le premier facteur 3 a 5 est donc dans l'appel, pas dans le reseau.
@@ -375,7 +431,74 @@ Reponse courte : non, 10 ms par inference n'est pas proche du plafond. Le gros g
 immediat et peu risque (forme de lot fixe, buffers reutilises), le gain reseau vient
 apres.
 
-## 12. Fichiers de reference
+## 12. Comparaison a un moteur mature (lc0)
+
+Cette section situe le moteur par rapport a Leela Chess Zero. Le clone local est dans
+`~/Documents/lc0` (sources seules, pas de binaire compile). Les chiffres externes sont
+publics, approximatifs, et datent de 2021 a 2026.
+
+### 12.1 Le nps de lc0 n'est pas la meme grandeur
+
+Le nps de lc0 compte des playouts. Avec son NNCache et la reutilisation du sous-arbre, une
+fraction importante des playouts ne declenche aucune inference reseau. Le banc de ce
+projet, lui, compte des simulations qui sont presque 1 pour 1 avec des inferences
+(`inferences/s` egal a `sims/s` sur les trois positions de reference). Une partie de
+l'ecart apparent entre les deux moteurs est donc un artefact de metrique.
+
+### 12.2 Points d'ancrage
+
+| configuration | nps rapportes | source |
+|---|---|---|
+| BT4-spsa-1740 (380 Mo), RTX 4070 Super, backend cuda, analyse longue | ~8 900 | TalkChess, 2025 |
+| CNN 20x256, RTX 3070 et 3090, backend OpenCL, anciens reseaux | ~37 800 et ~53 700 | OpenBenchmarking, 2021 |
+| CPU seul (BLAS), gros Ryzen | 700 a 900 | OpenBenchmarking, 2026 |
+
+Le GPU de developpement est un RTX PRO 2000 Blackwell laptop : 3 328 coeurs CUDA,
+104 tensor cores, environ 11 TFLOPS FP32, 8 Gio GDDR7 a 384-448 Go/s. C'est environ
+3 fois moins de FP32 qu'une 4070 Super desktop.
+
+Ordre de grandeur pour un reseau de la taille du notre, 10 blocs et 128 filtres, environ
+0.4 GFLOP par position : **10 000 a 25 000 nps** en FP16, et non 20 000 a 50 000. A
+20 000 nps il faudrait deja 8 TFLOP/s soutenus, et 50 000 en exigerait 20, au bord de
+l'enveloppe tensorielle du GPU. Sur une 4090 ou une carte plus grosse, la fourchette
+20 000 a 50 000 serait en revanche plausible.
+
+### 12.3 Ou passe l'ecart
+
+Le moteur actuel fait 500 a 850 simulations/s. Un moteur mature en fait plusieurs dizaines
+de milliers de nps. Decomposition en ordres de grandeur :
+
+| axe | maintenant | moteur mature | facteur estime |
+|---|---|---|---|
+| taille de lot | 6 positions (une vague) | 32 a 256 (file) | x3 a x8 |
+| execution | barriere synchrone | file decouplee, prefetch, evaluations hors ordre | x1.2 a x1.5 |
+| backend reseau | ONNX FP32, formes variables, softmax CPU | FP16, blocs fusionnes, cuDNN ou TensorRT, tampons fixes | x2 a x4 |
+| cache et metrique | arbre froid, 3 a 13 % de hits, sims egal inferences | NNCache large et sous-arbre conserve, playouts gratuits | x2 a x4 |
+
+Le produit encadre l'ecart observe, de x15 a x200.
+
+Point important : lc0 ne cherche pas dans un arbre plus large. Meme arbre unique, meme
+PUCT, meme virtual loss. La difference est le pipeline d'evaluation et le backend, pas la
+largeur de l'arbre. Les vagues de ce projet sont une version synchrone et etroite de la
+meme idee. Le self-play, lui, atteint deja la vitesse par position parce que ses 8 feuilles
+viennent de 8 arbres independants, sans collision ni barriere.
+
+### 12.4 Consequences pour la feuille de route
+
+- Premier facteur, deja prouve par le banc self-play (section 6.1) : forme de lot fixe et
+  buffers reutilises, x3 a x5.
+- Deuxieme facteur, l'etape 2 : file d'inference continue avec prefetch. lc0 utilise
+  `MinibatchSize` de 32 a 256 pour les petits reseaux, et un `MaxPrefetch` qui laisse la
+  recherche avancer pendant l'inference.
+- Troisieme facteur : FP16 et fusion des blocs, puis TensorRT si la dependance est
+  acceptable (section 8.5).
+- Quatrieme facteur : cache et reutilisation d'arbre, a quantifier par le test du cas
+  chaud (T4).
+- Le CPU de recherche, aujourd'hui a 1 % du temps, deviendrait limitant vers 20 000
+  simulations/s : il faudrait alors des noeuds compacts alloues en pool, sans allocation
+  par enfant, comme le fait lc0. Ce n'est pas un gisement avant ce niveau.
+
+## 13. Fichiers de reference
 
 - Donnees : `out/multicore/{phases,after,queue,avant-r*,apres-r*}.json`.
 - Code : `src/mcts.cpp` (UCB, FPU, selection), `src/mcts_wave.cpp` (collecteur,
@@ -384,4 +507,8 @@ apres.
   (appel ONNX et softmax), `src/evaluation_cache.cpp` (table).
 - Specs : `2026-09-14-search-bench-batching-gpu.md`,
   `2026-09-11-search-bench-resultats.md`, `2026-09-11-mcts-batching-design.md`,
-  `2026-09-14-mcts-multicore-design.md`.
+  `2026-09-14-mcts-multicore-design.md`, `2026-09-16-multicore-waves-results.md`.
+- Rapport d'ingenierie : `docs/rapports/2026-09-multicoeur/`.
+- Sources externes : `~/Documents/lc0` (clone local), TalkChess « GPU-lco testing »
+  2025, OpenBenchmarking.org profil LeelaChessZero, lczero.org/play/bestnets, fiche
+  NVIDIA RTX PRO 2000 Blackwell.
