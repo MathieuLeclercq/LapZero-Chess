@@ -422,9 +422,10 @@ class UCIEngine:
                             n = move_stat.visits
                             p = move_stat.prior * 100.0
                             q = move_stat.q_value
+                            v = move_stat.v_value
                             print(
                                 f"info string {uci_str} (0 ) N: {n} (+ 0) "
-                                f"(P: {p:.2f}%) (Q: {q:.5f}) (V: {q:.5f})")
+                                f"(P: {p:.2f}%) (Q: {q:.5f}) (V: {v:.5f})")
 
                         sys.stdout.flush()
 

@@ -25,6 +25,11 @@ struct MCTSNode {
     float prior;
     float total_value;
 
+    // Valeur statique du reseau a l'expansion, du point de vue du noeud (meme
+    // convention que total_value). Elle ne bouge plus ensuite : c'est le V
+    // publie par l'UCI, a ne pas confondre avec q_value(), la moyenne cherchee.
+    float network_value = 0.0f;
+
     // Virtual loss, approche LC0 : nombre de descentes en cours passant par ce
     // noeud. N'entre QUE dans le denominateur du terme U de ucb_score, jamais
     // dans q_value(), sans quoi Q se diluerait vers zero et avantagerait les
@@ -51,6 +56,7 @@ struct MoveStats {
     int visits;
     float q_value;
     float prior;
+    float v_value;
 };
 
 

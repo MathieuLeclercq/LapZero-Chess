@@ -474,6 +474,7 @@ void MCTS::run_search_waves(
                     m_terminal_hits.fetch_add(
                         1, std::memory_order_relaxed);
                 }
+                leaf.node->network_value = leaf.terminal_value;
                 backup(leaf.node, leaf.terminal_value, timing);
                 leaf.reservation.release();
             }

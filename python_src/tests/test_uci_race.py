@@ -166,7 +166,7 @@ def test_la_recherche_journalise_le_bilan(capsys, tmp_path, monkeypatch):
 
         def get_analysis_results(self):
             return [SimpleNamespace(move_idx=index, visits=7 - rang,
-                                    q_value=0.25, prior=0.5)
+                                    q_value=0.25, prior=0.5, v_value=0.2)
                     for rang, index in enumerate(FauxMCTSRecherche.indices)]
 
         def reset_analysis(self):

@@ -137,7 +137,8 @@ PYBIND11_MODULE(chess_engine, m) {
         .def_readonly("move_idx", &MoveStats::move_idx)
         .def_readonly("visits", &MoveStats::visits)
         .def_readonly("q_value", &MoveStats::q_value)
-        .def_readonly("prior", &MoveStats::prior);
+        .def_readonly("prior", &MoveStats::prior)
+        .def_readonly("v_value", &MoveStats::v_value);
 
     // --- Instrumentation de la recherche ---
     py::class_<SearchCounters>(m, "SearchCounters")

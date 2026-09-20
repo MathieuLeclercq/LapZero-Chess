@@ -60,6 +60,7 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
                     value = board.isInCheck() ? -1.0f : 0.0f;
                 }
 
+                node->network_value = value;
                 backup(node, value, timing);
                 for (int i = 0; i < moves_played; i++) board.undoMove();
                 m_completed_simulations.fetch_add(
@@ -117,6 +118,7 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
                 else {
                     value = board.isInCheck() ? -1.0f : 0.0f;
                 }
+                node->network_value = value;
                 backup(node, value, timing);
                 for (int i = 0; i < moves_played; i++) board.undoMove();
                 completed++;
@@ -166,7 +168,9 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
 
             if (leaf.legal_moves.empty()) {
                 leaf.reservation.publish(NodeState::Terminal);
-                backup(node, board.isInCheck() ? -1.0f : 0.0f, timing);
+                const float terminal = board.isInCheck() ? -1.0f : 0.0f;
+                node->network_value = terminal;
+                backup(node, terminal, timing);
                 leaf.reservation.release();
                 for (int i = 0; i < moves_played; i++) board.undoMove();
                 completed++;

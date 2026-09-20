@@ -335,6 +335,7 @@ float MCTS::expand_node_single(MCTSNode* node, Chessboard& board,
     record_tt_probe(probe.status);
 
     if (probe.status == TTProbeStatus::HIT) {
+        node->network_value = probe.value;
         return probe.value;
     }
 
@@ -345,7 +346,9 @@ float MCTS::expand_node_single(MCTSNode* node, Chessboard& board,
     }
     if (legal_indices.empty()) {
         publication.publish(NodeState::Terminal);
-        return board.isInCheck() ? -1.0f : 0.0f;
+        const float terminal = board.isInCheck() ? -1.0f : 0.0f;
+        node->network_value = terminal;
+        return terminal;
     }
 
     {
@@ -370,6 +373,7 @@ float MCTS::expand_node_single(MCTSNode* node, Chessboard& board,
         publication.publish(NodeState::Expanded);
     }
 
+    node->network_value = value;
     return value;
 }
 
@@ -635,7 +639,8 @@ std::vector<MoveStats> MCTS::get_analysis_results() const {
                 pair.first,
                 child->visit_count,
                 -child->q_value(),
-                child->prior
+                child->prior,
+                -child->network_value
                 });
         }
     }
@@ -664,6 +669,7 @@ MCTSNode* MCTS::advance_to_leaf(MCTSNode* root, Chessboard& board,
         else {
             value = board.isInCheck() ? -1.0f : 0.0f;
         }
+        node->network_value = value;
         backup(node, value);
         for (int i = 0; i < moves_played; i++) board.undoMove();
         return nullptr;
@@ -684,6 +690,7 @@ MCTSNode* MCTS::advance_to_leaf(MCTSNode* root, Chessboard& board,
     record_tt_probe(probe.status);
 
     if (probe.status == TTProbeStatus::HIT) {
+        node->network_value = probe.value;
         backup(node, probe.value);
         for (int i = 0; i < moves_played; i++) board.undoMove();
         return nullptr;
@@ -706,7 +713,9 @@ void MCTS::expand_and_backup(MCTSNode* leaf_node, Chessboard& board,
     std::vector<int> legal_indices = board.getLegalMoveIndices();
     if (legal_indices.empty()) {
         reservation.publish(NodeState::Terminal);
-        backup(leaf_node, board.isInCheck() ? -1.0f : 0.0f);
+        const float terminal = board.isInCheck() ? -1.0f : 0.0f;
+        leaf_node->network_value = terminal;
+        backup(leaf_node, terminal);
         reservation.release();
         return;
     }
@@ -725,6 +734,8 @@ void MCTS::expand_and_backup_prepared(MCTSNode* leaf_node,
     // Les feuilles terminales sont traitees pendant la descente, jamais ici :
     // legal_indices est donc non vide et le plateau n'est pas necessaire.
     store_tt(key, legal_indices, policy, value, timing);
+
+    leaf_node->network_value = value;
 
     {
         PhaseTimer timer(timing, SearchPhase::Expansion);

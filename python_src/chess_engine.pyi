@@ -246,6 +246,9 @@ class MoveStats:
     def q_value(self) -> float:
         ...
     @property
+    def v_value(self) -> float:
+        ...
+    @property
     def visits(self) -> int:
         ...
 class ONNXEvaluator:
