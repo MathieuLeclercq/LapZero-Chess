@@ -370,6 +370,87 @@ def test_les_mesures_transmettent_le_lot_fixe(monkeypatch):
     assert appels == [True]
 
 
+def test_les_mesures_transmettent_le_reglage_de_divergence(monkeypatch):
+    import search_bench
+
+    appels = []
+
+    class FauxMCTS:
+        def __init__(self, evaluateur, taille_tt, depth):
+            pass
+
+        def set_tuning(self, virtual_loss, fpu_reduction,
+                       collision_attempt_factor):
+            appels.append((virtual_loss, fpu_reduction,
+                           collision_attempt_factor))
+
+        def reset_analysis(self):
+            pass
+
+        def reset_counters(self):
+            pass
+
+        def mcts_search(self, *args):
+            pass
+
+        def step_analysis(self, *args):
+            pass
+
+        def get_counters(self):
+            return type("C", (), dict(
+                nn_calls=1, nn_batches=1, tt_hits=0, tt_misses=1,
+                terminal_hits=0, tt_position_matches=0,
+                tt_rule50_rejects=0, tt_context_rejects=0,
+                tt_history_rejects=0, leaf_collisions=0))()
+
+    monkeypatch.setattr(search_bench.chess_engine, "MCTS", FauxMCTS)
+    monkeypatch.setattr(search_bench, "charger_position", lambda fen: object())
+
+    search_bench.mesurer_mcts_search(
+        object(), "fen", "position", 8, virtual_loss=2, fpu_reduction=0.5,
+        collision_attempts=8)
+    assert appels == [(2, 0.5, 8)]
+
+    # Les reglages par defaut ne touchent pas le moteur.
+    search_bench.mesurer_mcts_search(object(), "fen", "position", 8)
+    assert appels == [(2, 0.5, 8)]
+
+
+def test_les_mesures_decoupent_en_tranches(monkeypatch):
+    import search_bench
+
+    appels = []
+
+    class FauxMCTS:
+        def __init__(self, evaluateur, taille_tt, depth):
+            pass
+
+        def reset_analysis(self):
+            pass
+
+        def reset_counters(self):
+            pass
+
+        def step_analysis(self, board, simulations, c_puct, batch_size,
+                          worker_count):
+            appels.append(simulations)
+
+        def get_counters(self):
+            return type("C", (), dict(
+                nn_calls=1, nn_batches=1, tt_hits=0, tt_misses=1,
+                terminal_hits=0, tt_position_matches=0,
+                tt_rule50_rejects=0, tt_context_rejects=0,
+                tt_history_rejects=0, leaf_collisions=0))()
+
+    monkeypatch.setattr(search_bench.chess_engine, "MCTS", FauxMCTS)
+    monkeypatch.setattr(search_bench, "charger_position", lambda fen: object())
+
+    search_bench.mesurer_step_analysis(
+        object(), "fen", "position", 700, slices=64)
+
+    assert appels == [64] * 10 + [60]
+
+
 def test_la_mesure_capture_les_timings_et_la_taille_tt(monkeypatch):
     import search_bench
 

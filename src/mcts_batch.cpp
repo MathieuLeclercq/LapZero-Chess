@@ -12,9 +12,10 @@
 
 namespace {
 
-void reserver_chemin(PathReservation& reservation, MCTSNode* node) {
+void reserver_chemin(PathReservation& reservation, MCTSNode* node,
+                     std::uint32_t units) {
     for (MCTSNode* current = node; current != nullptr; current = current->parent) {
-        reservation.reserve(current);
+        reservation.reserve(current, units);
     }
 }
 
@@ -155,7 +156,8 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
                 for (int i = 0; i < moves_played; i++) board.undoMove();
                 break;
             }
-            reserver_chemin(leaf.reservation, node);
+            reserver_chemin(leaf.reservation, node,
+                            static_cast<std::uint32_t>(m_tuning.virtual_loss));
             {
                 PhaseTimer timer(timing, SearchPhase::TensorKey);
                 leaf.legal_moves = board.getLegalMoveIndices();

@@ -85,6 +85,15 @@ struct TreeReport {
 };
 
 
+// Reglages de divergence de la collecte. Les valeurs par defaut sont celles
+// historiques ; toute modification change la recherche et exige une validation
+// qualite par le banc de puzzles.
+struct SearchTuning {
+    int virtual_loss = 1;             // unites de n_in_flight par descente
+    float fpu_reduction = 0.30f;      // coefficient du terme FPU
+    int collision_attempt_factor = 4; // tentatives = facteur * slots + workers
+};
+
 class MCTS {
     friend class MCTSTestAccess;
 
@@ -101,6 +110,7 @@ private:
     bool m_timing_enabled = false;
     SearchTiming m_last_timing;
     bool m_fixed_batch = false;
+    SearchTuning m_tuning;
     std::unique_ptr<SearchExecutor> m_search_executor;
     std::vector<WorkerContext> m_worker_contexts;
 
@@ -156,6 +166,8 @@ public:
     // sorties des positions dupliquees sont ignorees.
     void set_fixed_batch(bool enabled);
     bool fixed_batch() const;
+    void set_tuning(const SearchTuning& tuning);
+    SearchTuning get_tuning() const;
 
     // recherche mcts asynchrone
     MCTSNode* advance_to_leaf(MCTSNode* root, Chessboard& board, float c_puct,

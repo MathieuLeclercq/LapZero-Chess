@@ -98,7 +98,8 @@ LeafWork MCTS::collect_wave_leaf(
 
     LeafWork work;
     work.node = root;
-    work.reservation.reserve(root);
+    work.reservation.reserve(
+        root, static_cast<std::uint32_t>(m_tuning.virtual_loss));
     BoardRollback rollback(context.board);
     MCTSNode* node = root;
 
@@ -217,7 +218,7 @@ LeafWork MCTS::collect_wave_leaf(
             }
         }
         const float fpu_reduction =
-            0.30f * std::sqrt(visited_policy_sum);
+            m_tuning.fpu_reduction * std::sqrt(visited_policy_sum);
         const float parent_q = node->q_value();
         const float exploration_factor =
             c_puct * std::sqrt(static_cast<float>(node->visit_count));
@@ -242,7 +243,8 @@ LeafWork MCTS::collect_wave_leaf(
         // Le virtual loss devient visible avant de jouer le coup. Deux
         // workers peuvent encore choisir simultanement le meme enfant, le CAS
         // Pending reste donc la garantie de correction.
-        work.reservation.reserve(best_child);
+        work.reservation.reserve(
+            best_child, static_cast<std::uint32_t>(m_tuning.virtual_loss));
         if (!apply_move_by_index(context.board, best_move)) {
             throw std::runtime_error(
                 "collect_wave_leaf : application du coup impossible");
@@ -281,7 +283,9 @@ std::vector<LeafWork> MCTS::collect_wave(
     std::atomic<std::size_t> available{slots};
     std::atomic<std::size_t> attempts{0};
     std::atomic<bool> worker_failed{false};
-    const std::size_t max_attempts = 4 * slots + worker_count;
+    const std::size_t max_attempts =
+        static_cast<std::size_t>(m_tuning.collision_attempt_factor) * slots
+        + worker_count;
 
     try {
         executor.run(worker_count, [&](std::size_t worker_id) {

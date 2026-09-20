@@ -234,6 +234,33 @@ void test_fixed_batch_pads_mono_batch() {
     }
 }
 
+void test_tuning_defaults_validation_and_propagation() {
+    ControlledEvaluator evaluator;
+    MCTS mcts(&evaluator, 8192, 0);
+
+    const SearchTuning defauts = mcts.get_tuning();
+    require_test(defauts.virtual_loss == 1
+                     && defauts.fpu_reduction == 0.30f
+                     && defauts.collision_attempt_factor == 4,
+                 "les reglages de divergence par defaut ont change");
+
+    mcts.set_tuning(SearchTuning{2, 0.5f, 8});
+    const SearchTuning modifies = mcts.get_tuning();
+    require_test(modifies.virtual_loss == 2
+                     && modifies.fpu_reduction == 0.5f
+                     && modifies.collision_attempt_factor == 8,
+                 "set_tuning n'a pas propage les valeurs");
+
+    bool refuse = false;
+    try {
+        mcts.set_tuning(SearchTuning{0, 0.3f, 4});
+    }
+    catch (const std::invalid_argument&) {
+        refuse = true;
+    }
+    require_test(refuse, "virtual_loss nul accepte");
+}
+
 void test_gpu_phase_is_quiet_and_update_root_waits_for_session() {
     ControlledEvaluator evaluator;
     EvaluationGate gate;
@@ -291,6 +318,7 @@ int main() {
         test_invalid_evaluator_outputs_clean_session();
         test_fixed_batch_pads_wave_calls_and_keeps_budget();
         test_fixed_batch_pads_mono_batch();
+        test_tuning_defaults_validation_and_propagation();
         test_gpu_phase_is_quiet_and_update_root_waits_for_session();
         return 0;
     }

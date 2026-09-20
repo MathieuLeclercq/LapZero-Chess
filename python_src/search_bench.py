@@ -58,6 +58,7 @@ class Mesure:
     tt_rule50_rejects: int
     tt_context_rejects: int
     tt_history_rejects: int
+    leaf_collisions: int = 0
     repetition: int = 0
     worker_count: int = 1
     pool_etat: str = "froid"
@@ -141,6 +142,10 @@ def mesurer_mcts_search(evaluateur, fen: str, nom: str,
                         tt_size: int = TAILLE_TT,
                         timings: bool = False,
                         fixed_batch: bool = False,
+                        virtual_loss: int = 1,
+                        fpu_reduction: float = 0.30,
+                        collision_attempts: int = 4,
+                        slices: int = 0,
                         repetition: int = 0,
                         worker_count: int = 1,
                         pool_etat: str = "froid",
@@ -156,12 +161,22 @@ def mesurer_mcts_search(evaluateur, fen: str, nom: str,
         mcts.set_timing_enabled(True)
     if fixed_batch:
         mcts.set_fixed_batch(True)
+    if (virtual_loss, fpu_reduction, collision_attempts) != (1, 0.30, 4):
+        mcts.set_tuning(virtual_loss, fpu_reduction, collision_attempts)
     board = charger_position(fen)
     mcts.reset_counters()
 
     debut = time.perf_counter()
-    mcts.mcts_search(board, simulations, c_puct, False, batch_size,
-                     worker_count)
+    if slices:
+        fait = 0
+        while fait < simulations:
+            bloc = min(slices, simulations - fait)
+            mcts.mcts_search(board, bloc, c_puct, False, batch_size,
+                             worker_count)
+            fait += bloc
+    else:
+        mcts.mcts_search(board, simulations, c_puct, False, batch_size,
+                         worker_count)
     duree = time.perf_counter() - debut
 
     c = mcts.get_counters()
@@ -175,6 +190,7 @@ def mesurer_mcts_search(evaluateur, fen: str, nom: str,
         tt_rule50_rejects=c.tt_rule50_rejects,
         tt_context_rejects=c.tt_context_rejects,
         tt_history_rejects=c.tt_history_rejects,
+        leaf_collisions=getattr(c, "leaf_collisions", 0),
         repetition=repetition, worker_count=worker_count,
         pool_etat=pool_etat,
         timing=extraire_timing(mcts, timings))
@@ -187,6 +203,10 @@ def mesurer_step_analysis(evaluateur, fen: str, nom: str,
                           tt_size: int = TAILLE_TT,
                           timings: bool = False,
                           fixed_batch: bool = False,
+                          virtual_loss: int = 1,
+                          fpu_reduction: float = 0.30,
+                          collision_attempts: int = 4,
+                          slices: int = 0,
                           repetition: int = 0,
                           worker_count: int = 1,
                           pool_etat: str = "froid",
@@ -198,12 +218,22 @@ def mesurer_step_analysis(evaluateur, fen: str, nom: str,
         mcts.set_timing_enabled(True)
     if fixed_batch:
         mcts.set_fixed_batch(True)
+    if (virtual_loss, fpu_reduction, collision_attempts) != (1, 0.30, 4):
+        mcts.set_tuning(virtual_loss, fpu_reduction, collision_attempts)
     board = charger_position(fen)
     mcts.reset_analysis()
     mcts.reset_counters()
 
     debut = time.perf_counter()
-    mcts.step_analysis(board, simulations, c_puct, batch_size, worker_count)
+    if slices:
+        fait = 0
+        while fait < simulations:
+            bloc = min(slices, simulations - fait)
+            mcts.step_analysis(board, bloc, c_puct, batch_size, worker_count)
+            fait += bloc
+    else:
+        mcts.step_analysis(board, simulations, c_puct, batch_size,
+                           worker_count)
     duree = time.perf_counter() - debut
 
     c = mcts.get_counters()
@@ -217,6 +247,7 @@ def mesurer_step_analysis(evaluateur, fen: str, nom: str,
         tt_rule50_rejects=c.tt_rule50_rejects,
         tt_context_rejects=c.tt_context_rejects,
         tt_history_rejects=c.tt_history_rejects,
+        leaf_collisions=getattr(c, "leaf_collisions", 0),
         repetition=repetition, worker_count=worker_count,
         pool_etat=pool_etat,
         timing=extraire_timing(mcts, timings))
@@ -441,6 +472,15 @@ def main() -> int:
                         help="active les chronometrages internes par phase")
     parser.add_argument("--fixed-batch", action="store_true",
                         help="padde les lots d evaluation a une forme fixe")
+    parser.add_argument("--virtual-loss", type=int, default=1,
+                        help="unites de n_in_flight par descente")
+    parser.add_argument("--fpu", type=float, default=0.30,
+                        help="coefficient du terme FPU")
+    parser.add_argument("--collision-attempts", type=int, default=4,
+                        help="facteur du budget de tentatives de collecte")
+    parser.add_argument("--slices", type=int, default=0,
+                        help="decoupe chaque recherche en tranches de N "
+                             "simulations, 0 pour un appel unique")
     parser.add_argument("--tt-size", type=int, default=TAILLE_TT)
     parser.add_argument("--out-json", type=Path, default=None,
                         help="mesures individuelles et contexte en JSON")
@@ -455,6 +495,14 @@ def main() -> int:
         parser.error("passages et repetitions doivent etre positifs")
     if args.tt_size <= 0:
         parser.error("tt-size doit etre positif")
+    if args.virtual_loss < 1:
+        parser.error("--virtual-loss doit etre au moins 1")
+    if args.fpu < 0.0:
+        parser.error("--fpu doit etre positif ou nul")
+    if args.collision_attempts < 1:
+        parser.error("--collision-attempts doit etre au moins 1")
+    if args.slices < 0:
+        parser.error("--slices doit etre positif ou nul")
     if any(count < 1 for count in args.worker_counts):
         parser.error("les workers de recherche doivent etre au moins 1")
     if (any(count > 1 for count in args.worker_counts)
@@ -547,6 +595,10 @@ def main() -> int:
                                     tt_size=args.tt_size,
                                     timings=args.timings,
                                     fixed_batch=args.fixed_batch,
+                                    virtual_loss=args.virtual_loss,
+                                    fpu_reduction=args.fpu,
+                                    collision_attempts=args.collision_attempts,
+                                    slices=args.slices,
                                     repetition=repetition,
                                     worker_count=worker_count,
                                     pool_etat=pool_etat, mcts=pool))
@@ -562,6 +614,10 @@ def main() -> int:
                                     tt_size=args.tt_size,
                                     timings=args.timings,
                                     fixed_batch=args.fixed_batch,
+                                    virtual_loss=args.virtual_loss,
+                                    fpu_reduction=args.fpu,
+                                    collision_attempts=args.collision_attempts,
+                                    slices=args.slices,
                                     repetition=repetition,
                                     worker_count=worker_count,
                                     pool_etat=pool_etat, mcts=pool))
@@ -595,6 +651,10 @@ def main() -> int:
         "tt_size": args.tt_size,
         "timings": args.timings,
         "fixed_batch": args.fixed_batch,
+        "virtual_loss": args.virtual_loss,
+        "fpu_reduction": args.fpu,
+        "collision_attempts": args.collision_attempts,
+        "slices": args.slices,
     }
 
     sortie = args.out_rapport or Path(

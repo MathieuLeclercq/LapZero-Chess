@@ -244,6 +244,23 @@ PYBIND11_MODULE(chess_engine, m) {
              "Padde les lots d evaluation a une forme fixe")
         .def("fixed_batch", &MCTS::fixed_batch,
              py::call_guard<py::gil_scoped_release>())
+        .def("set_tuning",
+             [](MCTS& mcts, int virtual_loss, float fpu_reduction,
+                int collision_attempt_factor) {
+                 mcts.set_tuning(SearchTuning{
+                     virtual_loss, fpu_reduction, collision_attempt_factor});
+             },
+             py::call_guard<py::gil_scoped_release>(),
+             py::arg("virtual_loss") = 1,
+             py::arg("fpu_reduction") = 0.30f,
+             py::arg("collision_attempt_factor") = 4,
+             "Reglages de divergence de la collecte")
+        .def("get_tuning", [](const MCTS& mcts) {
+                const SearchTuning tuning = mcts.get_tuning();
+                return py::make_tuple(tuning.virtual_loss,
+                                      tuning.fpu_reduction,
+                                      tuning.collision_attempt_factor);
+            })
         .def("get_last_timing", &MCTS::get_last_timing,
              py::call_guard<py::gil_scoped_release>())
         .def("inspect_tree",

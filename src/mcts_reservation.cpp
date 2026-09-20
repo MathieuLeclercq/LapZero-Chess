@@ -26,14 +26,14 @@ PathReservation::~PathReservation() {
     release();
 }
 
-void PathReservation::reserve(MCTSNode* node) {
-    if (node == nullptr) {
+void PathReservation::reserve(MCTSNode* node, std::uint32_t units) {
+    if (node == nullptr || units == 0) {
         return;
     }
     // Enregistrer d'abord le pointeur : si le vecteur ne peut pas grandir,
     // aucun compteur n'a encore ete modifie.
     m_path.push_back(node);
-    node->n_in_flight.fetch_add(1, std::memory_order_relaxed);
+    node->n_in_flight.fetch_add(units, std::memory_order_relaxed);
 }
 
 bool PathReservation::try_claim(MCTSNode* node) {

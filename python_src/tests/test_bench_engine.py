@@ -133,6 +133,9 @@ def test_la_recherche_transmet_batch_et_workers(monkeypatch):
             assert taille_tt == puzzle_bench.TAILLE_TT
             appels.append(("constructeur", cache_history_depth))
 
+        def set_fixed_batch(self, enabled):
+            appels.append(("fixed", enabled))
+
         def mcts_search(self, board, simulations, c_puct, bruit,
                         batch_size, worker_count):
             appels.append((board, simulations, c_puct, bruit, batch_size,
@@ -147,8 +150,38 @@ def test_la_recherche_transmet_batch_et_workers(monkeypatch):
         worker_count=4)(plateau) == [1.0]
     assert appels == [
         ("constructeur", 0),
+        ("fixed", True),
         (plateau, 700, 1.4, False, 8, 4),
     ]
+
+
+def test_la_recherche_transmet_le_reglage_de_divergence(monkeypatch):
+    import puzzle_bench
+
+    appels = []
+
+    class FauxMCTS:
+        def __init__(self, *args):
+            pass
+
+        def set_fixed_batch(self, enabled):
+            appels.append(("fixed", enabled))
+
+        def set_tuning(self, virtual_loss, fpu_reduction,
+                       collision_attempt_factor):
+            appels.append(("tuning", virtual_loss, fpu_reduction,
+                           collision_attempt_factor))
+
+        def mcts_search(self, *args):
+            return [1.0]
+
+    monkeypatch.setattr(puzzle_bench.chess_engine, "MCTS", FauxMCTS)
+
+    puzzle_bench.faire_search_fn(
+        object(), 700, 1.4, 8, worker_count=4, virtual_loss=2,
+        fpu_reduction=0.45)(object())
+
+    assert appels == [("fixed", True), ("tuning", 2, 0.45, 4)]
 
 
 def test_la_taille_de_tt_reste_petite():
@@ -246,6 +279,9 @@ def test_faire_search_fn_en_mode_temps_rapporte_le_bilan(monkeypatch):
             instances.append(self)
             self.sims = 0
             self.clears = 0
+
+        def set_fixed_batch(self, enabled):
+            pass
 
         def reset_analysis(self):
             self.sims = 0

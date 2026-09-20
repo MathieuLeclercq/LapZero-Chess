@@ -136,7 +136,10 @@ def faire_search_fn(evaluateur, simulations: int, c_puct: float,
                     cache_history_depth: int = 0,
                     worker_count: int = 1,
                     search_seconds: float | None = None,
-                    horloge=time.perf_counter):
+                    horloge=time.perf_counter,
+                    virtual_loss: int = 1,
+                    fpu_reduction: float = 0.30,
+                    collision_attempts: int = 4):
     """Renvoie search_fn(board) -> distribution de visites sur 4672.
 
     A simulations fixes, un MCTS neuf est cree pour chaque puzzle afin que les
@@ -149,11 +152,20 @@ def faire_search_fn(evaluateur, simulations: int, c_puct: float,
     s'arrete apres la tranche qui franchit la fenetre. Le bilan renvoye
     contient les simulations terminees et le depassement du dernier appel
     complet.
+
+    Le lot fixe est toujours actif : c'est le reglage de production, il evite
+    la re-planification d'ONNX Runtime a chaque changement de forme.
     """
+    def regler(mcts):
+        mcts.set_fixed_batch(True)
+        if (virtual_loss, fpu_reduction, collision_attempts) != (1, 0.30, 4):
+            mcts.set_tuning(virtual_loss, fpu_reduction, collision_attempts)
+
     if search_seconds is None:
         def search_fn(board):
             mcts = chess_engine.MCTS(
                 evaluateur, TAILLE_TT, cache_history_depth)
+            regler(mcts)
             return mcts.mcts_search(board, simulations, c_puct, False,
                                     batch_size, worker_count)
         return search_fn
@@ -167,6 +179,7 @@ def faire_search_fn(evaluateur, simulations: int, c_puct: float,
         if mcts is None:
             mcts = chess_engine.MCTS(
                 evaluateur, TAILLE_TT, cache_history_depth)
+            regler(mcts)
             etat["mcts"] = mcts
         mcts.reset_analysis()
         mcts.clear_evaluation_cache()
@@ -236,7 +249,10 @@ def initialiser_travailleur(onnx: str, simulations, c_puct: float,
                             sans_historique: bool, batch_size: int,
                             cache_history_depth: int,
                             search_workers: int = 1,
-                            search_seconds: float | None = None) -> None:
+                            search_seconds: float | None = None,
+                            virtual_loss: int = 1,
+                            fpu_reduction: float = 0.30,
+                            collision_attempts: int = 4) -> None:
     import onnxruntime as ort
 
     options = ort.SessionOptions()
@@ -248,14 +264,19 @@ def initialiser_travailleur(onnx: str, simulations, c_puct: float,
     _ETAT["policy_fn"] = faire_policy_fn(session)
     _ETAT["search_fn"] = faire_search_fn(
         chess_engine.ONNXEvaluator(onnx, False), simulations, c_puct,
-        batch_size, cache_history_depth, search_workers, search_seconds)
+        batch_size, cache_history_depth, search_workers, search_seconds,
+        virtual_loss=virtual_loss, fpu_reduction=fpu_reduction,
+        collision_attempts=collision_attempts)
     _ETAT["sans_historique"] = sans_historique
 
 
 def initialiser_gpu(onnx: str, simulations, c_puct: float,
                     sans_historique: bool, batch_size: int,
                     cache_history_depth: int, search_workers: int,
-                    search_seconds: float | None) -> None:
+                    search_seconds: float | None,
+                    virtual_loss: int = 1,
+                    fpu_reduction: float = 0.30,
+                    collision_attempts: int = 4) -> None:
     """Un seul processus GPU : la policy brute garde sa session CPU, dont le
     cout est exclu du temps de recherche."""
     import onnxruntime as ort
@@ -269,7 +290,9 @@ def initialiser_gpu(onnx: str, simulations, c_puct: float,
     _ETAT["policy_fn"] = faire_policy_fn(session)
     _ETAT["search_fn"] = faire_search_fn(
         chess_engine.ONNXEvaluator(onnx, True), simulations, c_puct,
-        batch_size, cache_history_depth, search_workers, search_seconds)
+        batch_size, cache_history_depth, search_workers, search_seconds,
+        virtual_loss=virtual_loss, fpu_reduction=fpu_reduction,
+        collision_attempts=collision_attempts)
     _ETAT["sans_historique"] = sans_historique
 
 
@@ -360,6 +383,12 @@ def main() -> int:
     parser.add_argument("--search-workers", type=int, default=1,
                         help="workers CPU internes au C++ par recherche, sans "
                              "creer de processus Python supplementaires")
+    parser.add_argument("--virtual-loss", type=int, default=1,
+                        help="unites de n_in_flight par descente")
+    parser.add_argument("--fpu", type=float, default=0.30,
+                        help="coefficient du terme FPU")
+    parser.add_argument("--collision-attempts", type=int, default=4,
+                        help="facteur du budget de tentatives de collecte")
     parser.add_argument("--gpu", action="store_true",
                         help="recherche sur le GPU, un seul processus")
     # 2500 sur les 5000 du fichier : la demi-largeur de Wilson globale passe
@@ -394,6 +423,12 @@ def main() -> int:
     if args.search_workers > 1 and args.batch_size == 0:
         parser.error("la recherche multicoeur exige une taille de batch "
                      "positive")
+    if args.virtual_loss < 1:
+        parser.error("--virtual-loss doit etre au moins 1")
+    if args.fpu < 0.0:
+        parser.error("--fpu doit etre positif ou nul")
+    if args.collision_attempts < 1:
+        parser.error("--collision-attempts doit etre au moins 1")
 
     simulations = args.simulations
     if simulations is None and args.search_seconds is None:
@@ -443,7 +478,10 @@ def main() -> int:
         initialiser_gpu(str(onnx), simulations, args.c_puct,
                         args.sans_historique, args.batch_size,
                         args.cache_history_depth, args.search_workers,
-                        args.search_seconds)
+                        args.search_seconds,
+                        virtual_loss=args.virtual_loss,
+                        fpu_reduction=args.fpu,
+                        collision_attempts=args.collision_attempts)
         for i, lot in enumerate(lots, 1):
             mesures.extend(traiter_lot(lot))
             if i % 10 == 0 or i == len(lots):
@@ -457,7 +495,8 @@ def main() -> int:
                      initargs=(str(onnx), simulations, args.c_puct,
                                args.sans_historique, args.batch_size,
                                args.cache_history_depth, args.search_workers,
-                               args.search_seconds)) as pool:
+                               args.search_seconds, args.virtual_loss,
+                               args.fpu, args.collision_attempts)) as pool:
             for i, resultat in enumerate(
                     pool.imap_unordered(traiter_lot, lots), 1):
                 mesures.extend(resultat)
@@ -485,6 +524,10 @@ def main() -> int:
         "duree_totale_s": duree,
         "travailleurs": args.travailleurs,
         "search_workers": args.search_workers,
+        "fixed_batch": True,
+        "virtual_loss": args.virtual_loss,
+        "fpu_reduction": args.fpu,
+        "collision_attempts": args.collision_attempts,
         "accelerateur": "GPU" if args.gpu else "CPU",
         "modele_sha256": sha256_fichier(Path(onnx)),
         "banc_sha256": sha256_fichier(args.banc),

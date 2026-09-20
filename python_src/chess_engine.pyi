@@ -202,6 +202,8 @@ class MCTS:
         ...
     def get_root_q(self) -> float:
         ...
+    def get_tuning(self) -> tuple[int, float, int]:
+        ...
     def inspect_tree(self) -> TreeReport:
         ...
     def mcts_search(self, board: Chessboard, num_simulations: typing.SupportsInt | typing.SupportsIndex, c_puct: typing.SupportsFloat | typing.SupportsIndex = 1.399999976158142, add_dirichlet: bool = False, batch_size: typing.SupportsInt | typing.SupportsIndex = 0, worker_count: typing.SupportsInt | typing.SupportsIndex = 1) -> list[float]:
@@ -216,6 +218,10 @@ class MCTS:
         """
     def set_timing_enabled(self, enabled: bool) -> None:
         ...
+    def set_tuning(self, virtual_loss: typing.SupportsInt | typing.SupportsIndex = 1, fpu_reduction: typing.SupportsFloat | typing.SupportsIndex = 0.30000001192092896, collision_attempt_factor: typing.SupportsInt | typing.SupportsIndex = 4) -> None:
+        """
+        Reglages de divergence de la collecte
+        """
     def step_analysis(self, board: Chessboard, num_simulations: typing.SupportsInt | typing.SupportsIndex, c_puct: typing.SupportsFloat | typing.SupportsIndex = 1.399999976158142, batch_size: typing.SupportsInt | typing.SupportsIndex = 0, worker_count: typing.SupportsInt | typing.SupportsIndex = 1) -> None:
         ...
     def update_root(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:

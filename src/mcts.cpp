@@ -59,9 +59,10 @@ NodeChildren make_children_from_probe(MCTSNode* parent,
     return children;
 }
 
-void reserve_path(PathReservation& reservation, MCTSNode* leaf) {
+void reserve_path(PathReservation& reservation, MCTSNode* leaf,
+                  std::uint32_t units) {
     for (MCTSNode* node = leaf; node != nullptr; node = node->parent) {
-        reservation.reserve(node);
+        reservation.reserve(node, units);
     }
 }
 
@@ -268,7 +269,8 @@ std::pair<MCTSNode*, int> MCTS::select_leaf(MCTSNode* root, Chessboard& board,
                 visited_policy_sum += pair.second->prior;
             }
         }
-        float fpu_reduction = 0.30f * std::sqrt(visited_policy_sum);
+        float fpu_reduction = m_tuning.fpu_reduction
+            * std::sqrt(visited_policy_sum);
 
         // --- 3. SÉLECTION UCB ---
         float max_ucb = -1e9f;
@@ -532,6 +534,29 @@ bool MCTS::fixed_batch() const {
     return m_fixed_batch;
 }
 
+void MCTS::set_tuning(const SearchTuning& tuning) {
+    if (tuning.virtual_loss < 1 || tuning.virtual_loss > 32) {
+        throw std::invalid_argument(
+            "virtual_loss doit etre compris entre 1 et 32");
+    }
+    if (tuning.fpu_reduction < 0.0f || tuning.fpu_reduction > 10.0f) {
+        throw std::invalid_argument(
+            "fpu_reduction doit etre compris entre 0 et 10");
+    }
+    if (tuning.collision_attempt_factor < 1
+        || tuning.collision_attempt_factor > 64) {
+        throw std::invalid_argument(
+            "collision_attempt_factor doit etre compris entre 1 et 64");
+    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_tuning = tuning;
+}
+
+SearchTuning MCTS::get_tuning() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_tuning;
+}
+
 void MCTS::update_root(int move_idx) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
@@ -668,7 +693,8 @@ MCTSNode* MCTS::advance_to_leaf(MCTSNode* root, Chessboard& board,
         for (int i = 0; i < moves_played; i++) board.undoMove();
         return nullptr;
     }
-    reserve_path(reservation, node);
+    reserve_path(reservation, node,
+                 static_cast<std::uint32_t>(m_tuning.virtual_loss));
 
     return node;
 }

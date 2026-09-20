@@ -21,7 +21,7 @@ public:
     PathReservation& operator=(const PathReservation&) = delete;
     ~PathReservation();
 
-    void reserve(MCTSNode* node);
+    void reserve(MCTSNode* node, std::uint32_t units = 1);
     bool try_claim(MCTSNode* node);
     void publish(NodeState state) noexcept;
     void release() noexcept;
