@@ -73,7 +73,36 @@ Activation : `MCTS_FIXED_BATCH = True` dans `uci.py`, a cote de `MCTS_BATCH_SIZE
 `MCTS_WORKER_COUNT`. Tests : `test_fixed_batch_pads_wave_calls_and_keeps_budget`,
 `test_fixed_batch_pads_mono_batch`, `test_le_constructeur_active_le_lot_fixe_par_defaut`.
 
-## 4. Tache 5 : export FP16 rejete
+## 4. Tache 4 : divergence parametrable, balayage et verdict
+
+Les reglages `virtual_loss`, `fpu_reduction` et `collision_attempt_factor` sont
+parametrables (`MCTS::set_tuning`, options `--virtual-loss`, `--fpu`,
+`--collision-attempts` des bancs, `--slices` pour decouper la recherche). Balayage aux
+tranches de 64, workers 8, lot fixe, 6 observations par position :
+
+| config | ouverture | milieu | finale | collisions milieu |
+|---|---|---|---|---|
+| defaut | 1902 | 1458 | 1749 | 3294 |
+| vloss 2 | 2161 (+13.6 %) | 1649 (+13.1 %) | 1973 (+12.8 %) | 2628 |
+| vloss 3 | 2029 (+6.7 %) | 1710 (+17.3 %) | 2108 (+20.6 %) | 2468 |
+| fpu 0.45 | 1950 (+2.5 %) | 1546 (+6.0 %) | 1821 (+4.1 %) | 3160 |
+| vloss 2 + fpu 0.45 | 2093 (+10.0 %) | 1730 (+18.7 %) | 2187 (+25.0 %) | 2350 |
+| tentatives x8 | 2008 (+5.6 %) | 1478 (+1.4 %) | 1862 (+6.4 %) | 6098 |
+
+Verdict qualite, prefiltre 500 puzzles contre les defauts actuels, lot fixe des deux
+cotes :
+
+- vloss 2 + fpu 0.45 : delta -1.8 point, IC95 [-4.0 ; +0.4], 21 pertes contre 12 gains.
+- vloss 2 seul : delta -2.4 point, IC95 [-5.0 ; 0.0], 27 pertes contre 15 gains.
+
+Les deux candidats sont refuses et les defauts restent 1, 0.30 et 4. La hausse de
+remplissage se paie en qualite : plus de divergence elargit la recherche et dilue la
+cible de politique, exactement la mise en garde de la spec. Le facteur x8 de tentatives
+ne gagne presque rien et double les collisions. Ce resultat valide la barriere qualite :
+sans elle, un gain de 13 a 25 pour cent aurait ete adopte au prix de 2 points de
+resolution.
+
+## 5. Tache 5 : export FP16 rejete
 
 Conversion `onnxruntime.transformers.float16.convert_float_to_float16` avec
 `keep_io_types=True`, puis A/B interleaved sur le banc evaluateur, lots 1, 8 et 32. Le
@@ -81,7 +110,7 @@ FP16 est **plus lent** de 18 a 28 pour cent selon le lot. Rejet sans campagne qu
 aucun code de production ajoute, modele FP16 conserve hors depot dans
 `python_src/checkpoints_onnx/`.
 
-## 5. Tache 6 : cas chaud, et correction d'une reserve
+## 6. Tache 6 : cas chaud, et correction d'une reserve
 
 Parties auto-jouees, ouverture et finale, 12 coups, 700 simulations par coup, tranches de
 64, lot fixe (`out/multicore/hot-tree.json`) :
@@ -96,27 +125,49 @@ feuille reseau. Il n'evite donc pas l'inference et la reserve Amdahl des rapport
 precedents est sans objet. Les gains mesures s'appliquent tels quels en partie reelle ;
 seuls les terminaux evitent le reseau.
 
-## 6. Verification
+## 7. Verification
 
 - 15/15 CTest, dont le smoke du banc evaluateur et les deux tests de padding.
 - 256/256 pytest, dont les tests de propagation du lot fixe et du UCI.
 - A/B interleaved pour toutes les comparaisons de debit, meme session, ordre alterne.
 
-## 7. Taches restantes
+## 8. Taches restantes
 
 - Tache 2, buffers persistants : la mesure a montre que le facteur dominant etait la
   forme du lot, pas les allocations. Faible valeur attendue desormais.
-- Tache 4, balayage de divergence : les collisions sont maintenant un cout relatif plus
-  visible, mais le balayage et ses campagnes qualite restent a faire.
 - Tache 6, cible commitee `hot_tree_bench` : la mesure a ete faite par script ; la cible
   testable reste a ecrire.
-- Tache 7 complete : mesures finales, decision sur les reglages et verdict sur la
-  production continue.
+- Tache 7 complete : mesures finales et decision sur les reglages et la production
+  continue.
 
-## 8. Commits de ce chantier
+## 9. Verdict provisoire sur la production continue
+
+Avec le lot fixe, un appel de 8 positions coute 3.4 a 5.1 ms et la recherche tourne a
+1 500 a 2 100 simulations par seconde. La courbe du banc evaluateur montre que le cout par
+position continue de baisser jusqu'au lot 128 (0.10 ms contre 0.43 a 0.65 ms au
+remplissage reel), mais l'arbre d'un seul coup ne fournit que 5 a 7 feuilles par vague.
+
+Une file d'inference continue pourrait accumuler des requetes pendant le Run et remplir
+des lots plus gros. Estimation prudente : avec 16 workers et une file, un remplissage de
+12 a 16 feuilles donnerait environ 0.30 a 0.35 ms par position contre 0.43 a 0.65, soit un
+gain de x1.3 a x1.7 sur l'evaluateur, donc sur la recherche qui reste dominee a 97 pour
+cent par celui-ci.
+
+Deux reserves. Les essais de divergence montrent que forcer la recherche a s'etaler coute
+de la qualite ; une file ne force rien, mais elle ne cree pas non plus de feuilles utiles.
+Et la synchronisation des statistiques lues pendant le backup a un cout et un risque de
+correction.
+
+Recommandation : ecrire un microbenchmark de file, avec producteurs synthetiques et
+service par lots, avant tout chantier de concurrence, puis decider. La production continue
+merite son propre plan, avec les memes criteres de mediane, de p95 et de qualite que les
+vagues.
+
+## 10. Commits de ce chantier
 
 - `4161cd5` Mesure la courbe du lot de l evaluateur hors arbre
 - `29f9458` Padde les lots d evaluation a une forme fixe
 - `74122ac` Active le lot fixe dans le moteur UCI
 - `6606d97` Padde aussi les lots du chemin mono
 - `4461d80` Consigne la cause du decrochage et le gain du lot fixe
+- `3515f00` Rend la divergence de collecte parametrable
