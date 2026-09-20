@@ -238,6 +238,12 @@ PYBIND11_MODULE(chess_engine, m) {
         .def("set_timing_enabled", &MCTS::set_timing_enabled,
              py::call_guard<py::gil_scoped_release>(),
              py::arg("enabled"))
+        .def("set_fixed_batch", &MCTS::set_fixed_batch,
+             py::call_guard<py::gil_scoped_release>(),
+             py::arg("enabled"),
+             "Padde les lots d evaluation a une forme fixe")
+        .def("fixed_batch", &MCTS::fixed_batch,
+             py::call_guard<py::gil_scoped_release>())
         .def("get_last_timing", &MCTS::get_last_timing,
              py::call_guard<py::gil_scoped_release>())
         .def("inspect_tree",

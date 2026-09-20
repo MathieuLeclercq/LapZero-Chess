@@ -409,19 +409,40 @@ void MCTS::run_search_waves(
             }
         }
 
+        int eval_batch = static_cast<int>(network_count);
+        if (m_fixed_batch && network_count > 0) {
+            // ONNX Runtime re-planifie son graphe a chaque changement de forme
+            // de lot, ce qui quadruple le cout de session->Run. On duplique le
+            // dernier tenseur pour garder la forme batch_size ; seules les
+            // network_count premieres sorties sont utilisees.
+            constexpr std::size_t TENSOR_SIZE = 119 * 64;
+            eval_batch = batch_size;
+            const std::size_t target =
+                static_cast<std::size_t>(batch_size) * TENSOR_SIZE;
+            if (batch_input.size() < target) {
+                batch_input.reserve(target);
+                const std::vector<float> dernier(
+                    batch_input.end() - TENSOR_SIZE, batch_input.end());
+                while (batch_input.size() < target) {
+                    batch_input.insert(batch_input.end(),
+                                       dernier.begin(), dernier.end());
+                }
+            }
+        }
+
         if (network_count > 0) {
             m_nn_calls.fetch_add(network_count, std::memory_order_relaxed);
             m_nn_batches.fetch_add(1, std::memory_order_relaxed);
             {
                 PhaseTimer evaluator_timer(timing, SearchPhase::Evaluator);
                 m_evaluator->evaluate_batch(
-                    batch_input, policies, values,
-                    static_cast<int>(network_count));
+                    batch_input, policies, values, eval_batch);
             }
 
-            const std::size_t expected_policy = network_count * 4672;
+            const std::size_t expected_policy =
+                static_cast<std::size_t>(eval_batch) * 4672;
             if (policies.size() != expected_policy
-                || values.size() != network_count) {
+                || values.size() != static_cast<std::size_t>(eval_batch)) {
                 throw std::runtime_error(
                     "evaluateur : dimensions de sortie invalides");
             }

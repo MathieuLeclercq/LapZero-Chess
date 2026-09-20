@@ -192,6 +192,8 @@ class MCTS:
         """
         Remet la table de transposition a froid, au repos seulement
         """
+    def fixed_batch(self) -> bool:
+        ...
     def get_analysis_results(self) -> list[MoveStats]:
         ...
     def get_counters(self) -> SearchCounters:
@@ -208,6 +210,10 @@ class MCTS:
         ...
     def reset_counters(self) -> None:
         ...
+    def set_fixed_batch(self, enabled: bool) -> None:
+        """
+        Padde les lots d evaluation a une forme fixe
+        """
     def set_timing_enabled(self, enabled: bool) -> None:
         ...
     def step_analysis(self, board: Chessboard, num_simulations: typing.SupportsInt | typing.SupportsIndex, c_puct: typing.SupportsFloat | typing.SupportsIndex = 1.399999976158142, batch_size: typing.SupportsInt | typing.SupportsIndex = 0, worker_count: typing.SupportsInt | typing.SupportsIndex = 1) -> None:

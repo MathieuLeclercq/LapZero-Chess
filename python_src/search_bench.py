@@ -140,6 +140,7 @@ def mesurer_mcts_search(evaluateur, fen: str, nom: str,
                         cache_history_depth: int = 0,
                         tt_size: int = TAILLE_TT,
                         timings: bool = False,
+                        fixed_batch: bool = False,
                         repetition: int = 0,
                         worker_count: int = 1,
                         pool_etat: str = "froid",
@@ -153,6 +154,8 @@ def mesurer_mcts_search(evaluateur, fen: str, nom: str,
         mcts = chess_engine.MCTS(evaluateur, tt_size, cache_history_depth)
     if timings:
         mcts.set_timing_enabled(True)
+    if fixed_batch:
+        mcts.set_fixed_batch(True)
     board = charger_position(fen)
     mcts.reset_counters()
 
@@ -183,6 +186,7 @@ def mesurer_step_analysis(evaluateur, fen: str, nom: str,
                           cache_history_depth: int = 0,
                           tt_size: int = TAILLE_TT,
                           timings: bool = False,
+                          fixed_batch: bool = False,
                           repetition: int = 0,
                           worker_count: int = 1,
                           pool_etat: str = "froid",
@@ -192,6 +196,8 @@ def mesurer_step_analysis(evaluateur, fen: str, nom: str,
         mcts = chess_engine.MCTS(evaluateur, tt_size, cache_history_depth)
     if timings:
         mcts.set_timing_enabled(True)
+    if fixed_batch:
+        mcts.set_fixed_batch(True)
     board = charger_position(fen)
     mcts.reset_analysis()
     mcts.reset_counters()
@@ -433,6 +439,8 @@ def main() -> int:
                         help="verifie les invariants d'arbre, sans mesurer le debit")
     parser.add_argument("--timings", action="store_true",
                         help="active les chronometrages internes par phase")
+    parser.add_argument("--fixed-batch", action="store_true",
+                        help="padde les lots d evaluation a une forme fixe")
     parser.add_argument("--tt-size", type=int, default=TAILLE_TT)
     parser.add_argument("--out-json", type=Path, default=None,
                         help="mesures individuelles et contexte en JSON")
@@ -538,6 +546,7 @@ def main() -> int:
                                     args.c_puct, batch_size, depth,
                                     tt_size=args.tt_size,
                                     timings=args.timings,
+                                    fixed_batch=args.fixed_batch,
                                     repetition=repetition,
                                     worker_count=worker_count,
                                     pool_etat=pool_etat, mcts=pool))
@@ -552,6 +561,7 @@ def main() -> int:
                                     args.c_puct, batch_size, depth,
                                     tt_size=args.tt_size,
                                     timings=args.timings,
+                                    fixed_batch=args.fixed_batch,
                                     repetition=repetition,
                                     worker_count=worker_count,
                                     pool_etat=pool_etat, mcts=pool))
@@ -584,6 +594,7 @@ def main() -> int:
         "warmup_pool": args.warmup_pool,
         "tt_size": args.tt_size,
         "timings": args.timings,
+        "fixed_batch": args.fixed_batch,
     }
 
     sortie = args.out_rapport or Path(

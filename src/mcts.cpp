@@ -522,6 +522,16 @@ void MCTS::clear_evaluation_cache() {
     m_cache.clear();
 }
 
+void MCTS::set_fixed_batch(bool enabled) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_fixed_batch = enabled;
+}
+
+bool MCTS::fixed_batch() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_fixed_batch;
+}
+
 void MCTS::update_root(int move_idx) {
     std::lock_guard<std::mutex> lock(m_mutex);
 

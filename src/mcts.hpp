@@ -100,6 +100,7 @@ private:
     std::mt19937 m_noise_rng;
     bool m_timing_enabled = false;
     SearchTiming m_last_timing;
+    bool m_fixed_batch = false;
     std::unique_ptr<SearchExecutor> m_search_executor;
     std::vector<WorkerContext> m_worker_contexts;
 
@@ -150,6 +151,11 @@ public:
     TreeReport inspect_tree(const MCTSNode* root) const;
     void set_timing_enabled(bool enabled);
     SearchTiming get_last_timing() const;
+    // Forme de lot fixe : les vagues sont paddees a batch_size pour eviter la
+    // re-planification d'ONNX Runtime a chaque changement de forme. Les
+    // sorties des positions dupliquees sont ignorees.
+    void set_fixed_batch(bool enabled);
+    bool fixed_batch() const;
 
     // recherche mcts asynchrone
     MCTSNode* advance_to_leaf(MCTSNode* root, Chessboard& board, float c_puct,

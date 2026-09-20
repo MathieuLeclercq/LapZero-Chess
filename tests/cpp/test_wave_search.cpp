@@ -189,6 +189,35 @@ void test_invalid_evaluator_outputs_clean_session() {
     require_quiescent(mcts.inspect_tree());
 }
 
+void test_fixed_batch_pads_wave_calls_and_keeps_budget() {
+    ControlledEvaluator evaluator;
+    MCTS mcts(&evaluator, 8192, 0);
+    require_test(!mcts.fixed_batch(),
+                 "le lot fixe doit etre desactive par defaut");
+    mcts.set_fixed_batch(true);
+    require_test(mcts.fixed_batch(), "le lot fixe n'a pas ete active");
+
+    Chessboard board = startup_board();
+    mcts.step_analysis(board, 17, 1.4f, 8, 4);
+
+    require_test(!evaluator.batch_sizes.empty(), "evaluateur jamais appele");
+    require_test(evaluator.batch_sizes.front() == 1,
+                 "l'expansion de racine doit rester a batch 1");
+    for (std::size_t i = 1; i < evaluator.batch_sizes.size(); ++i) {
+        require_test(evaluator.batch_sizes[i] == 8,
+                     "un appel de vague n'a pas la forme fixe");
+    }
+
+    const TreeReport report = mcts.inspect_tree();
+    const SearchCounters counters = mcts.get_counters();
+    require_test(report.root_visits == 17, "budget de vagues incorrect");
+    require_test(counters.completed_simulations == 17,
+                 "simulations terminees incorrectes");
+    require_quiescent(report);
+    require_test(board.toFEN() == startup_board().toFEN(),
+                 "le lot fixe a modifie le plateau d'entree");
+}
+
 void test_gpu_phase_is_quiet_and_update_root_waits_for_session() {
     ControlledEvaluator evaluator;
     EvaluationGate gate;
@@ -244,6 +273,7 @@ int main() {
         test_terminal_root_uses_root_visits();
         test_evaluator_failure_cleans_session_and_allows_recovery();
         test_invalid_evaluator_outputs_clean_session();
+        test_fixed_batch_pads_wave_calls_and_keeps_budget();
         test_gpu_phase_is_quiet_and_update_root_waits_for_session();
         return 0;
     }

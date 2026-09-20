@@ -327,6 +327,49 @@ def test_les_mesures_transmettent_batch_et_workers_au_mcts(monkeypatch):
     assert mesure.batch_size == 8
 
 
+def test_les_mesures_transmettent_le_lot_fixe(monkeypatch):
+    import search_bench
+
+    appels = []
+
+    class FauxMCTS:
+        def __init__(self, evaluateur, taille_tt, depth):
+            pass
+
+        def set_fixed_batch(self, enabled):
+            appels.append(enabled)
+
+        def reset_analysis(self):
+            pass
+
+        def reset_counters(self):
+            pass
+
+        def mcts_search(self, *args):
+            pass
+
+        def step_analysis(self, *args):
+            pass
+
+        def get_counters(self):
+            return type("C", (), dict(
+                nn_calls=1, nn_batches=1, tt_hits=0, tt_misses=1,
+                terminal_hits=0, tt_position_matches=0,
+                tt_rule50_rejects=0, tt_context_rejects=0,
+                tt_history_rejects=0))()
+
+    monkeypatch.setattr(search_bench.chess_engine, "MCTS", FauxMCTS)
+    monkeypatch.setattr(search_bench, "charger_position", lambda fen: object())
+
+    search_bench.mesurer_mcts_search(
+        object(), "fen", "position", 8, fixed_batch=True)
+    assert appels == [True]
+
+    # Sans le drapeau, le reglage par defaut du moteur n'est pas touche.
+    search_bench.mesurer_mcts_search(object(), "fen", "position", 8)
+    assert appels == [True]
+
+
 def test_la_mesure_capture_les_timings_et_la_taille_tt(monkeypatch):
     import search_bench
 
