@@ -3,6 +3,27 @@
 Constats issus de la revue de code du 2026-08-07 et de la campagne perft, classés par
 rapport gain sur effort. Rien ici n'est en cours.
 
+## Correctifs MCTS et rebalayage de virtual loss
+
+La revue statique du 2026-09-21 a produit dix correctifs et leurs tests
+(`superpowers/plans/2026-09-21-audit-correctifs-mcts.md`). Deux constats commandent la
+suite :
+
+- R1, réservation pondérée : dès que l'amplitude du virtual loss dépasse 1, chaque
+  descente laissait un résidu permanent de +1 sur les noeuds du chemin. Le balayage de
+  divergence du 2026-09-19 est donc non interprétable dans les deux sens, et R1
+  conditionne tout réglage futur de la recherche. C'est aussi la cause probable du rejet
+  de `virtual_loss = 2`, qui mérite une campagne propre.
+- R9, fin de lot self-play : `generate_games` démarre C + N - 1 parties et abandonne les
+  C - 1 dernières à la destruction du gestionnaire, avec un biais plausible vers les
+  parties courtes dans les données collectées. À quantifier avant de conclure.
+
+- [ ] Traiter R2 puis R1 du plan de correctifs, prérequis du rebalayage.
+- [ ] Exécuter le rebalayage de virtual loss après R1 :
+      `superpowers/plans/2026-09-21-rebalayage-virtual-loss.md`.
+- [ ] Mesurer et décider R9-B (fin de génération self-play) après le diagnostic R9-A :
+      `superpowers/plans/2026-09-21-fin-de-lot-self-play.md`.
+
 ## Prochaine tâche décidée
 
 **Banc de test sur puzzles.** Mesurer la qualité recherche + évaluation à nombre de

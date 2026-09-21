@@ -10,6 +10,8 @@
 
 **Références :** les deux reviews de cette conversation, `docs/superpowers/specs/2026-09-14-mcts-multicore-design.md`, `docs/superpowers/plans/2026-09-16-mcts-multicore-waves.md`, `docs/superpowers/specs/2026-09-15-tt-evaluation-key-design.md`.
 
+**Plans de suivi :** le rebalayage de divergence apres R1 est planifie dans `docs/superpowers/plans/2026-09-21-rebalayage-virtual-loss.md` ; la fin de lot self-play de R9 est planifiee dans `docs/superpowers/plans/2026-09-21-fin-de-lot-self-play.md`. Ces deux plans remplacent des mesures ou des explications non interpretables, ils ne doublonnent pas les correctifs de ce document.
+
 **Base relue :** commit `f3ae347`, avec notamment `973a1bd` pour le changement de taille du pool self-play. Les noms de fonctions sont plus durables que les numéros de ligne.
 
 **Statut du document :** recommandations issues d'une lecture statique. Aucun test, compilation, entraînement, benchmark ou programme du projet n'a été exécuté pour le rédiger. Aucun correctif n'est appliqué par ce document. Les scénarios proposés restent à implémenter puis à exécuter.
@@ -175,6 +177,7 @@ Ne pas corriger en remettant directement `n_in_flight` à zéro : plusieurs prop
 - [ ] Le défaut est détecté avant correction pour au moins `units = 2`.
 - [ ] Les résultats de tuning obtenus avec `virtual_loss > 1` sont marqués comme non interprétables en l'état. Ne pas les présenter comme une comparaison fiable de qualité.
 - [ ] Aucune nouvelle campagne de tuning n'est lancée automatiquement.
+- [ ] Le rebalayage de `virtual_loss` après cette correction est planifié dans `docs/superpowers/plans/2026-09-21-rebalayage-virtual-loss.md` : configurations re-mesurées, barrière qualité, propagation au self-play. Il remplace le balayage de septembre, sans le réécrire.
 
 ## 4. R2 : rendre les invariants et le harnais fiables
 
@@ -551,6 +554,8 @@ Ainsi, C = 256 et N = 512 donnent 767 départs pour 512 résultats récupérés.
 Attention au dénominateur des mesures : `GameResult.total_real_moves` inclut l'historique de la partie source d'un puzzle. Ce n'est pas automatiquement le nombre de nouveaux demi-coups générés pendant cet appel. Pour une mesure de génération utile, compter séparément les nouveaux coups, les exemples retenus et, le cas échéant, le rejeu de l'historique. Ne pas rebaptiser un compteur existant sans adapter sa définition.
 
 ### R9-B : recommandation de correction pour une génération finie
+
+Plan de suivi : `docs/superpowers/plans/2026-09-21-fin-de-lot-self-play.md` (compteurs de diagnostic, caractérisation du comportement actuel, génération finie, mesure avant/après et décision). Le présent document fixe le contrat et les tests ; le plan de suivi décrit l'exécution.
 
 Recommandation : démarrer exactement N parties, renouveler les places tant qu'il reste des départs à effectuer, puis laisser finir les parties restantes. Ce choix simplifie le contrat et évite de jeter des parties engagées.
 
