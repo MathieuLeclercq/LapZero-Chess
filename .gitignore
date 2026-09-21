@@ -15,6 +15,10 @@ python_src/tests/__pycache__
 __pycache__/
 .pytest_cache/
 
+# Checkpoint iter436, modele courant (42 Mio) : poids distribues hors depot,
+# comme les ONNX de checkpoints_onnx. Les checkpoints anterieurs restent suivis.
+python_src/checkpoints/2026_04_30_09h53_iter436_unsupervised.pt
+
 # Journal par coup du bot UCI, regenere a chaque partie.
 python_src/uci_stats.log
 lichess_bot/
