@@ -27,6 +27,14 @@ public:
     void release() noexcept;
 
 private:
-    std::vector<MCTSNode*> m_path;
+    // Une entree par noeud reserve, avec le nombre exact d'unites posees a cet
+    // appel : les liberer par une constante globale desynchroniserait les
+    // compteurs des que l'amplitude du virtual loss depasse 1.
+    struct Reservation {
+        MCTSNode* node;
+        std::uint32_t units;
+    };
+
+    std::vector<Reservation> m_path;
     MCTSNode* m_owned_pending = nullptr;
 };

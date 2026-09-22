@@ -104,7 +104,122 @@ void test_move_assignment_releases_previous_reservation() {
                  "move assignment lost new path");
 }
 
-void test_only_one_concurrent_guard_owns_pending() {
+void test_weighted_reservation_returns_exactly() {
+    for (std::uint32_t units : {1u, 2u, 3u, 8u, 32u}) {
+        MCTSNode root(0.0f);
+        MCTSNode child(1.0f, 8, &root);
+        root.visit_count = 4;
+        root.total_value = 1.0f;
+        const int visites_avant = root.visit_count;
+        const float valeur_avant = root.total_value;
+        const float q_avant = root.q_value();
+        {
+            PathReservation reservation;
+            reservation.reserve(&root, units);
+            reservation.reserve(&child, units);
+            require_test(root.n_in_flight.load() == units,
+                         ("root got the wrong units for amplitude "
+                          + std::to_string(units)).c_str());
+            require_test(child.n_in_flight.load() == units,
+                         ("child got the wrong units for amplitude "
+                          + std::to_string(units)).c_str());
+        }
+        require_test(root.n_in_flight.load() == 0,
+                     ("root leaked units for amplitude "
+                      + std::to_string(units)).c_str());
+        require_test(child.n_in_flight.load() == 0,
+                     ("child leaked units for amplitude "
+                      + std::to_string(units)).c_str());
+        require_test(root.visit_count == visites_avant
+                         && root.total_value == valeur_avant
+                         && root.q_value() == q_avant,
+                     "weighted reservation changed visits or Q");
+    }
+}
+
+void test_concurrent_owners_subtract_their_own_units() {
+    MCTSNode root(0.0f);
+    PathReservation premier;
+    PathReservation second;
+    premier.reserve(&root, 2);
+    second.reserve(&root, 3);
+
+    require_test(root.n_in_flight.load() == 5,
+                 "two owners did not accumulate their units");
+    premier.release();
+    require_test(root.n_in_flight.load() == 3,
+                 "first release removed the wrong unit count");
+    second.release();
+    require_test(root.n_in_flight.load() == 0,
+                 "second release removed the wrong unit count");
+}
+
+void test_same_guard_accumulates_units_per_node() {
+    MCTSNode first(0.0f);
+    MCTSNode second(0.0f);
+    PathReservation reservation;
+    reservation.reserve(&first, 2);
+    reservation.reserve(&second, 8);
+    reservation.reserve(&first, 3);
+
+    require_test(first.n_in_flight.load() == 5,
+                 "same node did not accumulate 2 then 3 units");
+    require_test(second.n_in_flight.load() == 8,
+                 "second node did not receive 8 units");
+    reservation.release();
+    require_test(first.n_in_flight.load() == 0,
+                 "same node leaked its weighted units");
+    require_test(second.n_in_flight.load() == 0,
+                 "second node leaked its weighted units");
+}
+
+void test_weighted_move_and_exception_release_everything() {
+    MCTSNode root(0.0f);
+    MCTSNode child(1.0f, 8, &root);
+
+    try {
+        PathReservation first;
+        first.reserve(&root, 3);
+        first.reserve(&child, 5);
+        require_test(first.try_claim(&child), "claim failed");
+        PathReservation moved(std::move(first));
+        require_test(root.n_in_flight.load() == 3,
+                     "move duplicated the root units");
+        require_test(child.n_in_flight.load() == 5,
+                     "move duplicated the child units");
+        throw std::runtime_error("test exception");
+    }
+    catch (const std::runtime_error&) {
+    }
+
+    require_test(root.n_in_flight.load() == 0,
+                 "root leaked weighted units after exception");
+    require_test(child.n_in_flight.load() == 0,
+                 "child leaked weighted units after exception");
+    require_test(child.state.load() == NodeState::Unexpanded,
+                 "unpublished Pending leaked after exception");
+}
+
+void test_weighted_move_assignment_releases_previous_units() {
+    MCTSNode old_root(0.0f);
+    MCTSNode new_root(0.0f);
+    PathReservation destination;
+    destination.reserve(&old_root, 4);
+    PathReservation source;
+    source.reserve(&new_root, 7);
+
+    destination = std::move(source);
+
+    require_test(old_root.n_in_flight.load() == 0,
+                 "move assignment leaked the previous weighted path");
+    require_test(new_root.n_in_flight.load() == 7,
+                 "move assignment lost the new weighted path");
+    destination.release();
+    require_test(new_root.n_in_flight.load() == 0,
+                 "moved guard leaked its units");
+}
+
+void test_only_one_concurrent_guard_owns_pending(std::uint32_t units) {
     constexpr int THREADS = 8;
     MCTSNode root(0.0f);
     Gate start(THREADS);
@@ -115,7 +230,7 @@ void test_only_one_concurrent_guard_owns_pending() {
     for (int i = 0; i < THREADS; ++i) {
         threads.emplace_back([&]() {
             PathReservation reservation;
-            reservation.reserve(&root);
+            reservation.reserve(&root, units);
             start.wait();
             const bool won = reservation.try_claim(&root);
             if (won) {
@@ -133,7 +248,8 @@ void test_only_one_concurrent_guard_owns_pending() {
 
     require_test(winners.load() == 1, "Pending had multiple owners");
     require_test(root.n_in_flight.load() == 0,
-                 "concurrent reservations leaked");
+                 ("concurrent reservations leaked with units "
+                  + std::to_string(units)).c_str());
     require_test(root.state.load() == NodeState::Expanded,
                  "loser rolled back winner publication");
 }
@@ -145,7 +261,13 @@ int main() {
         test_move_and_exception_release_everything();
         test_publish_keeps_state_and_releases_path();
         test_move_assignment_releases_previous_reservation();
-        test_only_one_concurrent_guard_owns_pending();
+        test_only_one_concurrent_guard_owns_pending(1);
+        test_only_one_concurrent_guard_owns_pending(3);
+        test_weighted_reservation_returns_exactly();
+        test_concurrent_owners_subtract_their_own_units();
+        test_same_guard_accumulates_units_per_node();
+        test_weighted_move_and_exception_release_everything();
+        test_weighted_move_assignment_releases_previous_units();
         return 0;
     }
     catch (const std::exception& error) {

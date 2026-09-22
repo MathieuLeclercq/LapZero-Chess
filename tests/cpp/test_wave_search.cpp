@@ -308,6 +308,75 @@ void test_gpu_phase_is_quiet_and_update_root_waits_for_session() {
     require_quiescent(mcts.inspect_tree());
 }
 
+void test_weighted_virtual_loss_leaves_no_residue() {
+    constexpr std::array<int, 4> AMPLITUDES{1, 2, 3, 8};
+    constexpr std::array<int, 3> WORKERS{1, 4, 8};
+    constexpr std::array<int, 2> BUDGETS{3, 17};
+
+    for (int workers : WORKERS) {
+        for (int virtual_loss : AMPLITUDES) {
+            ControlledEvaluator evaluator;
+            MCTS mcts(&evaluator, 8192, 0);
+            mcts.set_tuning(SearchTuning{virtual_loss, 0.30f, 4});
+            Chessboard board = startup_board();
+
+            for (int budget : BUDGETS) {
+                const TreeReport before = mcts.inspect_tree();
+                const SearchCounters counters_before = mcts.get_counters();
+                mcts.step_analysis(board, budget, 1.4f, 8, workers);
+                const TreeReport after = mcts.inspect_tree();
+                const SearchCounters counters_after = mcts.get_counters();
+
+                require_test(
+                    after.root_visits - before.root_visits
+                        == static_cast<std::uint64_t>(budget),
+                    "weighted virtual loss changed the visit budget");
+                require_test(
+                    counters_after.completed_simulations
+                        - counters_before.completed_simulations
+                        == static_cast<std::uint64_t>(budget),
+                    "completed_simulations does not match budget");
+                require_quiescent(after);
+                require_test(board.toFEN() == startup_board().toFEN(),
+                             "weighted search changed the input board");
+            }
+        }
+    }
+}
+
+void test_weighted_reservations_survive_failure_then_recover() {
+    ControlledEvaluator evaluator;
+    evaluator.fail_on_call = 2;
+    MCTS mcts(&evaluator, 8192, 0);
+    mcts.set_tuning(SearchTuning{3, 0.30f, 4});
+    Chessboard board = startup_board();
+
+    bool failed = false;
+    try {
+        mcts.step_analysis(board, 8, 1.4f, 8, 8);
+    }
+    catch (const std::runtime_error&) {
+        failed = true;
+    }
+    require_test(failed, "controlled evaluator failure was swallowed");
+    require_quiescent(mcts.inspect_tree());
+
+    evaluator.fail_on_call = 0;
+    const TreeReport before = mcts.inspect_tree();
+    const SearchCounters counters_before = mcts.get_counters();
+    mcts.step_analysis(board, 3, 1.4f, 3, 2);
+    const TreeReport after = mcts.inspect_tree();
+    const SearchCounters counters_after = mcts.get_counters();
+
+    require_quiescent(after);
+    require_test(after.root_visits - before.root_visits == 3,
+                 "search did not recover after weighted failure");
+    require_test(
+        counters_after.completed_simulations
+            - counters_before.completed_simulations == 3,
+        "recovery did not complete the budget");
+}
+
 }  // namespace
 
 int main() {
@@ -319,6 +388,8 @@ int main() {
         test_fixed_batch_pads_wave_calls_and_keeps_budget();
         test_fixed_batch_pads_mono_batch();
         test_tuning_defaults_validation_and_propagation();
+        test_weighted_virtual_loss_leaves_no_residue();
+        test_weighted_reservations_survive_failure_then_recover();
         test_gpu_phase_is_quiet_and_update_root_waits_for_session();
         return 0;
     }

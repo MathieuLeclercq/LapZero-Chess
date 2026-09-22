@@ -30,9 +30,9 @@ void PathReservation::reserve(MCTSNode* node, std::uint32_t units) {
     if (node == nullptr || units == 0) {
         return;
     }
-    // Enregistrer d'abord le pointeur : si le vecteur ne peut pas grandir,
+    // Enregistrer d'abord l'entree : si le vecteur ne peut pas grandir,
     // aucun compteur n'a encore ete modifie.
-    m_path.push_back(node);
+    m_path.push_back(Reservation{node, units});
     node->n_in_flight.fetch_add(units, std::memory_order_relaxed);
 }
 
@@ -67,8 +67,9 @@ void PathReservation::release() noexcept {
         m_owned_pending = nullptr;
     }
 
-    for (MCTSNode* node : m_path) {
-        node->n_in_flight.fetch_sub(1, std::memory_order_relaxed);
+    for (const Reservation& reservation : m_path) {
+        reservation.node->n_in_flight.fetch_sub(
+            reservation.units, std::memory_order_relaxed);
     }
     m_path.clear();
 }

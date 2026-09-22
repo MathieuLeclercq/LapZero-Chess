@@ -133,6 +133,8 @@ Une TT de 3 entrées sert à provoquer des collisions. Une TT de 8192 entrées c
 
 ## 3. R1 : libérer exactement les unités réservées
 
+**Statut (2026-09-21) : fait et validé.** `PathReservation` enregistre le nombre exact d'unités par entrée de chemin et `release()` les soustrait une par une. Vérification : tests pondérés 1, 2, 3, 8 et 32 unités, propriétaires simultanés, déplacements et exceptions, recherches réelles aux amplitudes 1, 2, 3 et 8 avec workers 1, 4 et 8, échec d'évaluateur à amplitude 3 puis reprise, et passage réel sur les trois positions avec `--virtual-loss 3 --worker-counts 8` (zéro nœud en vol). Détection par mutation prouvée. Commit : `Libere exactement les unites reservees`.
+
 ### Constat et portée
 
 Dans `src/mcts_reservation.cpp`, `PathReservation::reserve(node, units)` ajoute `units` à `n_in_flight`, mais ne conserve que le pointeur du nœud. `release()` retire ensuite 1 par entrée.
@@ -173,11 +175,11 @@ Ne pas corriger en remettant directement `n_in_flight` à zéro : plusieurs prop
 
 ### Acceptation et historique des mesures
 
-- [ ] Tous les tests pondérés passent sans modifier la définition d'UCB.
-- [ ] Le défaut est détecté avant correction pour au moins `units = 2`.
-- [ ] Les résultats de tuning obtenus avec `virtual_loss > 1` sont marqués comme non interprétables en l'état. Ne pas les présenter comme une comparaison fiable de qualité.
-- [ ] Aucune nouvelle campagne de tuning n'est lancée automatiquement.
-- [ ] Le rebalayage de `virtual_loss` après cette correction est planifié dans `docs/superpowers/plans/2026-09-21-rebalayage-virtual-loss.md` : configurations re-mesurées, barrière qualité, propagation au self-play. Il remplace le balayage de septembre, sans le réécrire.
+- [x] Tous les tests pondérés passent sans modifier la définition d'UCB.
+- [x] Le défaut est détecté avant correction pour au moins `units = 2`. Vérifié par mutation : libération à 1 unité, `reservation_tests` échoue sur « concurrent reservations leaked with units 3 » et `wave_search_tests` sur « tree retained in-flight nodes », puis repasse après restauration.
+- [x] Les résultats de tuning obtenus avec `virtual_loss > 1` sont marqués comme non interprétables en l'état. Ne pas les présenter comme une comparaison fiable de qualité. Avertissement ajouté à la section 4 du rapport du coût de calcul.
+- [x] Aucune nouvelle campagne de tuning n'est lancée automatiquement.
+- [x] Le rebalayage de `virtual_loss` après cette correction est planifié dans `docs/superpowers/plans/2026-09-21-rebalayage-virtual-loss.md` : configurations re-mesurées, barrière qualité, propagation au self-play. Il remplace le balayage de septembre, sans le réécrire.
 
 ## 4. R2 : rendre les invariants et le harnais fiables
 

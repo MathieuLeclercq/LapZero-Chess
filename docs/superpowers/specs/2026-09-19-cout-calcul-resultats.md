@@ -80,6 +80,12 @@ parametrables (`MCTS::set_tuning`, options `--virtual-loss`, `--fpu`,
 `--collision-attempts` des bancs, `--slices` pour decouper la recherche). Balayage aux
 tranches de 64, workers 8, lot fixe, 6 observations par position :
 
+**Avertissement du 2026-09-21.** Les deux candidats a amplitude 2 ont ete mesures alors
+que `PathReservation` laissait +1 de virtual loss permanent sur chaque noeud traverse des
+que l'amplitude depassait 1 (defaut R1, corrige depuis). Le rejet n'est donc ni confirme
+ni infirme par cette campagne : le balayage propre est planifie dans
+`2026-09-21-rebalayage-virtual-loss.md`. Les chiffres ci-dessous ne sont pas reecrits.
+
 | config | ouverture | milieu | finale | collisions milieu |
 |---|---|---|---|---|
 | defaut | 1902 | 1458 | 1749 | 3294 |
