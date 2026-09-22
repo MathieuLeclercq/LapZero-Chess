@@ -602,6 +602,8 @@ Alternative possible, hors de ce lot : conserver un gestionnaire persistant et s
 
 ## 12. R10 : nettoyer les réservations si la fusion d'une vague échoue
 
+**Statut (2026-09-21) : fait et validé.** `WaveResultsGuard` vide les résultats des contextes à toute sortie de `collect_wave`, fusion comprise, après le retour de `SearchExecutor::run` (aucun worker ne touche plus aux résultats). La capacité maximale de `merged` est réservée avant la collecte, donc le transfert ne peut plus allouer. Deux hooks de test (`before_merge`, `after_transfer`) permettent d'injecter `std::bad_alloc` sur une instance MCTS sans l'exposer aux bindings. Vérification : nettoyage après échec de fusion, transfert partiel, panne par `step_analysis` puis reprise et `update_root`, panne par `mcts_search` avec preuve `pending_results == 0` avant destruction de la racine locale, unités pondérées à 3. Détection par mutation prouvée. Commit : `Nettoie les reservations si la fusion d une vague echoue`.
+
 ### Chaîne de défaillance
 
 Dans `collect_wave`, le `try/catch` protège l'exécution des workers et nettoie leurs résultats si elle échoue. La construction du vecteur `merged`, notamment son `reserve`, vient ensuite hors de cette protection.
@@ -619,14 +621,14 @@ Sur `step_analysis`, la racine persiste d'abord, mais une remise à zéro ou une
 
 ### Implémentation recommandée
 
-- [ ] Étendre la garantie de nettoyage à toute la durée de `collect_wave`, fusion comprise.
-- [ ] Recommandation : un garde local nettoie les `results` des contextes participants à toute sortie. Après transfert réussi, les conteneurs sont vides ou ne contiennent que des objets déplacés sans propriété.
-- [ ] Le nettoyage ne doit intervenir qu'après la fin de tous les workers. Ne pas libérer un chemin pendant qu'un worker le parcourt encore.
-- [ ] Réserver éventuellement la capacité maximale de `merged` avant la collecte pour déplacer l'allocation risquée avant l'acquisition de réservations. C'est une réduction du risque, pas un substitut au nettoyage général.
-- [ ] Préserver les déplacements `noexcept` de `PathReservation` et vérifier ceux des objets qui la contiennent.
-- [ ] Sur une exception pendant le transfert, les éléments déjà transférés sont nettoyés par le vecteur local et les autres par les contextes. Aucune réservation ne doit être possédée deux fois.
-- [ ] Ne pas se limiter à un nettoyage dans le destructeur de `MCTS` : dans `mcts_search`, la racine locale peut être détruite bien avant lui.
-- [ ] Ne pas masquer `std::bad_alloc` en renvoyant un résultat de recherche partiel comme s'il était complet.
+- [x] Étendre la garantie de nettoyage à toute la durée de `collect_wave`, fusion comprise.
+- [x] Recommandation : un garde local nettoie les `results` des contextes participants à toute sortie. Après transfert réussi, les conteneurs sont vides ou ne contiennent que des objets déplacés sans propriété.
+- [x] Le nettoyage ne doit intervenir qu'après la fin de tous les workers. Ne pas libérer un chemin pendant qu'un worker le parcourt encore.
+- [x] Réserver éventuellement la capacité maximale de `merged` avant la collecte pour déplacer l'allocation risquée avant l'acquisition de réservations. C'est une réduction du risque, pas un substitut au nettoyage général.
+- [x] Préserver les déplacements `noexcept` de `PathReservation` et vérifier ceux des objets qui la contiennent.
+- [x] Sur une exception pendant le transfert, les éléments déjà transférés sont nettoyés par le vecteur local et les autres par les contextes. Aucune réservation ne doit être possédée deux fois.
+- [x] Ne pas se limiter à un nettoyage dans le destructeur de `MCTS` : dans `mcts_search`, la racine locale peut être détruite bien avant lui.
+- [x] Ne pas masquer `std::bad_alloc` en renvoyant un résultat de recherche partiel comme s'il était complet.
 
 ### Injection de panne recommandée
 
@@ -650,10 +652,10 @@ Pour atteindre les points d'entrée publics, prolonger l'accès de test existant
 
 ### Acceptation
 
-- [ ] Aucun résultat persistant ne possède une réservation après le retour exceptionnel de la collecte.
-- [ ] La durée de vie de toute racine couvre la libération des pointeurs qui la référencent.
-- [ ] Les erreurs de workers et les erreurs de fusion disposent de la même garantie de nettoyage.
-- [ ] Aucune panne réelle de mémoire machine n'est nécessaire pour tester le cas.
+- [x] Aucun résultat persistant ne possède une réservation après le retour exceptionnel de la collecte.
+- [x] La durée de vie de toute racine couvre la libération des pointeurs qui la référencent.
+- [x] Les erreurs de workers et les erreurs de fusion disposent de la même garantie de nettoyage.
+- [x] Aucune panne réelle de mémoire machine n'est nécessaire pour tester le cas.
 
 ## 13. Validation finale des correctifs, à planifier après leur implémentation
 
@@ -718,8 +720,8 @@ Pour chaque lot, fournir :
 
 ### Checklist de couverture globale
 
-- [ ] R1 : unités de virtual loss équilibrées sur sorties normales et exceptionnelles.
-- [ ] R2 : invariants complets, options réellement transmises et statut d'échec fiable.
+- [x] R1 : unités de virtual loss équilibrées sur sorties normales et exceptionnelles.
+- [x] R2 : invariants complets, options réellement transmises et statut d'échec fiable.
 - [ ] R3 : mat à 100 correctement évalué dans toutes les recherches et le self-play.
 - [ ] R4 : bruit présent sur TT hit, une fois par coup, sans pollution du cache.
 - [ ] R5 : sorties invalides rejetées avant accès et insertion, reprise propre.
@@ -727,6 +729,6 @@ Pour chaque lot, fournir :
 - [ ] R7 : totalité des coups conservée, jamais de hit de politique tronquée.
 - [ ] R8 : identité UCI fondée sur la base et les coups, réutilisation normale conservée.
 - [ ] R9 : rapports corrigés et décision explicite sur la collecte des parties engagées.
-- [ ] R10 : aucune réservation ne survit à l'arbre qu'elle référence après échec de fusion.
+- [x] R10 : aucune réservation ne survit à l'arbre qu'elle référence après échec de fusion.
 
 Ne pas clore un lot uniquement parce que le bot joue une bonne partie. Ne pas refuser un correctif démontré au motif que le cas est rare. L'objectif est de préserver le bon comportement courant tout en fermant les cas limites et en rendant les preuves de validation plus solides.

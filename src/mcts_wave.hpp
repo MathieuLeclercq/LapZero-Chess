@@ -38,4 +38,9 @@ struct WorkerContext {
 struct WaveTestHooks {
     std::function<void(MCTSNode*)> before_claim;
     std::function<void(MCTSNode*)> before_tt_publish;
+    // Injection de panne de la fusion : appelee apres la collecte avant tout
+    // transfert, puis apres chaque resultat transfere vers le vecteur fusionne.
+    // La seconde permet de tester un transfert partiel.
+    std::function<void()> before_merge;
+    std::function<void(std::size_t)> after_transfer;
 };

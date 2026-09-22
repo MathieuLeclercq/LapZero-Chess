@@ -120,6 +120,10 @@ private:
     std::unique_ptr<SearchExecutor> m_search_executor;
     std::vector<WorkerContext> m_worker_contexts;
 
+    // Injection de panne des vagues, reservee aux tests. Nulle en production
+    // et non exposee dans les bindings.
+    const WaveTestHooks* m_wave_test_hooks = nullptr;
+
     // Atomiques parce que le self-play appelle advance_to_leaf depuis une region
     // OpenMP a 8 fils sur une instance de MCTS partagee
     // (selfplay_manager.cpp:376-387). L'ordre relache suffit : on ne lit ces

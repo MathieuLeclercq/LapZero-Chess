@@ -86,6 +86,33 @@ bool acquire_slot(std::atomic<std::size_t>& available) {
     return false;
 }
 
+// Les resultats d'un WorkerContext portent des reservations de chemin. A
+// toute sortie de collect_wave, y compris une exception pendant la fusion,
+// les contextes doivent etre vides : la racine locale de mcts_search est
+// detruite pendant la propagation, et un resultat abandonne garderait des
+// pointeurs et des unites en vol sur des noeuds liberes.
+class WaveResultsGuard {
+public:
+    WaveResultsGuard(std::vector<WorkerContext>& contexts,
+                     std::size_t worker_count)
+        : m_contexts(contexts), m_worker_count(worker_count) {}
+
+    WaveResultsGuard(const WaveResultsGuard&) = delete;
+    WaveResultsGuard& operator=(const WaveResultsGuard&) = delete;
+
+    ~WaveResultsGuard() {
+        // Contrat de SearchExecutor::run : aucun worker ne touche plus aux
+        // resultats quand run rend la main, exception comprise.
+        for (std::size_t id = 0; id < m_worker_count; ++id) {
+            m_contexts[id].results.clear();
+        }
+    }
+
+private:
+    std::vector<WorkerContext>& m_contexts;
+    std::size_t m_worker_count;
+};
+
 }  // namespace
 
 LeafWork MCTS::collect_wave_leaf(
@@ -288,48 +315,52 @@ std::vector<LeafWork> MCTS::collect_wave(
         static_cast<std::size_t>(m_tuning.collision_attempt_factor) * slots
         + worker_count;
 
-    try {
-        executor.run(worker_count, [&](std::size_t worker_id) {
-            try {
-                WorkerContext& context = contexts[worker_id];
-                while (!cancelled.load(std::memory_order_relaxed)
-                       && !worker_failed.load(std::memory_order_relaxed)) {
-                    if (!acquire_slot(available)) return;
-
-                    const std::size_t attempt =
-                        attempts.fetch_add(1, std::memory_order_relaxed);
-                    if (attempt >= max_attempts) {
-                        available.fetch_add(1, std::memory_order_relaxed);
-                        return;
-                    }
-
-                    LeafWork work = collect_wave_leaf(
-                        root, context, c_puct, cancelled, hooks);
-                    if (work.kind == LeafKind::Collision) {
-                        available.fetch_add(1, std::memory_order_relaxed);
-                        continue;
-                    }
-                    context.results.push_back(std::move(work));
-                }
-            }
-            catch (...) {
-                worker_failed.store(true, std::memory_order_relaxed);
-                throw;
-            }
-        });
-    }
-    catch (...) {
-        for (std::size_t id = 0; id < worker_count; ++id) {
-            contexts[id].results.clear();
-        }
-        throw;
-    }
-
+    // Capacite maximale reservee avant la collecte : le risque d'allocation se
+    // place avant l'acquisition des reservations, et les transferts suivants
+    // ne peuvent plus allouer.
     std::vector<LeafWork> merged;
-    merged.reserve(slots - available.load(std::memory_order_relaxed));
+    merged.reserve(slots);
+    WaveResultsGuard guard(contexts, worker_count);
+
+    executor.run(worker_count, [&](std::size_t worker_id) {
+        try {
+            WorkerContext& context = contexts[worker_id];
+            while (!cancelled.load(std::memory_order_relaxed)
+                   && !worker_failed.load(std::memory_order_relaxed)) {
+                if (!acquire_slot(available)) return;
+
+                const std::size_t attempt =
+                    attempts.fetch_add(1, std::memory_order_relaxed);
+                if (attempt >= max_attempts) {
+                    available.fetch_add(1, std::memory_order_relaxed);
+                    return;
+                }
+
+                LeafWork work = collect_wave_leaf(
+                    root, context, c_puct, cancelled, hooks);
+                if (work.kind == LeafKind::Collision) {
+                    available.fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
+                context.results.push_back(std::move(work));
+            }
+        }
+        catch (...) {
+            worker_failed.store(true, std::memory_order_relaxed);
+            throw;
+        }
+    });
+
+    if (hooks && hooks->before_merge) {
+        hooks->before_merge();
+    }
+
     for (std::size_t id = 0; id < worker_count; ++id) {
         for (LeafWork& work : contexts[id].results) {
             merged.push_back(std::move(work));
+            if (hooks && hooks->after_transfer) {
+                hooks->after_transfer(merged.size() - 1);
+            }
         }
         contexts[id].results.clear();
     }
@@ -386,7 +417,8 @@ void MCTS::run_search_waves(
             work = collect_wave(
                 root, c_puct, slots,
                 static_cast<std::size_t>(worker_count),
-                *m_search_executor, m_worker_contexts, cancelled);
+                *m_search_executor, m_worker_contexts, cancelled,
+                m_wave_test_hooks);
         }
         catch (...) {
             cancelled.store(true, std::memory_order_relaxed);

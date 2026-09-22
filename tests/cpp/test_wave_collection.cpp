@@ -434,6 +434,167 @@ void test_captured_tensor_matches_replayed_real_history() {
     }
 }
 
+void require_no_pending_result(const std::vector<WorkerContext>& contexts) {
+    for (const WorkerContext& context : contexts) {
+        require_test(context.results.empty(),
+                     "a worker context kept a collected result");
+    }
+}
+
+void require_no_residue(const MCTSNode* node) {
+    require_test(node->n_in_flight.load() == 0,
+                 "a node kept in-flight units");
+    require_test(node->state.load() != NodeState::Pending,
+                 "a node stayed Pending");
+    for (const auto& child : node->children) {
+        require_no_residue(child.second.get());
+    }
+}
+
+void test_merge_failure_releases_every_collected_reservation() {
+    ControlledEvaluator evaluator;
+    MCTS mcts(&evaluator, 8192, 0);
+    mcts.set_tuning(SearchTuning{3, 0.30f, 4});
+    Chessboard board = startup_board();
+    auto root = expanded_root(mcts, board, 64);
+    SearchExecutor executor;
+    std::vector<WorkerContext> contexts(2);
+    for (auto& context : contexts) context.board = board;
+    std::atomic<bool> cancelled{false};
+    WaveTestHooks hooks;
+    hooks.before_merge = [&]() {
+        const std::size_t collected =
+            contexts[0].results.size() + contexts[1].results.size();
+        require_test(collected >= 2,
+                     "merge fixture collected fewer than two leaves");
+        throw std::bad_alloc();
+    };
+
+    bool failed = false;
+    try {
+        (void)MCTSTestAccess::collect_wave(
+            mcts, root.get(), 1.4f, 4, 2, executor, contexts, cancelled,
+            &hooks);
+    }
+    catch (const std::bad_alloc&) {
+        failed = true;
+    }
+
+    require_test(failed, "merge failure was swallowed");
+    require_no_pending_result(contexts);
+    require_no_residue(root.get());
+    for (const WorkerContext& context : contexts) {
+        require_test(context.board.toFEN() == startup_board().toFEN(),
+                     "merge failure did not restore a worker board");
+    }
+}
+
+void test_partial_transfer_failure_releases_both_owners() {
+    ControlledEvaluator evaluator;
+    MCTS mcts(&evaluator, 8192, 0);
+    mcts.set_tuning(SearchTuning{3, 0.30f, 4});
+    Chessboard board = startup_board();
+    auto root = expanded_root(mcts, board, 64);
+    SearchExecutor executor;
+    std::vector<WorkerContext> contexts(2);
+    for (auto& context : contexts) context.board = board;
+    std::atomic<bool> cancelled{false};
+    std::size_t transferts = 0;
+    WaveTestHooks hooks;
+    hooks.after_transfer = [&](std::size_t index) {
+        ++transferts;
+        if (index == 0) throw std::bad_alloc();
+    };
+
+    bool failed = false;
+    try {
+        (void)MCTSTestAccess::collect_wave(
+            mcts, root.get(), 1.4f, 4, 2, executor, contexts, cancelled,
+            &hooks);
+    }
+    catch (const std::bad_alloc&) {
+        failed = true;
+    }
+
+    require_test(failed, "partial transfer failure was swallowed");
+    require_test(transferts == 1,
+                 "partial transfer did not stop at the first result");
+    require_no_pending_result(contexts);
+    require_no_residue(root.get());
+}
+
+void test_merge_failure_through_step_analysis_recovers() {
+    ControlledEvaluator evaluator;
+    MCTS mcts(&evaluator, 8192, 0);
+    Chessboard board = startup_board();
+    WaveTestHooks hooks;
+    hooks.before_merge = []() { throw std::bad_alloc(); };
+    MCTSTestAccess::set_wave_hooks(mcts, &hooks);
+
+    bool failed = false;
+    try {
+        mcts.step_analysis(board, 8, 1.4f, 8, 4);
+    }
+    catch (const std::bad_alloc&) {
+        failed = true;
+    }
+
+    require_test(failed, "merge failure through step_analysis was swallowed");
+    const TreeReport rest = mcts.inspect_tree();
+    require_test(rest.en_vol == 0 && rest.pending == 0
+                     && rest.violations == 0,
+                 "step_analysis left residue after merge failure");
+    require_test(board.toFEN() == startup_board().toFEN(),
+                 "step_analysis changed the input board");
+
+    MCTSTestAccess::set_wave_hooks(mcts, nullptr);
+    mcts.reset_analysis();
+    mcts.step_analysis(board, 3, 1.4f, 3, 2);
+    require_test(MCTSTestAccess::pending_results(mcts) == 0,
+                 "contexts kept results across recovery");
+    const TreeReport recovered = mcts.inspect_tree();
+    require_test(recovered.en_vol == 0 && recovered.pending == 0
+                     && recovered.violations == 0,
+                 "recovery search left residue");
+    require_test(recovered.root_visits == 3,
+                 "recovery search did not complete its budget");
+    const std::vector<int> legal = board.getLegalMoveIndices();
+    mcts.update_root(legal.front());
+}
+
+void test_merge_failure_in_mcts_search_keeps_instance_usable() {
+    ControlledEvaluator evaluator;
+    MCTS mcts(&evaluator, 8192, 0);
+    Chessboard board = startup_board();
+    WaveTestHooks hooks;
+    hooks.before_merge = []() { throw std::bad_alloc(); };
+    MCTSTestAccess::set_wave_hooks(mcts, &hooks);
+
+    bool failed = false;
+    try {
+        (void)mcts.mcts_search(board, 8, 1.4f, false, 8, 4);
+    }
+    catch (const std::bad_alloc&) {
+        failed = true;
+    }
+
+    require_test(failed, "merge failure in mcts_search was swallowed");
+    // La racine locale de mcts_search est detruite pendant la propagation :
+    // les contextes ne doivent plus posseder un seul resultat, meme sans
+    // arbre a inspecter.
+    require_test(MCTSTestAccess::pending_results(mcts) == 0,
+                 "mcts_search merge failure left owned results in contexts");
+    require_test(board.toFEN() == startup_board().toFEN(),
+                 "mcts_search merge failure changed the input board");
+
+    MCTSTestAccess::set_wave_hooks(mcts, nullptr);
+    const std::vector<float> policy =
+        mcts.mcts_search(board, 3, 1.4f, false, 3, 2);
+    require_test(!policy.empty(), "mcts_search did not recover");
+    require_test(MCTSTestAccess::pending_results(mcts) == 0,
+                 "recovery left results in contexts");
+}
+
 }  // namespace
 
 int main() {
@@ -445,6 +606,10 @@ int main() {
         test_wave_fills_beyond_worker_count_and_respects_budget();
         test_single_path_returns_a_partial_wave();
         test_captured_tensor_matches_replayed_real_history();
+        test_merge_failure_releases_every_collected_reservation();
+        test_partial_transfer_failure_releases_both_owners();
+        test_merge_failure_through_step_analysis_recovers();
+        test_merge_failure_in_mcts_search_keeps_instance_usable();
         return 0;
     }
     catch (const std::exception& error) {

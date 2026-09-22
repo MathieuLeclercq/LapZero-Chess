@@ -22,10 +22,25 @@ public:
             std::size_t slots, std::size_t worker_count,
             SearchExecutor& executor,
             std::vector<WorkerContext>& contexts,
-            const std::atomic<bool>& cancelled) {
+            const std::atomic<bool>& cancelled,
+            const WaveTestHooks* hooks = nullptr) {
         return mcts.collect_wave(
             root, c_puct, slots, worker_count, executor, contexts,
-            cancelled);
+            cancelled, hooks);
+    }
+
+    static void set_wave_hooks(MCTS& mcts, const WaveTestHooks* hooks) {
+        mcts.m_wave_test_hooks = hooks;
+    }
+
+    // Preuve directe que la collecte n'a laisse aucun resultat proprietaire
+    // dans les contextes persistants, meme sans arbre a inspecter.
+    static std::size_t pending_results(MCTS& mcts) {
+        std::size_t total = 0;
+        for (const WorkerContext& context : mcts.m_worker_contexts) {
+            total += context.results.size();
+        }
+        return total;
     }
 
     static void store(
