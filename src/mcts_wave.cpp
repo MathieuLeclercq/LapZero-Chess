@@ -1,6 +1,7 @@
 #include "mcts.hpp"
 
 #include "search_executor.hpp"
+#include "search_terminal.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -43,7 +44,7 @@ bool is_rule_terminal(const Chessboard& board) {
 }
 
 float terminal_value(Chessboard& board) {
-    if (is_rule_terminal(board)) return 0.0f;
+    if (is_rule_terminal(board)) return terminal_value_for(board);
     return board.isInCheck() ? -1.0f : 0.0f;
 }
 
@@ -162,7 +163,7 @@ LeafWork MCTS::collect_wave_leaf(
             }
             work.kind = LeafKind::Terminal;
             work.node = node;
-            work.terminal_value = 0.0f;
+            work.terminal_value = terminal_value(context.board);
             return work;
         }
 

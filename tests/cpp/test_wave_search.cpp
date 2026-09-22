@@ -473,6 +473,123 @@ void test_the_association_check_detects_a_permutation() {
     require_test(detected, "permuted batch rows were not detected");
 }
 
+void test_mate_at_hundred_is_a_loss_in_every_search_path() {
+    const char* mate_fen = "7k/6Q1/5K2/8/8/8/8/8 b - - 100 1";
+
+    // Sequentiel (batch 0), mono batche (batch 8, 1 worker) et vagues.
+    for (int batch : {0, 8}) {
+        for (int workers : {1, 4}) {
+            if (batch == 0 && workers != 1) continue;
+            ControlledEvaluator evaluator;
+            evaluator.fail_on_call = 1;  // aucune inference ne doit avoir lieu
+            MCTS mcts(&evaluator, 8192, 0);
+            Chessboard board;
+            board.loadFEN(mate_fen);
+
+            mcts.step_analysis(board, 8, 1.4f, batch, workers);
+
+            require_test(evaluator.batch_sizes.empty(),
+                         "a mated root called the evaluator");
+            const TreeReport report = mcts.inspect_tree();
+            require_quiescent(report);
+            require_test(report.root_visits == 8,
+                         "mated root lost simulations");
+            require_test(report.nodes == 1,
+                         "mated root grew children");
+            require_test(std::fabs(mcts.get_root_q() + 1.0f) < 1e-6f,
+                         "mate at the hundredth half-move was not a loss");
+            require_test(mcts.get_counters().terminal_hits == 8,
+                         "known terminal hits were not counted");
+        }
+    }
+}
+
+void test_mate_delivered_at_hundred_from_ninety_nine() {
+    ControlledEvaluator evaluator;
+    MCTS mcts(&evaluator, 8192, 0);
+    Chessboard board;
+    board.loadFEN("7k/8/5KQ1/8/8/8/8/8 w - - 99 1");
+
+    mcts.step_analysis(board, 200, 1.4f, 0, 1);
+
+    MCTSNode* root = MCTSTestAccess::analysis_root(mcts);
+    require_test(root != nullptr, "no analysis root");
+    MCTSNode* mat = nullptr;
+    for (const auto& child : root->children) {
+        Chessboard apres = board;
+        require_test(mcts.apply_move_by_index(apres, child.first),
+                     "could not replay a root move");
+        if (!apres.hasAnyLegalMove() && apres.isInCheck()) {
+            require_test(mat == nullptr, "the fixture has several mating moves");
+            mat = child.second.get();
+        }
+    }
+    require_test(mat != nullptr, "the mating move was not materialised");
+    require_test(mat->state.load() == NodeState::Terminal,
+                 "the mating move was not classified terminal");
+    require_test(std::fabs(mat->network_value + 1.0f) < 1e-6f,
+                 "mate at the hundredth half-move was not a loss");
+    require_test(mcts.get_root_q() > 0.0f,
+                 "the root did not score the mate for White");
+}
+
+void test_terminal_classification_prefers_mate_over_rule_draws() {
+    struct Cas {
+        const char* fen;
+        float attendu;
+        const char* message;
+    };
+    const Cas cas[] = {
+        {"7k/6Q1/5K2/8/8/8/8/8 b - - 100 1", -1.0f,
+         "mate at the hundredth half-move"},
+        {"7k/6Q1/5K2/8/8/8/8/8 b - - 0 1", -1.0f, "mate before 100"},
+        {"7k/5Q2/6K1/8/8/8/8/8 b - - 0 1", 0.0f, "stalemate"},
+        {"8/8/8/8/8/8/8/K6k w - - 0 1", 0.0f, "insufficient material"},
+        {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 100 1", 0.0f,
+         "true fifty-move draw"},
+        {"8/8/8/8/8/8/4r3/4K2k w - - 100 1", 0.0f, "check with an escape"},
+    };
+
+    for (const Cas& c : cas) {
+        ControlledEvaluator evaluator;
+        evaluator.fail_on_call = 1;
+        MCTS mcts(&evaluator, 8192, 0);
+        Chessboard board;
+        board.loadFEN(c.fen);
+        MCTSNode root(0.0f);
+
+        const float value = mcts.expand_node_single(&root, board);
+
+        require_test(std::fabs(value - c.attendu) < 1e-6f, c.message);
+        require_test(root.state.load() == NodeState::Terminal, c.message);
+        require_test(evaluator.batch_sizes.empty(),
+                     "a terminal position called the evaluator");
+    }
+}
+
+void test_repetition_is_a_draw_in_the_search() {
+    ControlledEvaluator evaluator;
+    evaluator.fail_on_call = 1;
+    MCTS mcts(&evaluator, 8192, 0);
+    Chessboard board;
+    board.setStartupPieces();
+    const char* moves[] = {"g1f3", "g8f6", "f3g1", "f6g8",
+                           "g1f3", "g8f6", "f3g1", "f6g8"};
+    for (const char* uci : moves) {
+        require_test(board.movePieceUCI(uci),
+                     "a scripted repetition move failed");
+    }
+
+    MCTSNode root(0.0f);
+    const float value = mcts.expand_node_single(&root, board);
+
+    require_test(std::fabs(value) < 1e-6f, "repetition was not a draw");
+    require_test(root.state.load() == NodeState::Terminal,
+                 "repetition was not classified terminal");
+    require_test(evaluator.batch_sizes.empty(),
+                 "a repetition called the evaluator");
+}
+
 void test_gpu_phase_is_quiet_and_update_root_waits_for_session() {
     ControlledEvaluator evaluator;
     EvaluationGate gate;
@@ -638,6 +755,10 @@ int main() {
         test_terminal_root_never_sends_a_wave();
         test_padding_sentinels_are_ignored_and_counters_stay_honest();
         test_the_association_check_detects_a_permutation();
+        test_mate_at_hundred_is_a_loss_in_every_search_path();
+        test_mate_delivered_at_hundred_from_ninety_nine();
+        test_terminal_classification_prefers_mate_over_rule_draws();
+        test_repetition_is_a_draw_in_the_search();
         test_gpu_phase_is_quiet_and_update_root_waits_for_session();
         return 0;
     }

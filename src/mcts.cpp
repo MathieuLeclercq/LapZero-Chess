@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "search_executor.hpp"
+#include "search_terminal.hpp"
 
 namespace {
 
@@ -301,6 +302,9 @@ std::pair<MCTSNode*, int> MCTS::select_leaf(MCTSNode* root, Chessboard& board,
         if (board.checkThreefoldRepetition() ||
             board.getHalfMoveClock() >= 100 ||
             board.checkInsufficientMaterial()) {
+            // Valeur initialisee avant de publier l'etat : le mat prime sur la
+            // nulle de regle quand les deux se recouvrent.
+            node->network_value = terminal_value_for(board);
             node->state.store(NodeState::Terminal,
                               std::memory_order_release);
             break;
@@ -316,15 +320,17 @@ float MCTS::expand_node_single(MCTSNode* node, Chessboard& board,
     if (!publication.try_claim(node)) {
         const NodeState state = node->state.load(std::memory_order_acquire);
         if (state == NodeState::Terminal) {
-            return 0.0f;
+            return terminal_value_for(board);
         }
         throw std::logic_error(
             "expand_node_single : noeud deja publie ou reserve");
     }
 
     if (board.checkThreefoldRepetition() || board.getHalfMoveClock() >= 100 || board.checkInsufficientMaterial()) {
+        const float terminal = terminal_value_for(board);
+        node->network_value = terminal;
         publication.publish(NodeState::Terminal);
-        return 0.0f;
+        return terminal;
     }
 
     EvaluationCacheKey key;
@@ -661,15 +667,7 @@ MCTSNode* MCTS::advance_to_leaf(MCTSNode* root, Chessboard& board,
 
     const NodeState state = node->state.load(std::memory_order_acquire);
     if (state == NodeState::Terminal) {
-        float value = 0.0f;
-        if (board.checkThreefoldRepetition() ||
-            board.getHalfMoveClock() >= 100 ||
-            board.checkInsufficientMaterial()) {
-            value = 0.0f;
-        }
-        else {
-            value = board.isInCheck() ? -1.0f : 0.0f;
-        }
+        const float value = terminal_value_for(board);
         node->network_value = value;
         backup(node, value);
         for (int i = 0; i < moves_played; i++) board.undoMove();

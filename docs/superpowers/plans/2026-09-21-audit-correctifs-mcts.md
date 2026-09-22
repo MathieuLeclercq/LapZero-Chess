@@ -229,6 +229,8 @@ Ne pas corriger en remettant directement `n_in_flight` à zéro : plusieurs prop
 
 ## 5. R3 : donner la priorité au mat sur la règle des 50 coups
 
+**Statut (2026-09-21) : fait et validé.** `terminal_value_for` dans `src/search_terminal.hpp` classe toute position terminale avec priorité au mat : chemin rapide sans génération de coups quand le roi n'est pas en échec, contrôle des coups légaux quand il l'est. Tous les chemins cités passent par lui : `select_leaf`, `expand_node_single`, `advance_to_leaf`, `expand_and_backup`, les deux branches terminales de `run_search`, et la branche de nulle de règle des vagues. La valeur est initialisée dans le nœud avant la publication de l'état. Vérification : mat chargé à la racine dans les trois chemins (Q racine -1, aucune inférence, aucun enfant, 8 `terminal_hits`), mat porté depuis 99 par une vraie recherche séquentielle (feuille -1, racine positive), classification des cas voisins (mat avant 100, pat, matériel insuffisant, nulle des 50 coups, échec avec échappatoire, répétition). Détection par mutation prouvée sur la priorité au mat. Commit : `Donne la priorite au mat sur la regle des 50 coups`.
+
 ### Constat
 
 La logique de `Chessboard` donne déjà la priorité au mat. Plusieurs chemins MCTS testent en revanche `half_move_clock >= 100` avant de déterminer qu'il n'existe aucun coup légal et que le roi est en échec. Ils peuvent donc remonter 0 au lieu de -1 pour le camp maté.
@@ -244,13 +246,13 @@ Le test Python existant `test_un_mat_au_centiemes_demi_coup_reste_un_mat` valide
 
 ### Implémentation recommandée
 
-- [ ] Définir une classification terminale cohérente : mat = -1 pour le joueur au trait, pat = 0, nulle de règle = 0.
-- [ ] Vérifier le mat avant de conclure à une nulle lorsque les conditions se chevauchent.
-- [ ] Réutiliser les coups légaux déjà calculés lorsqu'ils sont disponibles. Ne pas ajouter une génération complète de coups à chaque sélection d'un nœud déjà développé.
-- [ ] Pour le raccourci « nulle de règle », vérifier au minimum qu'il ne masque pas un mat, par exemple via échec et absence de coup légal. Conserver le chemin rapide pour les nulles qui ne peuvent pas être des mats.
-- [ ] Remplacer les décisions contradictoires dans TOUS les chemins cités, pas seulement dans les vagues.
-- [ ] Lorsqu'une valeur terminale est stockée dans le nœud, l'initialiser avant de publier son état comme disponible aux autres workers. Ne pas confondre cette valeur avec un Q déjà accumulé.
-- [ ] Préserver le comptage des visites et la convention de signe de `backup`.
+- [x] Définir une classification terminale cohérente : mat = -1 pour le joueur au trait, pat = 0, nulle de règle = 0.
+- [x] Vérifier le mat avant de conclure à une nulle lorsque les conditions se chevauchent.
+- [x] Réutiliser les coups légaux déjà calculés lorsqu'ils sont disponibles. Ne pas ajouter une génération complète de coups à chaque sélection d'un nœud déjà développé. Les sites qui viennent de calculer une liste vide gardent leur ternaire `isInCheck` ; le nouvel appel n'a lieu qu'après une nulle de règle et seulement si le roi est en échec.
+- [x] Pour le raccourci « nulle de règle », vérifier au minimum qu'il ne masque pas un mat, par exemple via échec et absence de coup légal. Conserver le chemin rapide pour les nulles qui ne peuvent pas être des mats.
+- [x] Remplacer les décisions contradictoires dans TOUS les chemins cités, pas seulement dans les vagues.
+- [x] Lorsqu'une valeur terminale est stockée dans le nœud, l'initialiser avant de publier son état comme disponible aux autres workers. Ne pas confondre cette valeur avec un Q déjà accumulé.
+- [x] Préserver le comptage des visites et la convention de signe de `backup`.
 
 Ne pas utiliser aveuglément un état de partie mémorisé si le chemin de simulation ne le recalcule pas. La classification doit être correcte sur les plateaux réellement manipulés par la recherche.
 
@@ -270,10 +272,11 @@ Ne pas utiliser aveuglément un état de partie mémorisé si le chemin de simul
 
 ### Acceptation
 
-- [ ] Une même position terminale reçoit la même valeur dans tous les chemins.
-- [ ] Aucun appel NN n'est ajouté sur un terminal connu.
-- [ ] Les tests n'exigent pas qu'un modèle réel trouve le mat : ils vérifient la règle et le backup.
-- [ ] Le seuil de 100 actuellement choisi par le moteur n'est pas modifié dans ce lot.
+- [x] Une même position terminale reçoit la même valeur dans tous les chemins.
+- [x] Aucun appel NN n'est ajouté sur un terminal connu.
+- [x] Les tests n'exigent pas qu'un modèle réel trouve le mat : ils vérifient la règle et le backup.
+- [x] Le seuil de 100 actuellement choisi par le moteur n'est pas modifié dans ce lot.
+- [ ] R3-T5 reste partiel : le chemin `advance_to_leaf` est couvert par la recherche réelle, mais l'issue finale enregistrée par le gestionnaire self-play n'a pas de test dédié à ce cas.
 
 ## 6. R4 : appliquer le bruit de racine même après un hit TT
 
@@ -726,7 +729,7 @@ Pour chaque lot, fournir :
 
 - [x] R1 : unités de virtual loss équilibrées sur sorties normales et exceptionnelles.
 - [x] R2 : invariants complets, options réellement transmises et statut d'échec fiable.
-- [ ] R3 : mat à 100 correctement évalué dans toutes les recherches et le self-play.
+- [x] R3 : mat à 100 correctement évalué dans toutes les recherches et le self-play.
 - [ ] R4 : bruit présent sur TT hit, une fois par coup, sans pollution du cache.
 - [x] R5 : sorties invalides rejetées avant accès et insertion, reprise propre.
 - [ ] R6 : tests discriminants de correspondance des lignes et de padding.

@@ -10,6 +10,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "search_terminal.hpp"
+
 namespace {
 
 void reserver_chemin(PathReservation& reservation, MCTSNode* node,
@@ -50,15 +52,7 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
                 node->state.load(std::memory_order_acquire);
             if (state == NodeState::Terminal) {
                 m_terminal_hits.fetch_add(1, std::memory_order_relaxed);
-                float value = 0.0f;
-                if (board.checkThreefoldRepetition() ||
-                    board.getHalfMoveClock() >= 100 ||
-                    board.checkInsufficientMaterial()) {
-                    value = 0.0f;
-                }
-                else {
-                    value = board.isInCheck() ? -1.0f : 0.0f;
-                }
+                const float value = terminal_value_for(board);
 
                 node->network_value = value;
                 backup(node, value, timing);
@@ -109,15 +103,7 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
                 node->state.load(std::memory_order_acquire);
             if (state == NodeState::Terminal) {
                 m_terminal_hits.fetch_add(1, std::memory_order_relaxed);
-                float value = 0.0f;
-                if (board.checkThreefoldRepetition() ||
-                    board.getHalfMoveClock() >= 100 ||
-                    board.checkInsufficientMaterial()) {
-                    value = 0.0f;
-                }
-                else {
-                    value = board.isInCheck() ? -1.0f : 0.0f;
-                }
+                const float value = terminal_value_for(board);
                 node->network_value = value;
                 backup(node, value, timing);
                 for (int i = 0; i < moves_played; i++) board.undoMove();
