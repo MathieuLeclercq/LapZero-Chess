@@ -1,6 +1,6 @@
 # Correctifs et tests issus des deux reviews MCTS : plan d'implémentation
 
-> Pour les agents chargés des correctifs : exécuter les lots séparément, en ligne, avec le skill `superpowers:executing-plans` si disponible. Aucun sous-agent. Les cases ci-dessous concernent les travaux futurs, pas des opérations déjà réalisées.
+> Pour les agents chargés des correctifs : exécuter les lots séparément, en ligne, avec le skill `superpowers:executing-plans` si disponible. Aucun sous-agent. Les cases ci-dessous suivent l'avancement : cochées quand le lot est fait et validé.
 
 **Objectif :** traiter les dix points soulevés lors des deux passes de review, avec des tests capables de détecter les défauts, sans refondre le moteur ni modifier arbitrairement ses réglages de jeu.
 
@@ -181,6 +181,8 @@ Ne pas corriger en remettant directement `n_in_flight` à zéro : plusieurs prop
 
 ## 4. R2 : rendre les invariants et le harnais fiables
 
+**Statut (2026-09-21) : fait et validé.** `n_in_flight` non nul est désormais une violation détectée par l'inspection. Le harnais configure le MCTS par un point commun (`configurer_mcts`), applique explicitement les défauts, contrôle chaque tranche, affiche `en_vol` et `pending` et les expose en JSON. Vérification : `node_state` en CTest, 265 pytest, et deux passages réels sur les trois positions (8 et 17 simulations, tranches de 8). Commit : `Rend les invariants et le harnais fiables`.
+
 ### Deux défauts à corriger ensemble, mais à tester séparément
 
 1. `src/mcts_observe.cpp` compte les nœuds en vol dans `TreeReport.en_vol`, mais n'ajoute pas de violation pour ce seul motif. Le harnais peut donc annoncer « aucune violation » malgré une fuite.
@@ -195,14 +197,14 @@ Ne pas corriger en remettant directement `n_in_flight` à zéro : plusieurs prop
 
 ### Implémentation recommandée
 
-- [ ] Lors de l'inspection au repos, tout `n_in_flight != 0` doit ajouter une violation et un message explicite. Garder le plafond de messages existant.
-- [ ] Garder les violations `Pending` : elles ne sont pas équivalentes au compteur en vol et peuvent révéler un autre défaut.
-- [ ] Extraire un petit point commun de configuration du MCTS utilisé par les mesures ET les invariants : lot fixe, virtual loss, FPU, facteur de tentatives de collision et activation éventuelle du chronométrage.
-- [ ] Appliquer explicitement les valeurs demandées sur un MCTS réutilisé, y compris les valeurs par défaut. Éviter qu'un ancien `fixed_batch = true` survive à une configuration qui demande `false`.
-- [ ] Vérifier les autres arguments : batch, workers, taille TT, profondeur de clé et budget doivent être ceux réellement utilisés.
-- [ ] Pour `--slices`, soit vérifier les invariants après chaque tranche du même arbre d'analyse, soit refuser clairement cette combinaison. Recommandation : vérifier chaque tranche ; ne pas afficher une granularité non exécutée.
-- [ ] Faire échouer le programme avec un code non nul si les invariants de repos échouent. Afficher aussi `en_vol` et `pending` pour rendre le diagnostic visible.
-- [ ] Si une sortie JSON est demandée en mode invariants, y inclure les résultats d'invariants et les réglages effectifs, pas seulement une liste vide de mesures de débit.
+- [x] Lors de l'inspection au repos, tout `n_in_flight != 0` doit ajouter une violation et un message explicite. Garder le plafond de messages existant.
+- [x] Garder les violations `Pending` : elles ne sont pas équivalentes au compteur en vol et peuvent révéler un autre défaut.
+- [x] Extraire un petit point commun de configuration du MCTS utilisé par les mesures ET les invariants : lot fixe, virtual loss, FPU, facteur de tentatives de collision et activation éventuelle du chronométrage.
+- [x] Appliquer explicitement les valeurs demandées sur un MCTS réutilisé, y compris les valeurs par défaut. Éviter qu'un ancien `fixed_batch = true` survive à une configuration qui demande `false`.
+- [x] Vérifier les autres arguments : batch, workers, taille TT, profondeur de clé et budget doivent être ceux réellement utilisés.
+- [x] Pour `--slices`, soit vérifier les invariants après chaque tranche du même arbre d'analyse, soit refuser clairement cette combinaison. Recommandation : vérifier chaque tranche ; ne pas afficher une granularité non exécutée.
+- [x] Faire échouer le programme avec un code non nul si les invariants de repos échouent. Afficher aussi `en_vol` et `pending` pour rendre le diagnostic visible.
+- [x] Si une sortie JSON est demandée en mode invariants, y inclure les résultats d'invariants et les réglages effectifs, pas seulement une liste vide de mesures de débit.
 
 ### Tests précis
 
@@ -218,10 +220,10 @@ Ne pas corriger en remettant directement `n_in_flight` à zéro : plusieurs prop
 
 ### Acceptation
 
-- [ ] Un résultat vert implique explicitement zéro nœud en vol et zéro nœud `Pending`.
-- [ ] Le rapport décrit ce qui a été exécuté, pas seulement ce qui figurait dans les arguments.
-- [ ] La collecte des invariants reste hors des boucles de mesure du débit.
-- [ ] Les tests du harnais ne chargent ni checkpoint ni GPU.
+- [x] Un résultat vert implique explicitement zéro nœud en vol et zéro nœud `Pending`.
+- [x] Le rapport décrit ce qui a été exécuté, pas seulement ce qui figurait dans les arguments.
+- [x] La collecte des invariants reste hors des boucles de mesure du débit.
+- [x] Les tests du harnais ne chargent ni checkpoint ni GPU.
 
 ## 5. R3 : donner la priorité au mat sur la règle des 50 coups
 

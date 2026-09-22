@@ -71,7 +71,14 @@ static void visiter(const MCTSNode* node, uint64_t profondeur, TreeReport& rappo
     const std::uint32_t in_flight =
         node->n_in_flight.load(std::memory_order_relaxed);
     const NodeState state = node->state.load(std::memory_order_acquire);
-    if (in_flight != 0) rapport.en_vol++;
+    if (in_flight != 0) {
+        // Une reservation non liberee est une fuite, pas un etat normal : au
+        // repos, aucune descente ne doit etre en vol. Le compteur en_vol reste
+        // le nombre de noeuds concernes, pas la somme des unites.
+        rapport.en_vol++;
+        ajouter_violation(rapport,
+            "noeud en vol au repos, n_in_flight " + std::to_string(in_flight));
+    }
     if (state == NodeState::Pending) {
         rapport.pending++;
         ajouter_violation(rapport, "noeud Pending au repos");

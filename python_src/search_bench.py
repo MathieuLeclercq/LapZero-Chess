@@ -135,6 +135,29 @@ def charger_position(fen: str):
     return board
 
 
+@dataclass(frozen=True)
+class ReglagesMCTS:
+    """Reglages de recherche appliques a un MCTS, defauts compris."""
+    fixed_batch: bool = False
+    virtual_loss: int = 1
+    fpu_reduction: float = 0.30
+    collision_attempts: int = 4
+    timings: bool = False
+
+
+def configurer_mcts(mcts, reglages: ReglagesMCTS) -> None:
+    """Applique explicitement TOUS les reglages, y compris les defauts.
+
+    Un MCTS reutilise garde sinon le lot fixe, le tuning ou le chronometrage
+    d'une configuration precedente, et un balayage ne mesurerait plus ce que son
+    rapport annonce. Les invariants et les mesures passent par ce meme point.
+    """
+    mcts.set_fixed_batch(reglages.fixed_batch)
+    mcts.set_tuning(reglages.virtual_loss, reglages.fpu_reduction,
+                    reglages.collision_attempts)
+    mcts.set_timing_enabled(reglages.timings)
+
+
 def mesurer_mcts_search(evaluateur, fen: str, nom: str,
                         simulations: int, c_puct: float = 1.4,
                         batch_size: int = 0,
@@ -157,12 +180,10 @@ def mesurer_mcts_search(evaluateur, fen: str, nom: str,
     """
     if mcts is None:
         mcts = chess_engine.MCTS(evaluateur, tt_size, cache_history_depth)
-    if timings:
-        mcts.set_timing_enabled(True)
-    if fixed_batch:
-        mcts.set_fixed_batch(True)
-    if (virtual_loss, fpu_reduction, collision_attempts) != (1, 0.30, 4):
-        mcts.set_tuning(virtual_loss, fpu_reduction, collision_attempts)
+    configurer_mcts(mcts, ReglagesMCTS(
+        fixed_batch=fixed_batch, virtual_loss=virtual_loss,
+        fpu_reduction=fpu_reduction, collision_attempts=collision_attempts,
+        timings=timings))
     board = charger_position(fen)
     mcts.reset_counters()
 
@@ -214,12 +235,10 @@ def mesurer_step_analysis(evaluateur, fen: str, nom: str,
     """Le chemin reel du bot : arbre d'analyse reutilise entre les coups."""
     if mcts is None:
         mcts = chess_engine.MCTS(evaluateur, tt_size, cache_history_depth)
-    if timings:
-        mcts.set_timing_enabled(True)
-    if fixed_batch:
-        mcts.set_fixed_batch(True)
-    if (virtual_loss, fpu_reduction, collision_attempts) != (1, 0.30, 4):
-        mcts.set_tuning(virtual_loss, fpu_reduction, collision_attempts)
+    configurer_mcts(mcts, ReglagesMCTS(
+        fixed_batch=fixed_batch, virtual_loss=virtual_loss,
+        fpu_reduction=fpu_reduction, collision_attempts=collision_attempts,
+        timings=timings))
     board = charger_position(fen)
     mcts.reset_analysis()
     mcts.reset_counters()
@@ -408,26 +427,30 @@ def format_report(agr: dict, contexte: dict, invariants: list) -> str:
     else:
         lignes += [
             "| Position | TT | batch | workers | noeuds | profondeur max "
-            "| violations |",
-            "|---|---|---|---|---|---|---|",
+            "| violations | en vol | Pending |",
+            "|---|---|---|---|---|---|---|---|---|",
         ]
         total = 0
-        for (position, depth, batch_size, worker_count, nodes, max_depth,
-             violations, _messages) in invariants:
+        for row in invariants:
+            position, depth, batch_size, worker_count = row[:4]
+            nodes, max_depth, violations = row[4:7]
+            en_vol = row[8] if len(row) > 8 else 0
+            pending = row[9] if len(row) > 9 else 0
             total += violations
             lignes.append(
                 f"| {position} | {etiquette_profondeur(depth)} "
                 f"| {batch_size} | {worker_count} "
-                f"| {nodes} | {max_depth} | {violations} |")
+                f"| {nodes} | {max_depth} | {violations} "
+                f"| {en_vol} | {pending} |")
         lignes.append("")
         if total == 0:
             lignes.append("Aucune violation.")
         else:
             lignes.append(f"**{total} violations.** Premiers messages :")
             lignes.append("")
-            for (position, depth, batch_size, worker_count, _n, _d, _v,
-                 messages) in invariants:
-                for message in messages:
+            for row in invariants:
+                position, depth, batch_size, worker_count = row[:4]
+                for message in row[7]:
                     lignes.append(
                         f"- `{position}`, {etiquette_profondeur(depth)}, "
                         f"batch {batch_size}, workers {worker_count} : {message}")
@@ -550,25 +573,57 @@ def main() -> int:
         # inspect_tree n'est jamais appele dans la boucle de mesure de debit :
         # son cout croit avec la taille de l'arbre et fausserait la mesure
         # qu'il protege. Les deux jambes sont donc exclusives.
+        reglages = ReglagesMCTS(
+            fixed_batch=args.fixed_batch, virtual_loss=args.virtual_loss,
+            fpu_reduction=args.fpu,
+            collision_attempts=args.collision_attempts,
+            timings=args.timings)
+        taille_tranche = (args.slices if args.slices > 0
+                          else max(args.simulations, 1))
         for depth in args.cache_history_depths:
             for batch_size in args.batch_sizes:
                 for worker_count in args.worker_counts:
                     for nom, fen in POSITIONS:
                         mcts = chess_engine.MCTS(
                             evaluateur, args.tt_size, depth)
-                        mcts.step_analysis(
-                            charger_position(fen), args.simulations,
-                            args.c_puct, batch_size, worker_count)
-                        r = mcts.inspect_tree()
+                        configurer_mcts(mcts, reglages)
+                        board = charger_position(fen)
+                        mcts.reset_analysis()
+                        # Une tranche peut reveler un etat transitoire que la
+                        # suivante masquerait : on inspecte au repos apres
+                        # chacune, et la violation maximale est retenue.
+                        rapports = []
+                        fait = 0
+                        while True:
+                            bloc = min(taille_tranche,
+                                       args.simulations - fait)
+                            mcts.step_analysis(board, bloc, args.c_puct,
+                                               batch_size, worker_count)
+                            fait += bloc
+                            rapports.append(mcts.inspect_tree())
+                            if fait >= args.simulations:
+                                break
+                        dernier = rapports[-1]
+                        violations = max(r.violations for r in rapports)
+                        en_vol = max(r.en_vol for r in rapports)
+                        pending = max(r.pending for r in rapports)
+                        messages = next(
+                            (list(r.messages) for r in rapports
+                             if r.violations == violations and violations > 0),
+                            [])
                         invariants.append((
-                            nom, depth, batch_size, worker_count, r.nodes,
-                            r.max_depth, r.violations, list(r.messages)))
-                        etat = ("OK" if r.violations == 0 else
-                                f"{r.violations} VIOLATIONS")
+                            nom, depth, batch_size, worker_count,
+                            dernier.nodes, dernier.max_depth, violations,
+                            messages, en_vol, pending, len(rapports)))
+                        etat = ("OK" if violations == 0 else
+                                f"{violations} VIOLATIONS")
                         print(f"  {nom:10} {etiquette_profondeur(depth):6} "
                               f"batch {batch_size:2} workers {worker_count} : "
-                              f"{r.nodes} noeuds, "
-                              f"profondeur {r.max_depth}, {etat}")
+                              f"{dernier.nodes} noeuds, "
+                              f"profondeur {dernier.max_depth}, {etat}, "
+                              f"en vol {en_vol}, "
+                              f"Pending {pending}, "
+                              f"{len(rapports)} controle(s)")
     else:
         for passage in range(args.passages):
             # L'ordre des configurations tourne d'un passage a l'autre : derive
@@ -666,13 +721,34 @@ def main() -> int:
 
     if args.out_json is not None:
         args.out_json.parent.mkdir(parents=True, exist_ok=True)
-        args.out_json.write_text(json.dumps({
+        donnees = {
             "contexte": contexte,
             "mesures": [asdict(m) for m in mesures],
-        }, indent=2, sort_keys=True), encoding="utf-8")
+        }
+        if args.invariants:
+            # Le mode invariants ne produit aucune mesure de debit : le JSON
+            # doit porter les resultats d'invariants et les reglages effectifs,
+            # pas une liste de mesures vide.
+            donnees["invariants"] = [
+                {
+                    "position": row[0],
+                    "cache_history_depth": row[1],
+                    "batch_size": row[2],
+                    "worker_count": row[3],
+                    "nodes": row[4],
+                    "max_depth": row[5],
+                    "violations": row[6],
+                    "messages": list(row[7]),
+                    "en_vol": row[8],
+                    "pending": row[9],
+                    "tranches": row[10],
+                }
+                for row in invariants]
+        args.out_json.write_text(
+            json.dumps(donnees, indent=2, sort_keys=True), encoding="utf-8")
         print(f"Mesures : {args.out_json}")
 
-    total_violations = sum(v for (_, _, _, _, _, _, v, _) in invariants)
+    total_violations = sum(row[6] for row in invariants)
     if total_violations:
         print(f"{total_violations} violations d'invariants", file=sys.stderr)
         return 1

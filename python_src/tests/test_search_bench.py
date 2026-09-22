@@ -19,6 +19,20 @@ from search_bench import (
 )
 
 
+class FauxMCTSSetters:
+    """Setters attendus par configurer_mcts, sans effet par defaut."""
+
+    def set_fixed_batch(self, enabled):
+        pass
+
+    def set_tuning(self, virtual_loss, fpu_reduction,
+                   collision_attempt_factor):
+        pass
+
+    def set_timing_enabled(self, enabled):
+        pass
+
+
 def _m(position="depart", chemin="mcts_search", simulations=400, duree_s=1.0,
        nn_calls=300, nn_batches=300, tt_hits=100, tt_misses=300,
        terminal_hits=0, batch_size=0, cache_history_depth=1,
@@ -248,7 +262,7 @@ def test_les_mesures_transmettent_la_profondeur_au_mcts(monkeypatch):
 
     constructions = []
 
-    class FauxMCTS:
+    class FauxMCTS(FauxMCTSSetters):
         def __init__(self, evaluateur, taille_tt, depth):
             constructions.append(depth)
 
@@ -287,7 +301,7 @@ def test_les_mesures_transmettent_batch_et_workers_au_mcts(monkeypatch):
 
     appels = []
 
-    class FauxMCTS:
+    class FauxMCTS(FauxMCTSSetters):
         def __init__(self, evaluateur, taille_tt, depth):
             pass
 
@@ -332,7 +346,7 @@ def test_les_mesures_transmettent_le_lot_fixe(monkeypatch):
 
     appels = []
 
-    class FauxMCTS:
+    class FauxMCTS(FauxMCTSSetters):
         def __init__(self, evaluateur, taille_tt, depth):
             pass
 
@@ -365,9 +379,10 @@ def test_les_mesures_transmettent_le_lot_fixe(monkeypatch):
         object(), "fen", "position", 8, fixed_batch=True)
     assert appels == [True]
 
-    # Sans le drapeau, le reglage par defaut du moteur n'est pas touche.
+    # Le defaut est reapplique explicitement : un MCTS reutilise ne doit pas
+    # garder le lot fixe d'une configuration precedente.
     search_bench.mesurer_mcts_search(object(), "fen", "position", 8)
-    assert appels == [True]
+    assert appels == [True, False]
 
 
 def test_les_mesures_transmettent_le_reglage_de_divergence(monkeypatch):
@@ -375,7 +390,7 @@ def test_les_mesures_transmettent_le_reglage_de_divergence(monkeypatch):
 
     appels = []
 
-    class FauxMCTS:
+    class FauxMCTS(FauxMCTSSetters):
         def __init__(self, evaluateur, taille_tt, depth):
             pass
 
@@ -411,9 +426,10 @@ def test_les_mesures_transmettent_le_reglage_de_divergence(monkeypatch):
         collision_attempts=8)
     assert appels == [(2, 0.5, 8)]
 
-    # Les reglages par defaut ne touchent pas le moteur.
+    # Les defauts sont reappliques explicitement : le tuning precedent ne
+    # survit pas a la configuration suivante.
     search_bench.mesurer_mcts_search(object(), "fen", "position", 8)
-    assert appels == [(2, 0.5, 8)]
+    assert appels == [(2, 0.5, 8), (1, 0.30, 4)]
 
 
 def test_les_mesures_decoupent_en_tranches(monkeypatch):
@@ -421,7 +437,7 @@ def test_les_mesures_decoupent_en_tranches(monkeypatch):
 
     appels = []
 
-    class FauxMCTS:
+    class FauxMCTS(FauxMCTSSetters):
         def __init__(self, evaluateur, taille_tt, depth):
             pass
 
@@ -456,7 +472,7 @@ def test_la_mesure_capture_les_timings_et_la_taille_tt(monkeypatch):
 
     constructions = []
 
-    class FauxMCTS:
+    class FauxMCTS(FauxMCTSSetters):
         def __init__(self, evaluateur, taille_tt, depth):
             constructions.append((taille_tt, depth))
 
@@ -494,6 +510,195 @@ def test_la_mesure_capture_les_timings_et_la_taille_tt(monkeypatch):
     assert mesure.repetition == 7
     assert mesure.timing["wall_ns"] == 101
     assert mesure.timing["evaluator_ns"] == 17
+
+
+def test_configurer_mcts_reapplique_les_defauts():
+    """Un MCTS reutilise ne doit garder ni le lot fixe, ni le tuning, ni le
+    chronometrage d'une configuration precedente."""
+    import search_bench
+
+    journal = []
+
+    class FauxMCTS:
+        def set_fixed_batch(self, enabled):
+            journal.append(("fixed_batch", enabled))
+
+        def set_tuning(self, virtual_loss, fpu_reduction, tentatives):
+            journal.append(("tuning", virtual_loss, fpu_reduction, tentatives))
+
+        def set_timing_enabled(self, enabled):
+            journal.append(("timing", enabled))
+
+    mcts = FauxMCTS()
+    search_bench.configurer_mcts(mcts, search_bench.ReglagesMCTS(
+        fixed_batch=True, virtual_loss=3, fpu_reduction=0.5,
+        collision_attempts=8, timings=True))
+    search_bench.configurer_mcts(mcts, search_bench.ReglagesMCTS())
+
+    assert journal == [
+        ("fixed_batch", True), ("tuning", 3, 0.5, 8), ("timing", True),
+        ("fixed_batch", False), ("tuning", 1, 0.30, 4), ("timing", False),
+    ]
+
+
+class _Rapport:
+    def __init__(self, nodes=10, max_depth=3, violations=0, messages=(),
+                 en_vol=0, pending=0):
+        self.nodes = nodes
+        self.max_depth = max_depth
+        self.violations = violations
+        self.messages = list(messages)
+        self.en_vol = en_vol
+        self.pending = pending
+
+
+class _FauxMCTSInvariants:
+    """Faux MCTS du mode invariants : journalise setters et tranches."""
+
+    instances = []
+    rapports_preprogrammes = []
+
+    def __init__(self, evaluateur, taille_tt, depth):
+        self.depth = depth
+        self.journal = []
+        self.recherches = []
+        self.inspections = 0
+        self.rapports = list(_FauxMCTSInvariants.rapports_preprogrammes)
+        self.dernier_batch = None
+        self.dernier_workers = None
+        _FauxMCTSInvariants.instances.append(self)
+
+    def set_fixed_batch(self, enabled):
+        self.journal.append(("fixed_batch", enabled))
+
+    def set_tuning(self, virtual_loss, fpu_reduction, tentatives):
+        self.journal.append(("tuning", virtual_loss, fpu_reduction, tentatives))
+
+    def set_timing_enabled(self, enabled):
+        self.journal.append(("timing", enabled))
+
+    def reset_analysis(self):
+        self.journal.append(("reset_analysis",))
+
+    def mcts_search(self, *args):
+        pass
+
+    def step_analysis(self, board, simulations, c_puct, batch_size,
+                      worker_count):
+        self.journal.append(("step_analysis", simulations))
+        self.recherches.append(simulations)
+        self.dernier_batch = batch_size
+        self.dernier_workers = worker_count
+
+    def inspect_tree(self):
+        self.inspections += 1
+        if self.rapports:
+            return self.rapports.pop(0)
+        return _Rapport()
+
+
+def _preparer_invariants(monkeypatch, tmp_path, argv):
+    """Monte un main() en mode invariants, sans modele ni GPU."""
+    import search_bench
+    import puzzle_bench
+
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"modele factice")
+    _FauxMCTSInvariants.instances = []
+    _FauxMCTSInvariants.rapports_preprogrammes = []
+    monkeypatch.setattr(search_bench, "POSITIONS", (("depart", "fen"),))
+    monkeypatch.setattr(search_bench.chess_engine, "MCTS",
+                        _FauxMCTSInvariants)
+    monkeypatch.setattr(search_bench.chess_engine, "ONNXEvaluator",
+                        lambda *args: object())
+    monkeypatch.setattr(search_bench, "charger_position", lambda fen: object())
+    monkeypatch.setattr(puzzle_bench, "resoudre_modele",
+                        lambda *args: (model, {}))
+    monkeypatch.setattr(sys, "argv", [
+        "search_bench.py", "--model", str(model), *argv])
+    return model
+
+
+def test_les_invariants_recoivent_les_reglages_demandes(monkeypatch, tmp_path):
+    """Le mode invariants doit verifier la configuration annoncee, pas les
+    defauts : setters avant la recherche, batch et workers reels."""
+    import json
+    import search_bench
+
+    brut = tmp_path / "invariants.json"
+    _preparer_invariants(monkeypatch, tmp_path, [
+        "--invariants", "--simulations", "8", "--batch-sizes", "8",
+        "--worker-counts", "4", "--fixed-batch", "--virtual-loss", "3",
+        "--fpu", "0.5", "--collision-attempts", "8",
+        "--out-json", str(brut), "--out-rapport", str(tmp_path / "r.md"),
+    ])
+
+    assert search_bench.main() == 0
+
+    # La premiere instance est la recherche de rodage, sans configuration.
+    mcts = _FauxMCTSInvariants.instances[-1]
+    assert mcts.journal == [
+        ("fixed_batch", True), ("tuning", 3, 0.5, 8), ("timing", False),
+        ("reset_analysis",), ("step_analysis", 8),
+    ]
+    assert mcts.dernier_batch == 8
+    assert mcts.dernier_workers == 4
+    donnees = json.loads(brut.read_text(encoding="utf-8"))
+    assert donnees["contexte"]["fixed_batch"] is True
+    assert donnees["contexte"]["virtual_loss"] == 3
+    assert donnees["contexte"]["fpu_reduction"] == 0.5
+    assert donnees["contexte"]["collision_attempts"] == 8
+    assert donnees["mesures"] == []
+    assert donnees["invariants"][0]["violations"] == 0
+    assert donnees["invariants"][0]["tranches"] == 1
+    assert donnees["invariants"][0]["en_vol"] == 0
+    assert donnees["invariants"][0]["pending"] == 0
+
+
+def test_les_invariants_controllent_chaque_tranche(monkeypatch, tmp_path):
+    import search_bench
+
+    _preparer_invariants(monkeypatch, tmp_path, [
+        "--invariants", "--simulations", "17", "--slices", "8",
+        "--batch-sizes", "8", "--worker-counts", "1",
+        "--out-rapport", str(tmp_path / "r.md"),
+    ])
+
+    assert search_bench.main() == 0
+
+    mcts = _FauxMCTSInvariants.instances[-1]
+    assert mcts.recherches == [8, 8, 1]
+    assert mcts.inspections == 3
+
+
+def test_les_invariants_echouent_avec_un_code_non_nul(monkeypatch, tmp_path,
+                                                      capsys):
+    import search_bench
+
+    _preparer_invariants(monkeypatch, tmp_path, [
+        "--invariants", "--simulations", "8", "--batch-sizes", "8",
+        "--worker-counts", "1",
+        "--out-rapport", str(tmp_path / "r.md"),
+    ])
+    _FauxMCTSInvariants.rapports_preprogrammes = [
+        _Rapport(violations=2,
+                 messages=["noeud en vol au repos, n_in_flight 1"],
+                 en_vol=1, pending=1)]
+
+    assert search_bench.main() == 1
+    sortie = capsys.readouterr().out
+    assert "2 VIOLATIONS" in sortie
+    assert "en vol 1" in sortie
+    assert "Pending 1" in sortie
+
+    _FauxMCTSInvariants.rapports_preprogrammes = []
+    monkeypatch.setattr(sys, "argv", [
+        "search_bench.py", "--model",
+        str(tmp_path / "model.onnx"), "--invariants", "--simulations", "8",
+        "--batch-sizes", "8", "--worker-counts", "1",
+        "--out-rapport", str(tmp_path / "propre.md"),
+    ])
+    assert search_bench.main() == 0
 
 
 def test_main_ecrit_les_mesures_individuelles_en_json(
@@ -672,7 +877,7 @@ def test_main_reutilise_le_pool_chaud_et_efface_la_tt(monkeypatch, tmp_path):
     brut = tmp_path / "mesures.json"
     instances = []
 
-    class FauxMCTS:
+    class FauxMCTS(FauxMCTSSetters):
         def __init__(self, evaluateur, taille_tt, depth):
             instances.append(self)
             self.clears = 0
