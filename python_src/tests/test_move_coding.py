@@ -106,6 +106,28 @@ def test_the_four_promotion_choices_get_distinct_indices():
     assert indices <= set(board.get_legal_move_indices())
 
 
+def test_decode_rejects_a_mismatched_is_black():
+    """Le plateau fait foi : un drapeau incoherent est signale, pas ignore.
+
+    L'ancienne table Python decodait silencieusement dans le mauvais repere.
+    """
+    board = _board(POSITIONS[0])  # Blancs au trait
+    index = board.get_legal_move_indices()[0]
+
+    assert decode_move_index(board, index, is_black=False)
+
+    with pytest.raises(ValueError):
+        decode_move_index(board, index, is_black=True)
+
+
+def test_decode_sans_drapeau_utilise_le_trait_du_plateau():
+    board = _board(POSITIONS[2])  # Noirs au trait
+    index = board.get_legal_move_indices()[0]
+
+    assert decode_move_index(board, index) == decode_move_index(
+        board, index, is_black=True)
+
+
 def test_move_coding_does_not_import_torch():
     """La raison d'etre du module : 16 travailleurs important torch coutent
     environ 8 Gio de RAM, contre moins de 1 Gio sans lui."""

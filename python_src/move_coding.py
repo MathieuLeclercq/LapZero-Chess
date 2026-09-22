@@ -25,7 +25,8 @@ def decode_move_index(board, index, is_black=None):
     Le parametre is_black est conserve pour les appelants historiques, mais le
     plateau fait foi : une incoherence est signalee plutot que corrigee en
     silence. Le decodeur C++ inclut l'orientation du camp au trait et
-    l'inference de promotion dame.
+    l'inference de promotion dame. L'index doit appartenir a [0, 4671] ;
+    hors bornes, le decodage n'est pas defini.
     """
     if is_black is not None:
         attendu = (board.turn == chess_engine.Color.BLACK)

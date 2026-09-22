@@ -99,7 +99,9 @@ class Chessboard
         int encodeMove(const Move& move) const;
         // Inverse de encodeMove : decode un index de policy (0 a 4671) en coup
         // absolu, orientation du camp au trait et promotion dame incluses.
-        // Le seul decodeur d'index du moteur.
+        // Le seul decodeur d'index du moteur. L'index doit appartenir a
+        // [0, 4671] ; hors bornes, le decodage n'est pas defini, comme du
+        // temps de la table Python.
         Move decodeMoveIndex(int index) const;
        
         Color getTurn() const;
