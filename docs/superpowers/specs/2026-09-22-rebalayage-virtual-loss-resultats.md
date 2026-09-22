@@ -58,13 +58,18 @@ La colonne reseau seul est identique au bit pres entre les deux bras, sur les
 
 ## 4. Decision et propagation
 
-`virtual_loss = 2` est active dans :
+`virtual_loss = 2` est active dans `uci.py` (`MCTS_VIRTUAL_LOSS = 2`, applique
+au MCTS de production), `play_against_bot.py`, `tournament_elo.py` et
+`stockfish_player.py`, pour que le bot, la GUI, le tournoi et l'ancrage
+cherchent de la meme facon.
 
-- `uci.py` (`MCTS_VIRTUAL_LOSS = 2`, applique au MCTS de production) ;
-- `train_self_play.py`, passe au binding `generate_self_play_games`, donc au
-  `SelfPlayManager`, qui l'applique au MCTS partage ;
-- `play_against_bot.py`, `tournament_elo.py` et `stockfish_player.py`, pour que
-  la GUI, le tournoi et l'ancrage cherchent comme le bot.
+Le self-play n'est pas concerne, et c'est un resultat du code, pas un oubli :
+chaque arbre y est descendu une seule fois par vague, donc `n_in_flight` n'a
+aucun lecteur entre la reservation et sa liberation, et l'amplitude y est
+inerte. Avant R1, la fuite faisait s'accumuler ces unites d'une vague a l'autre,
+ce qui est une des raisons pour lesquelles le balayage de septembre etait non
+interpretable. Le gestionnaire garde donc le defaut 1, avec un commentaire qui
+documente l'inerte.
 
 Le defaut de la classe `MCTS` et des bancs reste 1 : les campagnes historiques
 gardent leur sens, et un banc qui n'explicite pas le reglage mesure toujours le
@@ -79,8 +84,9 @@ C++ verrouille la propagation au gestionnaire.
   192,9, 231,2 et 254,4 plies nouveaux par seconde, avec departs = fins = total
   partout. Une confirmation a 700/100 est necessaire avant de changer la taille
   de pool de production, qui reste 256.
-- Les chiffres sont mesures sur iter316 ; le serveur de self-play doit etre
-  synchronise et reconstruit pour beneficier du reglage.
+- Les chiffres sont mesures sur iter316. Le serveur de self-play n'a pas besoin
+  du reglage : l'amplitude y est inerte (section 4), seuls le bot et ses chemins
+  batches en beneficient.
 - Aucun tournoi de niveau de jeu n'a ete lance : le banc de puzzles mesure une
   non-inferiorite, pas un gain Elo. Un tournoi reste la seule mesure de force.
 - Les mesures de septembre 2026 sur la divergence restent non interpretables et

@@ -15,8 +15,7 @@ SelfPlayManager::SelfPlayManager(
     int num_concurrent_games,
     int slow_sims, int fast_sims, float slow_ratio,
     size_t tt_size,
-    const std::string& puzzles_path,
-    SearchTuning tuning)
+    const std::string& puzzles_path)
     : m_evaluator(evaluator),
     m_num_concurrent_games(num_concurrent_games),
     m_slow_sims(slow_sims),
@@ -44,10 +43,11 @@ SelfPlayManager::SelfPlayManager(
 
     m_batch_input.resize(num_concurrent_games * 119 * 64);
 
+    // Le virtual loss n'est pas regle ici : en self-play, chaque arbre n'est
+    // descendu qu'une fois par vague, donc n_in_flight n'a pas de lecteur entre
+    // la reservation et sa liberation, et l'amplitude est inerte. Le bot et les
+    // bancs, qui collectent plusieurs feuilles du meme arbre, la reglent a 2.
     m_shared_mcts = std::make_unique<MCTS>(m_evaluator, tt_size);
-    // Le self-play doit chercher avec les memes reglages que le bot, sinon les
-    // donnees d'entrainement viennent d'une autre recherche.
-    m_shared_mcts->set_tuning(tuning);
 
     m_tactical_boost.resize(num_concurrent_games, false);
     load_tactical_puzzles(puzzles_path);

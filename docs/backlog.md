@@ -27,7 +27,9 @@ alternance : +9 à +20 % de débit sur les trois positions, p95 de latence en ba
 20 %, collisions en milieu de 3284 à 2054. Barrière qualité franchie sur 500 puis 2500
 puzzles : 1926 contre 1928, IC95 [-0,4 ; +0,56], McNemar p = 0,87, réseau seul identique au
 bit près. Le rejet de septembre venait bien de la fuite R1. Le réglage est propagé au bot,
-au self-play, au tournoi, à la GUI et à l'ancrage Stockfish. Rapport complet :
+au tournoi, à la GUI et à l'ancrage Stockfish. Le self-play n'est pas concerné :
+chaque arbre y est descendu une seule fois par vague, donc l'amplitude y est
+inerte. Rapport complet :
 `superpowers/specs/2026-09-22-rebalayage-virtual-loss-resultats.md`.
 
 **Pools self-play, mesure préliminaire.** À 100/20 simulations, la matrice (128, 256),

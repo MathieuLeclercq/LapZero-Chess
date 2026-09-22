@@ -320,13 +320,10 @@ PYBIND11_MODULE(chess_engine, m) {
         int slow_sims, int fast_sims,
         int total_games, float slow_ratio,
         size_t tt_size = 2097143,
-        const std::string& puzzles_path = "../training_data/puzzles_train.txt",
-        int virtual_loss = 1, float fpu_reduction = 0.30f,
-        int collision_attempts = 4) {
+        const std::string& puzzles_path = "../training_data/puzzles_train.txt") {
             SelfPlayManager manager(
                 evaluator, concurrent_games, slow_sims, fast_sims, slow_ratio,
-                tt_size, puzzles_path,
-                SearchTuning{virtual_loss, fpu_reduction, collision_attempts});
+                tt_size, puzzles_path);
             return manager.generate_games(total_games);
         },
         py::call_guard<py::gil_scoped_release>(),
@@ -338,9 +335,6 @@ PYBIND11_MODULE(chess_engine, m) {
         py::arg("slow_ratio") = 0.25f,
         py::arg("tt_size") = 2097143,
         py::arg("puzzles_path") = "../training_data/puzzles_train.txt",
-        py::arg("virtual_loss") = 1,
-        py::arg("fpu_reduction") = 0.30f,
-        py::arg("collision_attempts") = 4,
         "Génère un dataset de parties en self-play en utilisant un batching GPU massif.");
 
     // Variante de diagnostic : meme generation, plus les compteurs. La fonction
@@ -352,13 +346,10 @@ PYBIND11_MODULE(chess_engine, m) {
         int slow_sims, int fast_sims,
         int total_games, float slow_ratio,
         size_t tt_size = 2097143,
-        const std::string& puzzles_path = "../training_data/puzzles_train.txt",
-        int virtual_loss = 1, float fpu_reduction = 0.30f,
-        int collision_attempts = 4) {
+        const std::string& puzzles_path = "../training_data/puzzles_train.txt") {
             SelfPlayManager manager(
                 evaluator, concurrent_games, slow_sims, fast_sims, slow_ratio,
-                tt_size, puzzles_path,
-                SearchTuning{virtual_loss, fpu_reduction, collision_attempts});
+                tt_size, puzzles_path);
             auto parties = manager.generate_games(total_games);
             return std::make_tuple(std::move(parties), manager.get_stats());
         },
@@ -371,8 +362,5 @@ PYBIND11_MODULE(chess_engine, m) {
         py::arg("slow_ratio") = 0.25f,
         py::arg("tt_size") = 2097143,
         py::arg("puzzles_path") = "../training_data/puzzles_train.txt",
-        py::arg("virtual_loss") = 1,
-        py::arg("fpu_reduction") = 0.30f,
-        py::arg("collision_attempts") = 4,
         "Genere des parties de self-play et renvoie aussi les compteurs.");
 }
