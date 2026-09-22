@@ -279,6 +279,12 @@ PYBIND11_MODULE(chess_engine, m) {
              py::overload_cast<>(&MCTS::inspect_tree, py::const_),
              py::call_guard<py::gil_scoped_release>());
 
+    m.def("encode_move", &encodeMoveIndex,
+          py::arg("orig_f"), py::arg("orig_r"), py::arg("dest_f"),
+          py::arg("dest_r"), py::arg("promotion"), py::arg("is_black"),
+          "Encode un coup en index de policy (0 a 4671), -1 si le coup n'est "
+          "pas encodable.");
+
     py::class_<GameResult>(m, "GameResult")
         .def_property_readonly("state_tensors", [](py::object& self) {
         auto& res = self.cast<GameResult&>();

@@ -43,6 +43,12 @@ struct EvaluationCacheKey {
     uint8_t total_moves_bucket = 0;
 };
 
+// Encode un coup en index de policy (0 a 4671) du point de vue du camp donne.
+// Renvoie -1 si le coup n'est pas encodable. Seul encodeur du moteur : le
+// binding Python et Chessboard::encodeMove passent par lui.
+int encodeMoveIndex(int orig_f, int orig_r, int dest_f, int dest_r,
+                    PieceType promotion, bool is_black);
+
 class Chessboard
 {
     private:

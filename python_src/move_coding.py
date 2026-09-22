@@ -2,49 +2,21 @@
 
 Extrait de lib.py pour etre importable sans torch : le banc de puzzles fait
 tourner 16 processus travailleurs, et torch plus onnx coutent 475 Mio a
-l'import contre 2 Mio pour chess_engine seul. Les corps de ces fonctions n'ont
-pas change, lib les reexporte pour ne casser aucun appelant.
+l'import contre 2 Mio pour chess_engine seul. Les tables vivent maintenant en
+C++ : encode_move et decode_move_index sont de simples enveloppes des fonctions
+de chess_engine, et lib les reexporte pour ne casser aucun appelant.
 """
 
 import chess_engine
 
 
 def encode_move(orig_f, orig_r, dest_f, dest_r, promotion_type, is_black_turn):
-    """Convertit un coup en un index plat (0 à 4671). Retourne -1 en cas d'erreur de parsing."""
-    if is_black_turn:
-        orig_r = 7 - orig_r
-        dest_r = 7 - dest_r
+    """Convertit un coup en un index plat (0 a 4671), delegue au C++.
 
-    df = dest_f - orig_f
-    dr = dest_r - orig_r
-    plane = -1
-
-    try:
-        if promotion_type in [chess_engine.PieceType.KNIGHT, chess_engine.PieceType.BISHOP,
-                              chess_engine.PieceType.ROOK]:
-            dir_idx = df + 1
-            if promotion_type == chess_engine.PieceType.KNIGHT:
-                p_idx = 0
-            elif promotion_type == chess_engine.PieceType.BISHOP:
-                p_idx = 1
-            elif promotion_type == chess_engine.PieceType.ROOK:
-                p_idx = 2
-            plane = 64 + dir_idx * 3 + p_idx
-
-        elif (abs(df) == 2 and abs(dr) == 1) or (abs(df) == 1 and abs(dr) == 2):
-            knight_moves = [(1, 2), (2, 1), (2, -1), (1, -2), (-1, -2), (-2, -1), (-2, 1), (-1, 2)]
-            plane = 56 + knight_moves.index((df, dr))
-
-        else:
-            dirs = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)]
-            dist = max(abs(df), abs(dr))
-            dir_tuple = (df // dist, dr // dist)
-            dir_idx = dirs.index(dir_tuple)
-            plane = dir_idx * 7 + (dist - 1)
-
-        return plane * 64 + orig_r * 8 + orig_f
-    except ValueError:
-        return -1
+    Renvoie -1 si le coup n'est pas encodable, comme l'ancienne version locale.
+    """
+    return chess_engine.encode_move(
+        orig_f, orig_r, dest_f, dest_r, promotion_type, bool(is_black_turn))
 
 
 def decode_move_index(board, index, is_black=None):

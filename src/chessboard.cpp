@@ -523,14 +523,9 @@ Move Chessboard::decodeMoveIndex(int index) const
     return Move(origine, Square(dest_f, dest_r), promotion);
 }
 
-int Chessboard::encodeMove(const Move& move) const
-{    int orig_f = move.getOrigSquare().getFile();
-    int orig_r = move.getOrigSquare().getRank();
-    int dest_f = move.getDestSquare().getFile();
-    int dest_r = move.getDestSquare().getRank();
-    PieceType promotion = move.getPromotion();
-    bool is_black = (m_turn == BLACK);
-
+int encodeMoveIndex(int orig_f, int orig_r, int dest_f, int dest_r,
+                    PieceType promotion, bool is_black)
+{
     if (is_black)
     {
         orig_r = 7 - orig_r;
@@ -587,6 +582,14 @@ int Chessboard::encodeMove(const Move& move) const
 
     if (plane == -1) return -1;
     return plane * 64 + orig_r * 8 + orig_f;
+}
+
+int Chessboard::encodeMove(const Move& move) const
+{
+    return encodeMoveIndex(
+        move.getOrigSquare().getFile(), move.getOrigSquare().getRank(),
+        move.getDestSquare().getFile(), move.getDestSquare().getRank(),
+        move.getPromotion(), m_turn == BLACK);
 }
 
 std::vector<int> Chessboard::getLegalMoveIndices() {

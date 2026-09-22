@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BISHOP', 'BLACK', 'CHECKMATE', 'Chessboard', 'Color', 'DRAW_50_MOVES', 'DRAW_INSUFF_MATERIAL', 'DRAW_REPETITION', 'EvaluationCacheKey', 'GameResult', 'GameState', 'KING', 'KNIGHT', 'MCTS', 'Move', 'MoveStats', 'NONE', 'NO_COLOR', 'ONGOING', 'ONNXEvaluator', 'PAWN', 'Piece', 'PieceType', 'QUEEN', 'ROOK', 'STALEMATE', 'SearchCounters', 'SearchTiming', 'SelfPlayStats', 'Square', 'TreeReport', 'WHITE', 'generate_self_play_games', 'generate_self_play_games_with_stats']
+__all__: list[str] = ['BISHOP', 'BLACK', 'CHECKMATE', 'Chessboard', 'Color', 'DRAW_50_MOVES', 'DRAW_INSUFF_MATERIAL', 'DRAW_REPETITION', 'EvaluationCacheKey', 'GameResult', 'GameState', 'KING', 'KNIGHT', 'MCTS', 'Move', 'MoveStats', 'NONE', 'NO_COLOR', 'ONGOING', 'ONNXEvaluator', 'PAWN', 'Piece', 'PieceType', 'QUEEN', 'ROOK', 'STALEMATE', 'SearchCounters', 'SearchTiming', 'SelfPlayStats', 'Square', 'TreeReport', 'WHITE', 'encode_move', 'generate_self_play_games', 'generate_self_play_games_with_stats']
 class Chessboard:
     def __init__(self) -> None:
         ...
@@ -450,6 +450,10 @@ class TreeReport:
     @property
     def violations(self) -> int:
         ...
+def encode_move(orig_f: typing.SupportsInt | typing.SupportsIndex, orig_r: typing.SupportsInt | typing.SupportsIndex, dest_f: typing.SupportsInt | typing.SupportsIndex, dest_r: typing.SupportsInt | typing.SupportsIndex, promotion: PieceType, is_black: bool) -> int:
+    """
+    Encode un coup en index de policy (0 a 4671), -1 si le coup n'est pas encodable.
+    """
 def generate_self_play_games(evaluator: ONNXEvaluator, concurrent_games: typing.SupportsInt | typing.SupportsIndex, slow_sims: typing.SupportsInt | typing.SupportsIndex, fast_sims: typing.SupportsInt | typing.SupportsIndex, total_games: typing.SupportsInt | typing.SupportsIndex, slow_ratio: typing.SupportsFloat | typing.SupportsIndex = 0.25, tt_size: typing.SupportsInt | typing.SupportsIndex = 2097143, puzzles_path: str = '../training_data/puzzles_train.txt') -> list[GameResult]:
     """
     Génère un dataset de parties en self-play en utilisant un batching GPU massif.
