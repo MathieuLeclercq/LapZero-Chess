@@ -407,12 +407,15 @@ Le banc doit rester disjoint de l'entraînement, c'est le cas aujourd'hui
 (0 recouvrement entre les 5 000 puzzles du banc et les 100 000 de
 `training_data/puzzles_train.txt`).
 
-## Phase 2 du perft, non faite
+## Phase 2 du perft, partiellement faite
 
 Voir la section « Phasage » de `superpowers/specs/2026-08-07-perft-design.md` :
 
-- figer les profondeurs calibrées (43,5 M nœuds, environ 23 s avec `--strict`)
-- intégration CTest
-- déplacer `apply_move_by_index` vers `Chessboard::decodeMoveIndex` et ajouter la
-  commande `roundtrip`, qui couvre le seul des trois trous identifiés resté non testé
-- nettoyer les chemins en dur `C:/Users/M47h1/...` de `src/main.cpp`
+- fait : profondeurs calibrees figees par position et commande `calibre`
+  (43 428 093 noeuds mesures, 27 s avec `--strict` sur la machine de developpement)
+- fait : integration CTest, `chess_perft_bench` (instantane) et
+  `chess_perft_calibre` (timeout 300 s), 17 tests au total
+- restant : deplacer `apply_move_by_index` vers `Chessboard::decodeMoveIndex` et
+  ajouter la commande `roundtrip`, qui couvre le seul des trois trous identifies
+  reste non teste
+- restant : nettoyer les chemins en dur `C:/Users/M47h1/...` de `src/main.cpp`

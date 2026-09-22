@@ -73,6 +73,14 @@ add_test(NAME chess_tests_pgn_smoke
 add_executable(chess_perft src/perft_main.cpp)
 target_link_libraries(chess_perft PRIVATE chess_core)
 
+# Perft dans CTest : palier rapide instantane, puis palier calibre a
+# profondeurs figees (environ 43,5 M de noeuds, 23 s attendues en Release).
+add_test(NAME chess_perft_bench
+    COMMAND chess_perft bench --strict --check-fen)
+add_test(NAME chess_perft_calibre
+    COMMAND chess_perft calibre --strict --check-fen)
+set_tests_properties(chess_perft_calibre PROPERTIES TIMEOUT 300)
+
 # ==========================================
 # 2 ter. Tests unitaires C++ du MCTS
 # ==========================================

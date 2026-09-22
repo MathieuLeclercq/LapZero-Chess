@@ -5,6 +5,7 @@ encodings, `training` training loop, `data` datasets, `uci` UCI and Lichess
 bot, `tools` benchmarks and interfaces, `build` build and dependencies,
 `misc` project life.
 
+- 2026-09-22 : `tools` perft calibrated tier (43.5M nodes) in CTest.
 - 2026-09-20 : `uci` lichess-bot update, faster games, bots first.
 - 2026-09-20 : `mcts` evaluation batches padded to a fixed shape.
 - 2026-09-19 : `uci` per-move search log in uci.py.
