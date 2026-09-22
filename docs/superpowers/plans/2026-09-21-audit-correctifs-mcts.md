@@ -714,13 +714,13 @@ Attention aux mesures découpées : `get_last_timing()` fournit le dernier appel
 
 ### Niveau D : niveau de jeu, budget explicitement choisi
 
-- [ ] Réutiliser un sous-ensemble déterministe du puzzle bench, avec vrai historique et même modèle.
-- [ ] Comparer les mêmes puzzles avant/après, pas deux échantillons indépendants.
-- [ ] Séparer score au premier coup recherché et réussite de la ligne complète.
-- [ ] Comparer d'abord à nombre de simulations égal pour isoler une éventuelle dégradation logique, puis à temps égal si l'objectif est le bénéfice pratique de débit.
-- [ ] Pour le multicoeur, accepter l'ordonnancement non déterministe ; ne pas exiger les mêmes compteurs détaillés ou la même distribution de visites bit à bit.
-- [ ] Ne pas présenter une petite variation sur un petit échantillon comme un gain Elo établi. Conserver les désaccords par puzzle pour analyse.
-- [ ] Ne pas mélanger correction R1 et nouveau tuning de virtual loss dans la même comparaison.
+- [x] Réutiliser un sous-ensemble déterministe du puzzle bench, avec vrai historique et même modèle. Fait par le rebalayage : mêmes 500 puis 2500 lignes, historique réel, iter316.
+- [x] Comparer les mêmes puzzles avant/après, pas deux échantillons indépendants. Fait, comparaison appariée ligne à ligne.
+- [ ] Séparer score au premier coup recherché et réussite de la ligne complète. Non fait : le banc ne score que le premier coup, par choix de conception ; la ligne complète n'est pas rejouée.
+- [ ] Comparer d'abord à nombre de simulations égal pour isoler une éventuelle dégradation logique, puis à temps égal si l'objectif est le bénéfice pratique de débit. Fait à simulations égales ; le temps égal n'a pas été mesuré, il reste optionnel.
+- [x] Pour le multicoeur, accepter l'ordonnancement non déterministe ; ne pas exiger les mêmes compteurs détaillés ou la même distribution de visites bit à bit. Respecté : mêmes workers des deux côtés, aucune exigence bit à bit.
+- [x] Ne pas présenter une petite variation sur un petit échantillon comme un gain Elo établi. Conserver les désaccords par puzzle pour analyse. Respecté : intervalles de confiance, McNemar et paires discordantes rapportés, aucun Elo annoncé.
+- [x] Ne pas mélanger correction R1 et nouveau tuning de virtual loss dans la même comparaison. Respecté : les deux bras tournent sur le code corrigé R1.
 
 R4 change l'exploration en self-play, pas le réseau entraîné déjà chargé par le bot. Un correctif du bruit ne promet donc pas une hausse immédiate du niveau du checkpoint actuel.
 
