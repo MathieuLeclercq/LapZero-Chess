@@ -415,30 +415,12 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
                     for (const auto& p : m_game_policies[i])
                         res.flat_policies.insert(res.flat_policies.end(), p.begin(), p.end());
 
-                    if (!m_boards[i].hasAnyLegalMove() && m_boards[i].isInCheck()) {
-                        res.final_outcome = (m_boards[i].getTurn() == WHITE) ? -1.0f : 1.0f;
-                        res.end_reason = 0; // Checkmate
-                    }
-                    else if (m_boards[i].getMoveHistory().size() >= MAX_PLIES_BEFORE_FORCED_DRAW) {
-                        res.final_outcome = 0.0f;
-                        res.end_reason = 5; // Max Moves (300 coups)
-                    }
-                    else if (m_boards[i].checkThreefoldRepetition()) {
-                        res.final_outcome = 0.0f;
-                        res.end_reason = 2; // Répétition
-                    }
-                    else if (m_boards[i].getHalfMoveClock() >= 100) {
-                        res.final_outcome = 0.0f;
-                        res.end_reason = 3; // Règle des 50 coups
-                    }
-                    else if (m_boards[i].checkInsufficientMaterial()) {
-                        res.final_outcome = 0.0f;
-                        res.end_reason = 4; // Matériel insuffisant
-                    }
-                    else {
-                        res.final_outcome = 0.0f;
-                        res.end_reason = 1; // Pat (Stalemate)
-                    }
+                    const GameConclusion conclusion = conclure_partie(
+                        m_boards[i],
+                        m_boards[i].getMoveHistory().size()
+                            >= MAX_PLIES_BEFORE_FORCED_DRAW);
+                    res.final_outcome = conclusion.final_outcome;
+                    res.end_reason = conclusion.end_reason;
 
                     m_finished_games.push_back(res);
                     games_completed++;

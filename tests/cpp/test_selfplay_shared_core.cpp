@@ -586,6 +586,52 @@ void test_slow_puzzle_game_is_not_lost_behind_a_fast_one() {
                  "the slow puzzle game and the fast game were not both kept");
 }
 
+void test_game_conclusion_signs_and_reasons() {
+    Chessboard board;
+
+    board.loadFEN("7k/6Q1/5K2/8/8/8/8/8 b - - 0 1");
+    GameConclusion c = conclure_partie(board, false);
+    require_test(c.end_reason == 0 && c.final_outcome == 1.0f,
+                 "a mated black side should be a win for White");
+
+    board.loadFEN("8/8/8/8/8/5k2/6q1/7K w - - 0 1");
+    c = conclure_partie(board, false);
+    require_test(c.end_reason == 0 && c.final_outcome == -1.0f,
+                 "a mated white side should be a loss for White");
+
+    board.loadFEN("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1");
+    c = conclure_partie(board, false);
+    require_test(c.end_reason == 1 && c.final_outcome == 0.0f,
+                 "stalemate should be a draw");
+
+    board.loadFEN(
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    c = conclure_partie(board, true);
+    require_test(c.end_reason == 5 && c.final_outcome == 0.0f,
+                 "the maximum length should be a draw");
+
+    board.setStartupPieces();
+    const char* moves[] = {"g1f3", "g8f6", "f3g1", "f6g8",
+                           "g1f3", "g8f6", "f3g1", "f6g8"};
+    for (const char* uci : moves) {
+        require_test(board.movePieceUCI(uci), "repetition move failed");
+    }
+    c = conclure_partie(board, false);
+    require_test(c.end_reason == 2 && c.final_outcome == 0.0f,
+                 "repetition should be a draw");
+
+    board.loadFEN(
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 100 1");
+    c = conclure_partie(board, false);
+    require_test(c.end_reason == 3 && c.final_outcome == 0.0f,
+                 "the fifty-move rule should be a draw");
+
+    board.loadFEN("8/8/8/8/8/8/8/K6k w - - 0 1");
+    c = conclure_partie(board, false);
+    require_test(c.end_reason == 4 && c.final_outcome == 0.0f,
+                 "insufficient material should be a draw");
+}
+
 }  // namespace
 
 int main() {
@@ -602,6 +648,7 @@ int main() {
         test_puzzle_first_move_boost_then_normal_move();
         test_puzzle_first_move_served_by_the_table_keeps_the_boost();
         test_slow_puzzle_game_is_not_lost_behind_a_fast_one();
+        test_game_conclusion_signs_and_reasons();
         return 0;
     }
     catch (const std::exception& error) {

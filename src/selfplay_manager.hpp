@@ -28,6 +28,27 @@ struct SelfPlayStats {
     std::uint64_t replayed_plies = 0;   // historique de puzzle rejoue
 };
 
+// Conclusion d'une partie terminee : issue du point de vue du camp au trait et
+// raison de fin (0 mat, 1 pat, 2 repetition, 3 cinquante coups, 4 materiel
+// insuffisant, 5 longueur maximale). Le mat prime quand les conditions se
+// recouvrent, comme dans la recherche.
+struct GameConclusion {
+    float final_outcome = 0.0f;
+    int end_reason = 1;
+};
+
+inline GameConclusion conclure_partie(Chessboard& board,
+                                      bool longueur_max_atteinte) {
+    if (!board.hasAnyLegalMove() && board.isInCheck()) {
+        return {board.getTurn() == WHITE ? -1.0f : 1.0f, 0};
+    }
+    if (longueur_max_atteinte) return {0.0f, 5};
+    if (board.checkThreefoldRepetition()) return {0.0f, 2};
+    if (board.getHalfMoveClock() >= 100) return {0.0f, 3};
+    if (board.checkInsufficientMaterial()) return {0.0f, 4};
+    return {0.0f, 1};
+}
+
 struct ThreadLocalBuffer {
     std::vector<MCTSNode*> leaves;
     std::vector<int> game_indices;

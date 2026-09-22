@@ -276,7 +276,7 @@ Ne pas utiliser aveuglément un état de partie mémorisé si le chemin de simul
 - [x] Aucun appel NN n'est ajouté sur un terminal connu.
 - [x] Les tests n'exigent pas qu'un modèle réel trouve le mat : ils vérifient la règle et le backup.
 - [x] Le seuil de 100 actuellement choisi par le moteur n'est pas modifié dans ce lot.
-- [ ] R3-T5 reste partiel : le chemin `advance_to_leaf` est couvert par la recherche réelle, mais l'issue finale enregistrée par le gestionnaire self-play n'a pas de test dédié à ce cas.
+- [x] R3-T5 est couvert : la classification finale du gestionnaire self-play est extraite dans `conclure_partie` et testée sur les deux camps matés (+1 et -1), le pat, la répétition, les cinquante coups, le matériel insuffisant et la longueur maximale. Mutation vérifiée sur le signe.
 
 ## 6. R4 : appliquer le bruit de racine même après un hit TT
 
