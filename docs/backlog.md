@@ -393,6 +393,16 @@ désappris. Attention à ne pas conclure sur le seul prior : une position facile
 peut le faire monter sans rapport avec le confondant, d'où la comparaison de
 plusieurs métriques.
 
+**Outil fait le 2026-09-22.** `puzzle_bench.py --comparer-historique` mesure
+chaque puzzle deux fois, avec puis sans historique, dans le même travailleur.
+Il écrit le CSV avec historique, un CSV `_sans`, leurs sidecars, et un rapport
+qui ouvre sur la section de comparaison appariée. Le chiffre à suivre est
+l'écart médian du prior du coup solution (`avec - sans`), accompagné de la part
+de visites, de la value, des taux de résolution avec McNemar apparié et de
+l'accord des coups de recherche. La fonction pure `comparer_historique` vit
+dans `bench_metrics.py` et se teste sans modèle. Reste à lancer la campagne sur
+le modèle courant puis après réentraînement sur les données corrigées.
+
 Le banc doit rester disjoint de l'entraînement, c'est le cas aujourd'hui
 (0 recouvrement entre les 5 000 puzzles du banc et les 100 000 de
 `training_data/puzzles_train.txt`).

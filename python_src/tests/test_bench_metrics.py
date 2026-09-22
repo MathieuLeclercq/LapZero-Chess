@@ -587,3 +587,131 @@ def test_format_report_produit_des_tables_markdown_valides():
         while j < len(lignes) and lignes[j].startswith("|"):
             assert lignes[j].count("|") - 1 == cols_tete, lignes[j]
             j += 1
+
+
+from bench_metrics import (  # noqa: E402
+    PuzzleMeasure,
+    comparer_historique,
+    format_comparaison,
+)
+
+
+def _mesure(ligne, p_correct, value=0.0, reussi=False, coup="a2a3",
+            part_visites=0.0, erreur="", reussi_reseau=False):
+    return PuzzleMeasure(
+        ligne=ligne, rating=1500, themes="fork", plies_historique=10,
+        nb_coups_legaux=30, coup_reseau=coup, reussi_reseau=reussi_reseau,
+        p_correct_reseau=p_correct, rang_correct_reseau=1, value_reseau=value,
+        coup_recherche=coup, reussi_recherche=reussi,
+        part_visites_correct=part_visites, duree_s=0.1, erreur=erreur)
+
+
+def test_comparer_historique_apparie_par_ligne_et_mesure_l_ecart():
+    """L'ecart apparie est la grandeur du confondant : negatif tant que la
+    presentation sans historique gonfle le prior du coup solution."""
+    avec = [
+        _mesure(0, 0.05, value=-0.8, reussi=True, coup="a2a3",
+                part_visites=0.9),
+        _mesure(1, 0.30, value=0.1, reussi=False, coup="b2b3",
+                part_visites=0.4),
+    ]
+    sans = [
+        _mesure(0, 0.39, value=0.1, reussi=False, coup="c2c3",
+                part_visites=0.2),
+        _mesure(1, 0.50, value=0.2, reussi=True, coup="b2b3",
+                part_visites=0.6),
+    ]
+
+    c = comparer_historique(avec, sans)
+
+    assert c.n == 2
+    assert c.non_apparies == 0
+    assert c.p_correct_median_avec == pytest.approx(0.175)
+    assert c.p_correct_median_sans == pytest.approx(0.445)
+    assert c.delta_p_correct_median == pytest.approx(-0.27)
+    assert c.delta_part_visites_median == pytest.approx(0.25)
+    assert c.delta_value_median == pytest.approx(-0.5)
+    assert c.recherche_avec == 1
+    assert c.recherche_sans == 1
+    assert c.mcnemar_b == 1
+    assert c.mcnemar_c == 1
+    assert c.accord_coups == pytest.approx(0.5)
+
+
+def test_comparer_historique_ecarte_les_paires_en_erreur():
+    avec = [_mesure(0, 0.1), _mesure(1, 0.2, erreur="solution_illegale")]
+    sans = [_mesure(0, 0.2), _mesure(1, 0.3)]
+
+    c = comparer_historique(avec, sans)
+
+    assert c.n == 1
+    assert c.non_apparies == 1
+
+
+def test_comparer_historique_ecarte_une_ligne_absente():
+    c = comparer_historique([_mesure(0, 0.1), _mesure(1, 0.2)],
+                            [_mesure(0, 0.2)])
+
+    assert c.n == 1
+    assert c.non_apparies == 1
+
+
+def test_comparer_historique_supporte_les_listes_vides():
+    c = comparer_historique([], [])
+
+    assert c.n == 0
+    assert c.mcnemar_p == 1.0
+    assert c.delta_p_correct_median == 0.0
+
+
+def test_format_comparaison_nomme_le_chiffre_a_suivre():
+    c = comparer_historique([_mesure(0, 0.05)], [_mesure(0, 0.39)])
+
+    texte = format_comparaison(c, {})
+
+    assert "Comparaison avec / sans historique" in texte
+    assert "ecart median" in texte
+    assert "-0.3400" in texte
+    assert "Puzzles apparies : **1**" in texte
+    assert "—" not in texte
+
+
+def test_traiter_lot_en_comparaison_mesure_les_deux_passes(monkeypatch):
+    """Le mode comparaison mesure chaque puzzle deux fois, avec puis sans
+    historique, dans le meme processus travailleur."""
+    import bench_metrics
+    import puzzle_bench
+
+    appels = []
+
+    def fausse_mesure(puzzle, policy_fn, search_fn, sans_historique=False,
+                      horloge=None):
+        appels.append(sans_historique)
+        return ("mesure", puzzle.ligne, sans_historique)
+
+    monkeypatch.setattr(bench_metrics, "measure_puzzle", fausse_mesure)
+    monkeypatch.setitem(puzzle_bench._ETAT, "policy_fn", object())
+    monkeypatch.setitem(puzzle_bench._ETAT, "search_fn", object())
+    monkeypatch.setitem(puzzle_bench._ETAT, "sans_historique", False)
+    monkeypatch.setitem(puzzle_bench._ETAT, "comparer_historique", True)
+
+    resultat = puzzle_bench.traiter_lot([(3, LIGNE + "\n")])
+
+    assert appels == [False, True]
+    assert resultat == [(("mesure", 3, False), ("mesure", 3, True))]
+
+
+def test_traiter_lot_sans_comparaison_renvoie_des_mesures_simples(monkeypatch):
+    import bench_metrics
+    import puzzle_bench
+
+    monkeypatch.setattr(bench_metrics, "measure_puzzle",
+                        lambda puzzle, policy_fn, search_fn,
+                        sans_historique=False, horloge=None:
+                        ("mesure", puzzle.ligne))
+    monkeypatch.setitem(puzzle_bench._ETAT, "policy_fn", object())
+    monkeypatch.setitem(puzzle_bench._ETAT, "search_fn", object())
+    monkeypatch.setitem(puzzle_bench._ETAT, "sans_historique", False)
+    monkeypatch.setitem(puzzle_bench._ETAT, "comparer_historique", False)
+
+    assert puzzle_bench.traiter_lot([(3, LIGNE + "\n")]) == [("mesure", 3)]

@@ -444,3 +444,128 @@ def format_report(stats: BenchStats, contexte: dict) -> str:
         ]
 
     return "\n".join(lignes) + "\n"
+
+
+@dataclass(frozen=True)
+class ComparaisonHistorique:
+    """Ecart apparie entre les deux presentations des memes puzzles."""
+    n: int
+    p_correct_median_avec: float
+    p_correct_median_sans: float
+    delta_p_correct_median: float
+    delta_part_visites_median: float
+    value_median_avec: float
+    value_median_sans: float
+    delta_value_median: float
+    recherche_avec: int
+    recherche_sans: int
+    mcnemar_b: int
+    mcnemar_c: int
+    mcnemar_chi2: float
+    mcnemar_p: float
+    accord_coups: float
+    non_apparies: int
+
+
+def comparer_historique(mesures_avec: list,
+                        mesures_sans: list) -> ComparaisonHistorique:
+    """Ecart entre les passes avec et sans historique, puzzle par puzzle.
+
+    Le confondant « pas d'historique = position tactique » gonfle le prior du
+    coup solution et la value quand l'historique est vide. L'ecart apparie
+    `avec - sans` est donc fortement negatif tant que le raccourci est present,
+    et doit converger vers zero quand il est desappris. C'est le chiffre a
+    suivre d'une campagne a l'autre ; les taux de resolution, la part de
+    visites, la value et l'accord des coups de recherche l'accompagnent pour
+    eviter de conclure sur le seul prior.
+
+    Les puzzles en erreur d'un cote ou de l'autre sont ecartes et comptes.
+    """
+    par_ligne_sans = {m.ligne: m for m in mesures_sans}
+    paires = []
+    non_apparies = 0
+    for avec in mesures_avec:
+        sans = par_ligne_sans.get(avec.ligne)
+        if sans is None or avec.erreur or sans.erreur:
+            non_apparies += 1
+            continue
+        paires.append((avec, sans))
+
+    if not paires:
+        return ComparaisonHistorique(
+            n=0, p_correct_median_avec=0.0, p_correct_median_sans=0.0,
+            delta_p_correct_median=0.0, delta_part_visites_median=0.0,
+            value_median_avec=0.0, value_median_sans=0.0,
+            delta_value_median=0.0, recherche_avec=0, recherche_sans=0,
+            mcnemar_b=0, mcnemar_c=0, mcnemar_chi2=0.0, mcnemar_p=1.0,
+            accord_coups=0.0, non_apparies=non_apparies)
+
+    b = sum(1 for a, s in paires
+            if a.reussi_recherche and not s.reussi_recherche)
+    c = sum(1 for a, s in paires
+            if not a.reussi_recherche and s.reussi_recherche)
+    chi2, p = mcnemar(b, c)
+
+    return ComparaisonHistorique(
+        n=len(paires),
+        p_correct_median_avec=statistics.median(
+            a.p_correct_reseau for a, _ in paires),
+        p_correct_median_sans=statistics.median(
+            s.p_correct_reseau for _, s in paires),
+        delta_p_correct_median=statistics.median(
+            a.p_correct_reseau - s.p_correct_reseau for a, s in paires),
+        delta_part_visites_median=statistics.median(
+            a.part_visites_correct - s.part_visites_correct for a, s in paires),
+        value_median_avec=statistics.median(a.value_reseau for a, _ in paires),
+        value_median_sans=statistics.median(s.value_reseau for _, s in paires),
+        delta_value_median=statistics.median(
+            a.value_reseau - s.value_reseau for a, s in paires),
+        recherche_avec=sum(1 for a, _ in paires if a.reussi_recherche),
+        recherche_sans=sum(1 for _, s in paires if s.reussi_recherche),
+        mcnemar_b=b, mcnemar_c=c, mcnemar_chi2=chi2, mcnemar_p=p,
+        accord_coups=sum(1 for a, s in paires
+                         if a.coup_recherche == s.coup_recherche) / len(paires),
+        non_apparies=non_apparies,
+    )
+
+
+def format_comparaison(comparaison: ComparaisonHistorique,
+                       contexte: dict) -> str:
+    """Section de comparaison, avec le chiffre a suivre en tete."""
+    ecartes = (f", {comparaison.non_apparies} ecartes"
+               if comparaison.non_apparies else "")
+    lignes = [
+        "",
+        "## Comparaison avec / sans historique (passe appariee)",
+        "",
+        "Meme modele, memes puzzles, meme budget : la seule difference est la",
+        "presentation. Tant que le raccourci « pas d'historique = position",
+        "tactique » est present, la passe sans historique gonfle le prior du",
+        "coup solution et la value. Le chiffre a suivre d'une campagne a",
+        "l'autre est l'ecart median du prior : il doit converger vers zero",
+        "quand le raccourci est desappris. Les autres lignes evitent de",
+        "conclure sur le seul prior.",
+        "",
+        f"- Puzzles apparies : **{comparaison.n}**{ecartes}",
+        f"- Prior median du coup solution : avec "
+        f"{comparaison.p_correct_median_avec:.3f}, sans "
+        f"{comparaison.p_correct_median_sans:.3f}, **ecart median "
+        f"{comparaison.delta_p_correct_median:+.4f}**",
+        f"- Part de visites mediane du coup solution : ecart median "
+        f"{comparaison.delta_part_visites_median:+.4f}",
+        f"- Value du reseau : avec {comparaison.value_median_avec:+.3f}, sans "
+        f"{comparaison.value_median_sans:+.3f}, ecart median "
+        f"{comparaison.delta_value_median:+.3f}",
+        f"- Recherche : avec {comparaison.recherche_avec}/{comparaison.n}, "
+        f"sans {comparaison.recherche_sans}/{comparaison.n}",
+        f"- McNemar apparie : reussi avec seul {comparaison.mcnemar_b}, reussi "
+        f"sans seul {comparaison.mcnemar_c}, chi2 = "
+        f"{comparaison.mcnemar_chi2:.2f}, p = {comparaison.mcnemar_p:.2e}",
+        f"- Accord des coups de recherche entre les deux passes : "
+        f"{100.0 * comparaison.accord_coups:.1f} %",
+        "",
+        "Les deux rapports complets suivent : bras avec historique, puis bras",
+        "sans historique.",
+        "",
+    ]
+    return "\n".join(lignes) + "\n"

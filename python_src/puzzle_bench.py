@@ -252,7 +252,8 @@ def initialiser_travailleur(onnx: str, simulations, c_puct: float,
                             search_seconds: float | None = None,
                             virtual_loss: int = 1,
                             fpu_reduction: float = 0.30,
-                            collision_attempts: int = 4) -> None:
+                            collision_attempts: int = 4,
+                            comparer_historique: bool = False) -> None:
     import onnxruntime as ort
 
     options = ort.SessionOptions()
@@ -268,6 +269,7 @@ def initialiser_travailleur(onnx: str, simulations, c_puct: float,
         virtual_loss=virtual_loss, fpu_reduction=fpu_reduction,
         collision_attempts=collision_attempts)
     _ETAT["sans_historique"] = sans_historique
+    _ETAT["comparer_historique"] = comparer_historique
 
 
 def initialiser_gpu(onnx: str, simulations, c_puct: float,
@@ -276,7 +278,8 @@ def initialiser_gpu(onnx: str, simulations, c_puct: float,
                     search_seconds: float | None,
                     virtual_loss: int = 1,
                     fpu_reduction: float = 0.30,
-                    collision_attempts: int = 4) -> None:
+                    collision_attempts: int = 4,
+                    comparer_historique: bool = False) -> None:
     """Un seul processus GPU : la policy brute garde sa session CPU, dont le
     cout est exclu du temps de recherche."""
     import onnxruntime as ort
@@ -294,21 +297,30 @@ def initialiser_gpu(onnx: str, simulations, c_puct: float,
         virtual_loss=virtual_loss, fpu_reduction=fpu_reduction,
         collision_attempts=collision_attempts)
     _ETAT["sans_historique"] = sans_historique
+    _ETAT["comparer_historique"] = comparer_historique
 
 
 def traiter_lot(lot: list) -> list:
-    """lot : liste de (index, ligne brute). Renvoie des PuzzleMeasure."""
+    """lot : liste de (index, ligne brute).
+
+    Renvoie des PuzzleMeasure, ou des couples (avec, sans) en mode comparaison.
+    """
     from bench_metrics import measure_puzzle, parse_bench_line
 
-    return [
-        measure_puzzle(
-            parse_bench_line(index, ligne),
-            _ETAT["policy_fn"],
-            _ETAT["search_fn"],
-            sans_historique=_ETAT["sans_historique"],
-        )
-        for index, ligne in lot
-    ]
+    resultats = []
+    for index, ligne in lot:
+        puzzle = parse_bench_line(index, ligne)
+        avec = measure_puzzle(
+            puzzle, _ETAT["policy_fn"], _ETAT["search_fn"],
+            sans_historique=_ETAT["sans_historique"])
+        if _ETAT.get("comparer_historique"):
+            sans = measure_puzzle(
+                puzzle, _ETAT["policy_fn"], _ETAT["search_fn"],
+                sans_historique=True)
+            resultats.append((avec, sans))
+        else:
+            resultats.append(avec)
+    return resultats
 
 
 def ecrire_csv(mesures: list, chemin: Path) -> None:
@@ -352,7 +364,8 @@ def main() -> int:
     import argparse
     import multiprocessing as mp
 
-    from bench_metrics import aggregate, format_report
+    from bench_metrics import (aggregate, comparer_historique,
+                               format_comparaison, format_report)
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path, required=True,
@@ -403,6 +416,10 @@ def main() -> int:
                              "par tranche")
     parser.add_argument("--sans-historique", action="store_true",
                         help="presente les puzzles avec l'historique vide")
+    parser.add_argument("--comparer-historique", action="store_true",
+                        help="mesure chaque puzzle avec et sans historique, "
+                             "puis rapporte l'ecart apparie entre les deux "
+                             "passes")
     args = parser.parse_args()
 
     if args.batch_size < 0:
@@ -429,6 +446,10 @@ def main() -> int:
         parser.error("--fpu doit etre positif ou nul")
     if args.collision_attempts < 1:
         parser.error("--collision-attempts doit etre au moins 1")
+    if args.sans_historique and args.comparer_historique:
+        parser.error("--sans-historique et --comparer-historique sont "
+                     "exclusifs : la comparaison mesure elle-meme les deux "
+                     "passes")
 
     simulations = args.simulations
     if simulations is None and args.search_seconds is None:
@@ -457,7 +478,9 @@ def main() -> int:
     # poser dans l'initialiseur serait trop tard.
     os.environ["OMP_NUM_THREADS"] = "1"
 
-    suffixe = " (sans historique)" if args.sans_historique else ""
+    suffixe = (" (comparaison avec / sans historique)"
+               if args.comparer_historique else
+               (" (sans historique)" if args.sans_historique else ""))
     politique = ("legacy" if args.cache_history_depth == -1 else
                  f"h{args.cache_history_depth}")
     print(f"{len(lignes)} puzzles sur {total_fichier} du fichier, "
@@ -470,6 +493,17 @@ def main() -> int:
     debut = time.perf_counter()
     lots = _lots(lignes, 16)
     mesures: list = []
+    mesures_sans: list = []
+
+    def collecter(resultat):
+        """Range un lot selon le mode : mesures seules, ou couples apparies."""
+        if args.comparer_historique:
+            for avec, sans in resultat:
+                mesures.append(avec)
+                mesures_sans.append(sans)
+        else:
+            mesures.extend(resultat)
+
     if args.gpu:
         # Les DLL CUDA de torch rendent celles du provider ONNX visibles au
         # processus avant la construction de l'evaluateur C++.
@@ -481,9 +515,10 @@ def main() -> int:
                         args.search_seconds,
                         virtual_loss=args.virtual_loss,
                         fpu_reduction=args.fpu,
-                        collision_attempts=args.collision_attempts)
+                        collision_attempts=args.collision_attempts,
+                        comparer_historique=args.comparer_historique)
         for i, lot in enumerate(lots, 1):
-            mesures.extend(traiter_lot(lot))
+            collecter(traiter_lot(lot))
             if i % 10 == 0 or i == len(lots):
                 ecoule = time.perf_counter() - debut
                 print(f"  {len(mesures)}/{len(lignes)} puzzles, "
@@ -496,10 +531,11 @@ def main() -> int:
                                args.sans_historique, args.batch_size,
                                args.cache_history_depth, args.search_workers,
                                args.search_seconds, args.virtual_loss,
-                               args.fpu, args.collision_attempts)) as pool:
+                               args.fpu, args.collision_attempts,
+                               args.comparer_historique)) as pool:
             for i, resultat in enumerate(
                     pool.imap_unordered(traiter_lot, lots), 1):
-                mesures.extend(resultat)
+                collecter(resultat)
                 if i % 10 == 0 or i == len(lots):
                     ecoule = time.perf_counter() - debut
                     print(f"  {len(mesures)}/{len(lignes)} puzzles, "
@@ -509,6 +545,7 @@ def main() -> int:
     duree = time.perf_counter() - debut
 
     stats = aggregate(mesures)
+    stats_sans = aggregate(mesures_sans) if args.comparer_historique else None
     contexte = {
         "modele": Path(onnx).name,
         "iteration": meta.get("iteration"),
@@ -521,6 +558,7 @@ def main() -> int:
         "cache_history_depth": args.cache_history_depth,
         "fichier_banc": str(args.banc),
         "sans_historique": args.sans_historique,
+        "comparer_historique": args.comparer_historique,
         "duree_totale_s": duree,
         "travailleurs": args.travailleurs,
         "search_workers": args.search_workers,
@@ -546,16 +584,37 @@ def main() -> int:
     ecrire_csv(mesures, out_csv)
     ecrire_sidecar(contexte, out_csv)
     out_rapport.parent.mkdir(parents=True, exist_ok=True)
-    out_rapport.write_text(format_report(stats, contexte), encoding="utf-8")
 
-    print(f"\nCSV     : {out_csv}")
+    if args.comparer_historique:
+        contexte_sans = dict(contexte)
+        contexte_sans["sans_historique"] = True
+        comparaison = comparer_historique(mesures, mesures_sans)
+        out_csv_sans = out_csv.with_name(
+            out_csv.stem + "_sans" + out_csv.suffix)
+        ecrire_csv(mesures_sans, out_csv_sans)
+        ecrire_sidecar(contexte_sans, out_csv_sans)
+        out_rapport.write_text(
+            format_report(stats, contexte)
+            + format_comparaison(comparaison, contexte)
+            + format_report(stats_sans, contexte_sans),
+            encoding="utf-8")
+        print(f"\nCSV avec : {out_csv}")
+        print(f"CSV sans : {out_csv_sans}")
+    else:
+        out_rapport.write_text(
+            format_report(stats, contexte), encoding="utf-8")
+        print(f"\nCSV     : {out_csv}")
+
     print(f"Rapport : {out_rapport}")
     print(f"Duree   : {duree / 60.0:.1f} min")
-    if stats.erreurs:
+    erreurs = stats.erreurs
+    if stats_sans is not None:
+        erreurs = erreurs or stats_sans.erreurs
+    if erreurs:
         # Un CSV contenant des lignes en erreur ne doit jamais se faire passer
         # pour une campagne reussie : la comparaison les refusera, mais le
         # statut d'echec doit deja etre visible ici.
-        print(f"Erreurs de donnees : {stats.erreurs}", file=sys.stderr)
+        print(f"Erreurs de donnees : {erreurs}", file=sys.stderr)
         return 1
     return 0
 

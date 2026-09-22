@@ -478,3 +478,72 @@ def test_main_refuse_un_fichier_de_banc_absent(tmp_path, monkeypatch):
     ])
 
     assert puzzle_bench.main() == 2
+
+
+def test_main_en_comparaison_ecrit_les_deux_csv_et_l_ecart(
+        tmp_path, monkeypatch):
+    """Le mode comparaison produit les deux passes et la section d'ecart, sur
+    les memes puzzles dans le meme ordre."""
+    import csv as csv_mod
+    import json
+    import puzzle_bench
+    from puzzle_bench import chemin_sidecar
+
+    sortie_csv = tmp_path / "res.csv"
+    sortie_rapport = tmp_path / "rapport.md"
+
+    monkeypatch.setattr(sys, "argv", [
+        "puzzle_bench.py",
+        "--model", str(CHECKPOINT),
+        "--banc", str(BANC),
+        "--limite", "2",
+        "--simulations", "8",
+        "--travailleurs", "1",
+        "--comparer-historique",
+        "--dossier-onnx", str(tmp_path / "onnx"),
+        "--out-csv", str(sortie_csv),
+        "--out-rapport", str(sortie_rapport),
+    ])
+
+    assert puzzle_bench.main() == 0
+
+    with open(sortie_csv, encoding="utf-8", newline="") as f:
+        avec = list(csv_mod.DictReader(f))
+    sans_csv = tmp_path / "res_sans.csv"
+    with open(sans_csv, encoding="utf-8", newline="") as f:
+        sans = list(csv_mod.DictReader(f))
+
+    assert len(avec) == 2
+    assert len(sans) == 2
+    assert [l["ligne"] for l in avec] == [l["ligne"] for l in sans]
+
+    sidecar_avec = json.loads(
+        chemin_sidecar(sortie_csv).read_text(encoding="utf-8"))
+    sidecar_sans = json.loads(
+        chemin_sidecar(sans_csv).read_text(encoding="utf-8"))
+    assert sidecar_avec["comparer_historique"] is True
+    assert sidecar_avec["sans_historique"] is False
+    assert sidecar_sans["sans_historique"] is True
+
+    rapport = sortie_rapport.read_text(encoding="utf-8")
+    assert "Comparaison avec / sans historique" in rapport
+    assert "ecart median" in rapport
+    assert "bras sans historique" in rapport
+
+
+def test_main_refuse_les_deux_modes_d_historique(tmp_path, monkeypatch):
+    import puzzle_bench
+
+    onnx = tmp_path / "modele.onnx"
+    onnx.write_bytes(b"onnx factice")
+    monkeypatch.setattr(puzzle_bench, "resoudre_modele",
+                        lambda *args: (onnx, {}))
+    monkeypatch.setattr(sys, "argv", [
+        "puzzle_bench.py", "--model", str(onnx), "--banc", str(BANC),
+        "--sans-historique", "--comparer-historique",
+        "--out-csv", str(tmp_path / "r.csv"),
+        "--out-rapport", str(tmp_path / "r.md"),
+    ])
+
+    with pytest.raises(SystemExit):
+        puzzle_bench.main()
