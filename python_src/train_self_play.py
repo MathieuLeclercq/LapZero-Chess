@@ -28,6 +28,12 @@ PUZZLES_PATH = str(Path(__file__).resolve().parents[1]
 STOCKFISH_PATH = str(Path(__file__).resolve().parent / "lichess_bot"
                      / "stockfish" / "stockfish-windows-x86-64-universal.exe")
 
+# Le self-play doit chercher avec les memes reglages que le bot, sinon les
+# donnees d'entrainement viennent d'une autre recherche. Virtual loss 2 :
+# +9 a +20 % de debit mesures, qualite non-inferieure sur 2500 puzzles.
+# Voir docs/superpowers/specs/2026-09-22-rebalayage-virtual-loss-resultats.md.
+MCTS_VIRTUAL_LOSS = 2
+
 
 # ============================================================
 #                     DATASET
@@ -77,7 +83,8 @@ def generate_games(
         games_per_iter,
         slow_ratio,
         tt_size,
-        PUZZLES_PATH
+        PUZZLES_PATH,
+        MCTS_VIRTUAL_LOSS
     )
 
     data, stats = convert_game_results(game_results)

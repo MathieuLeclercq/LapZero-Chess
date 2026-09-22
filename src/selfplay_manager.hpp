@@ -144,7 +144,8 @@ public:
     SelfPlayManager(Evaluator* evaluator, int num_concurrent_games,
                     int slow_sims, int fast_sims, float slow_ratio,
                     size_t tt_size = 2097143,
-                    const std::string& puzzles_path = "../training_data/puzzles_train.txt");
+                    const std::string& puzzles_path = "../training_data/puzzles_train.txt",
+                    SearchTuning tuning = SearchTuning{});
     std::vector<GameResult> generate_games(int total_games_to_play);
     SelfPlayStats get_stats() const;
 

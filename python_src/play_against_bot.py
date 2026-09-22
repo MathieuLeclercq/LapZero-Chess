@@ -26,6 +26,10 @@ CHECKPOINT_PATH = "checkpoints/2026_03_21_10h36_iter136_unsupervised.onnx"
 # Nombre de positions evaluees par inference, grace au virtual loss.
 MCTS_BATCH_SIZE = 8
 
+# Virtual loss 2 : +9 a +20 % de debit mesures, qualite non-inferieure sur
+# 2500 puzzles. Voir docs/superpowers/specs/2026-09-22-rebalayage-virtual-loss-resultats.md.
+MCTS_VIRTUAL_LOSS = 2
+
 MCTS_PARAMS = {
     "num_sim": 1200,
     "tau_first_move": 2,
@@ -348,6 +352,7 @@ def main():
         print(f"GPU indisponible, repli sur le CPU : {e}")
         evaluator = chess_engine.ONNXEvaluator(CHECKPOINT_PATH, False)
     mcts_engine = chess_engine.MCTS(evaluator)
+    mcts_engine.set_tuning(MCTS_VIRTUAL_LOSS)
 
     board = chess_engine.Chessboard()
     board.set_startup_pieces()

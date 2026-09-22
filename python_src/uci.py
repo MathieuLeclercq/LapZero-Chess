@@ -40,6 +40,11 @@ MCTS_WORKER_COUNT = 8
 # ignorees, donc la recherche est inchangee. Voir
 # docs/superpowers/specs/2026-09-19-cout-calcul-cpu-gpu.md.
 MCTS_FIXED_BATCH = True
+
+# Virtual loss 2 : +9 a +20 % de debit mesures sur le banc de recherche, et
+# qualite non-inferieure sur 2500 puzzles, IC95 [-0.4 ; +0.56] point.
+# Voir docs/superpowers/specs/2026-09-22-rebalayage-virtual-loss-resultats.md.
+MCTS_VIRTUAL_LOSS = 2
 SNAPSHOT_INTERVAL = 0.1
 NB_FAST_PLIES_OPENING = 10
 
@@ -96,6 +101,7 @@ class UCIEngine:
                      else chess_engine.MCTS(self.evaluator, tt_size=4_000_000))
         if mcts is None:
             self.mcts.set_fixed_batch(MCTS_FIXED_BATCH)
+            self.mcts.set_tuning(MCTS_VIRTUAL_LOSS)
         self.search_thread = None
 
         self.stop_event = threading.Event()

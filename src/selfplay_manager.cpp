@@ -15,7 +15,8 @@ SelfPlayManager::SelfPlayManager(
     int num_concurrent_games,
     int slow_sims, int fast_sims, float slow_ratio,
     size_t tt_size,
-    const std::string& puzzles_path)
+    const std::string& puzzles_path,
+    SearchTuning tuning)
     : m_evaluator(evaluator),
     m_num_concurrent_games(num_concurrent_games),
     m_slow_sims(slow_sims),
@@ -44,6 +45,9 @@ SelfPlayManager::SelfPlayManager(
     m_batch_input.resize(num_concurrent_games * 119 * 64);
 
     m_shared_mcts = std::make_unique<MCTS>(m_evaluator, tt_size);
+    // Le self-play doit chercher avec les memes reglages que le bot, sinon les
+    // donnees d'entrainement viennent d'une autre recherche.
+    m_shared_mcts->set_tuning(tuning);
 
     m_tactical_boost.resize(num_concurrent_games, false);
     load_tactical_puzzles(puzzles_path);

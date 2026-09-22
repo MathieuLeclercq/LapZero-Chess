@@ -26,6 +26,10 @@ MAX_WORKERS = 8  # Nombre de parties en parallèle
 # Positions evaluees par inference, grace au virtual loss. Le GPU n'est pas
 # active ici : huit processus se disputant la meme carte tombent sous le CPU.
 MCTS_BATCH_SIZE = 8
+
+# Virtual loss 2 : +9 a +20 % de debit mesures, qualite non-inferieure sur
+# 2500 puzzles. Voir docs/superpowers/specs/2026-09-22-rebalayage-virtual-loss-resultats.md.
+MCTS_VIRTUAL_LOSS = 2
 WHR_STATE_FILE = "tournament_data/tournament_state.whr"
 STATS_FILE = "tournament_data/tournament_stats.json"
 MODE = "default"  # Options : "default", "all", "x-y", ou "endless"
@@ -107,6 +111,7 @@ def play_game_worker(args):
     else:
         evaluator_w = chess_engine.ONNXEvaluator(os.path.join(CHECKPOINT_DIR, white_p))
         model_white = chess_engine.MCTS(evaluator_w, tt_size=131071)
+        model_white.set_tuning(MCTS_VIRTUAL_LOSS)
 
     # 2. Instanciation locale du modèle Noir
     if black_h == sf_hash_str:
@@ -114,6 +119,7 @@ def play_game_worker(args):
     else:
         evaluator = chess_engine.ONNXEvaluator(os.path.join(CHECKPOINT_DIR, black_p))
         model_black = chess_engine.MCTS(evaluator, tt_size=131071)
+        model_black.set_tuning(MCTS_VIRTUAL_LOSS)
 
     # 3. Exécution de la partie
     winner, moves = play_game_between_two_bots(model_white, model_black, sims)

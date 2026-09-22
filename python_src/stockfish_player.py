@@ -8,6 +8,10 @@ from datetime import datetime
 import chess_engine
 from lib import chose_move_idx, decode_move_index, parse_uci_to_coords, coords_to_uci, move_to_san
 
+# Virtual loss 2 : +9 a +20 % de debit mesures, qualite non-inferieure sur
+# 2500 puzzles. Voir docs/superpowers/specs/2026-09-22-rebalayage-virtual-loss-resultats.md.
+MCTS_VIRTUAL_LOSS = 2
+
 
 class StockfishPlayer:
     def __init__(self, path="stockfish.exe", elo=None):
@@ -44,6 +48,7 @@ def eval_worker(args):
 
     evaluator = chess_engine.ONNXEvaluator(onnx_path, False)
     mcts = chess_engine.MCTS(evaluator, tt_size=131071)
+    mcts.set_tuning(MCTS_VIRTUAL_LOSS)
 
     board = chess_engine.Chessboard()
     board.set_startup_pieces()

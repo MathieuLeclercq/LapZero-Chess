@@ -22,11 +22,12 @@ from uci import UCIEngine
 RACINE_PROJET = Path(__file__).resolve().parents[2]
 
 
-def test_les_trois_lanceurs_utilisent_le_batch_valide():
-    """Le batch 8 est le compromis valide par le banc appaire de puzzles."""
+def test_les_trois_lanceurs_partagent_le_batch_et_le_virtual_loss():
+    """Le batch 8 et le virtual loss 2 sont les reglages valides par les bancs."""
     for nom in ("uci.py", "play_against_bot.py", "tournament_elo.py"):
         source = (RACINE_PROJET / "python_src" / nom).read_text(encoding="utf-8")
         assert "MCTS_BATCH_SIZE = 8" in source, nom
+        assert "MCTS_VIRTUAL_LOSS = 2" in source, nom
 
 
 def test_le_modele_uci_configure_est_resolu_depuis_le_depot():
@@ -90,9 +91,9 @@ def test_le_constructeur_accepte_des_dependances_injectees():
     assert isinstance(moteur.board, chess_engine.Chessboard)
 
 
-def test_le_constructeur_active_le_lot_fixe_par_defaut(monkeypatch):
-    """Sur le chemin de production, le MCTS recoit le lot de forme fixe, qui
-    evitait un facteur 2 a 3 sur le banc du 2026-09-19."""
+def test_le_constructeur_active_le_lot_fixe_et_le_tuning(monkeypatch):
+    """Sur le chemin de production, le MCTS recoit le lot de forme fixe et le
+    virtual loss valide par le rebalayage."""
     import uci
 
     appels = []
@@ -102,13 +103,19 @@ def test_le_constructeur_active_le_lot_fixe_par_defaut(monkeypatch):
             pass
 
         def set_fixed_batch(self, enabled):
-            appels.append(enabled)
+            appels.append(("fixed_batch", enabled))
+
+        def set_tuning(self, virtual_loss, fpu_reduction=0.30,
+                       collision_attempt_factor=4):
+            appels.append(("tuning", virtual_loss))
 
     monkeypatch.setattr(uci.chess_engine, "MCTS", FauxMCTS)
     uci.UCIEngine(evaluator=object())
 
-    assert appels == [uci.MCTS_FIXED_BATCH]
+    assert appels == [("fixed_batch", uci.MCTS_FIXED_BATCH),
+                      ("tuning", uci.MCTS_VIRTUAL_LOSS)]
     assert uci.MCTS_FIXED_BATCH is True
+    assert uci.MCTS_VIRTUAL_LOSS == 2
 
 
 def test_la_boucle_uci_transmet_le_nombre_de_workers():

@@ -632,6 +632,23 @@ void test_game_conclusion_signs_and_reasons() {
                  "insufficient material should be a draw");
 }
 
+void test_selfplay_uses_the_requested_tuning() {
+    const std::string fixture = ecrire_fixture_puzzle();
+    ControlledEvaluator evaluator;
+
+    SelfPlayManager defaut(&evaluator, 2, 2, 1, 0.5f, 8192, fixture);
+    require_test(
+        SelfPlayTestAccess::mcts(defaut).get_tuning().virtual_loss == 1,
+        "the self-play default tuning should stay 1");
+
+    SelfPlayManager regle(&evaluator, 2, 2, 1, 0.5f, 8192, fixture,
+                          SearchTuning{2, 0.30f, 4});
+    require_test(
+        SelfPlayTestAccess::mcts(regle).get_tuning().virtual_loss == 2,
+        "the requested tuning was not applied to the shared MCTS");
+    std::remove(fixture.c_str());
+}
+
 }  // namespace
 
 int main() {
@@ -649,6 +666,7 @@ int main() {
         test_puzzle_first_move_served_by_the_table_keeps_the_boost();
         test_slow_puzzle_game_is_not_lost_behind_a_fast_one();
         test_game_conclusion_signs_and_reasons();
+        test_selfplay_uses_the_requested_tuning();
         return 0;
     }
     catch (const std::exception& error) {
