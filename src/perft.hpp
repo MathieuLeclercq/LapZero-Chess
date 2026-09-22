@@ -13,6 +13,7 @@
 struct PerftOptions {
     bool strict = false;    // trous 1 et 3 : encodage et hasAnyLegalMove
     bool check_fen = false; // aller-retour toFEN / loadFEN (coûteux, faible profondeur)
+    bool roundtrip = false; // trou 2 : encodeMove(decodeMoveIndex(i)) == i
 };
 
 struct PerftReport {

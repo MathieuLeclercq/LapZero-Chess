@@ -169,9 +169,10 @@ int run_campaign(int max_depth, const PerftOptions& opts, const char* label,
 void print_usage() {
     std::cout <<
         "Usage :\n"
-        "  chess_perft bench   [--strict]             profondeur 1 a 3, rapide\n"
-        "  chess_perft calibre [--strict]             profondeurs figees, environ 23 s\n"
-        "  chess_perft deep    [--strict]             profondeur maximale publiee\n"
+        "  chess_perft bench     [--strict]           profondeur 1 a 3, rapide\n"
+        "  chess_perft roundtrip                     encodage et decodage, profondeur 1 a 3\n"
+        "  chess_perft calibre   [--strict]           profondeurs figees, environ 23 s\n"
+        "  chess_perft deep      [--strict]           profondeur maximale publiee\n"
         "  chess_perft divide <fen|startpos> <n> [--strict] [--check-fen]\n";
 }
 
@@ -197,6 +198,13 @@ int main(int argc, char** argv) {
 
     if (command == "bench") {
         return run_campaign(3, opts, "Palier rapide (profondeur 1 a 3)");
+    }
+    if (command == "roundtrip") {
+        PerftOptions controle = opts;
+        controle.strict = true;
+        controle.roundtrip = true;
+        return run_campaign(3, controle,
+                            "Roundtrip encodage / decodage (profondeur 1 a 3)");
     }
     if (command == "calibre") {
         return run_campaign(0, opts, "Palier calibre (profondeurs figees)",

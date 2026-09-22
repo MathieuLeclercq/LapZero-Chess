@@ -14,6 +14,7 @@ void report_violation(PerftReport& report, const std::string& message) {
 
 void run_strict_checks(Chessboard& board,
                        const std::vector<Move>& moves,
+                       const PerftOptions& opts,
                        PerftReport& report) {
     // Trou 3 : hasAnyLegalMove duplique la boucle interne de
     // getLegalMovesForSquare. On confronte la copie à son original.
@@ -44,6 +45,16 @@ void run_strict_checks(Chessboard& board,
             report_violation(report,
                 "indice duplique, deux coups encodes pareil : " + std::to_string(index));
         }
+        // Trou 2 : le decodage. Le seul controle qui exerce decodeMoveIndex,
+        // que le parcours utilise sinon sans le confronter a son inverse.
+        if (opts.roundtrip) {
+            const int reencode = board.encodeMove(board.decodeMoveIndex(index));
+            if (reencode != index) {
+                report_violation(report,
+                    "roundtrip : l'index " + std::to_string(index)
+                    + " se reencode en " + std::to_string(reencode));
+            }
+        }
     }
 }
 
@@ -64,7 +75,7 @@ uint64_t perft_rec(Chessboard& board, int depth,
 
     std::vector<Move> moves = board.getAllLegalMoves();
 
-    if (opts.strict)    run_strict_checks(board, moves, report);
+    if (opts.strict || opts.roundtrip) run_strict_checks(board, moves, opts, report);
     if (opts.check_fen) run_fen_check(board, report);
 
     uint64_t nodes = 0;
@@ -128,7 +139,7 @@ std::vector<std::pair<std::string, uint64_t>> perft_divide(
 
     // La position racine doit etre controlee elle aussi : perft_rec ne voit
     // que ses descendants.
-    if (opts.strict)    run_strict_checks(board, moves, sink);
+    if (opts.strict || opts.roundtrip) run_strict_checks(board, moves, opts, sink);
     if (opts.check_fen) run_fen_check(board, sink);
 
     for (const Move& move : moves) {
