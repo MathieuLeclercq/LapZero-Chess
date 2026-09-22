@@ -91,6 +91,10 @@ class Chessboard
         int getNumberOfOccupiedSquares() const;
         int getHalfMoveClock() const;
         int encodeMove(const Move& move) const;
+        // Inverse de encodeMove : decode un index de policy (0 a 4671) en coup
+        // absolu, orientation du camp au trait et promotion dame incluses.
+        // Le seul decodeur d'index du moteur.
+        Move decodeMoveIndex(int index) const;
        
         Color getTurn() const;
         GameState getGameState() const;

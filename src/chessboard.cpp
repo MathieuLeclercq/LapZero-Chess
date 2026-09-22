@@ -459,9 +459,72 @@ bool Chessboard::hasAnyLegalMove() {
     return false;
 }
 
-int Chessboard::encodeMove(const Move& move) const
+Move Chessboard::decodeMoveIndex(int index) const
 {
-    int orig_f = move.getOrigSquare().getFile();
+    const bool is_black = (getTurn() == BLACK);
+    const int plane = index / 64;
+    const int remainder = index % 64;
+    int orig_r = remainder / 8;
+    int orig_f = remainder % 8;
+
+    int df = 0, dr = 0;
+    PieceType promotion = NONE;
+
+    if (plane < 56)
+    {
+        // Coups de dame : 8 directions x 7 distances.
+        const int dir_idx = plane / 7;
+        const int dist = (plane % 7) + 1;
+        const int dirs[8][2] = { {0, 1}, {1, 1}, {1, 0}, {1, -1}, {0, -1}, {-1, -1}, {-1, 0}, {-1, 1} };
+        df = dirs[dir_idx][0] * dist;
+        dr = dirs[dir_idx][1] * dist;
+    }
+    else if (plane < 64)
+    {
+        const int knight_idx = plane - 56;
+        const int knight_moves[8][2] = { {1, 2}, {2, 1}, {2, -1}, {1, -2}, {-1, -2}, {-2, -1}, {-2, 1}, {-1, 2} };
+        df = knight_moves[knight_idx][0];
+        dr = knight_moves[knight_idx][1];
+    }
+    else
+    {
+        // Sous-promotions : 3 directions x 3 pieces (cavalier, fou, tour).
+        const int sub_idx = plane - 64;
+        const int dir_idx = sub_idx / 3;
+        const int p_idx = sub_idx % 3;
+        df = dir_idx - 1;
+        dr = 1;
+
+        if (p_idx == 0) promotion = KNIGHT;
+        else if (p_idx == 1) promotion = BISHOP;
+        else promotion = ROOK;
+    }
+
+    int dest_f = orig_f + df;
+    int dest_r = orig_r + dr;
+
+    if (is_black)
+    {
+        orig_r = 7 - orig_r;
+        dest_r = 7 - dest_r;
+    }
+
+    const Square origine = getSquare(orig_f, orig_r);
+    // Une poussee de pion sur la derniere rang ee est une promotion dame quand
+    // l'index ne precise pas de piece, c'est-a-dire sur un plan de dame.
+    if (origine.getPiece().getType() == PAWN)
+    {
+        if ((!is_black && dest_r == 7) || (is_black && dest_r == 0))
+        {
+            if (promotion == NONE) promotion = QUEEN;
+        }
+    }
+
+    return Move(origine, Square(dest_f, dest_r), promotion);
+}
+
+int Chessboard::encodeMove(const Move& move) const
+{    int orig_f = move.getOrigSquare().getFile();
     int orig_r = move.getOrigSquare().getRank();
     int dest_f = move.getDestSquare().getFile();
     int dest_r = move.getDestSquare().getRank();

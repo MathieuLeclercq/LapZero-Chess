@@ -454,57 +454,13 @@ std::vector<float> MCTS::mcts_search(
 }
 
 bool MCTS::apply_move_by_index(Chessboard& board, int index) {
-    bool is_black = (board.getTurn() == BLACK);
-    int plane = index / 64;
-    int remainder = index % 64;
-    int orig_r = remainder / 8;
-    int orig_f = remainder % 8;
-
-    int df = 0, dr = 0;
-    PieceType promotion = NONE;
-
-    if (plane < 56) {
-        int dir_idx = plane / 7;
-        int dist = (plane % 7) + 1;
-        int dirs[8][2] = { {0, 1}, {1, 1}, {1, 0}, {1, -1}, {0, -1}, {-1, -1}, {-1, 0}, {-1, 1} };
-        df = dirs[dir_idx][0] * dist;
-        dr = dirs[dir_idx][1] * dist;
-    }
-    else if (plane < 64) {
-        int knight_idx = plane - 56;
-        int knight_moves[8][2] = { {1, 2}, {2, 1}, {2, -1}, {1, -2}, {-1, -2}, {-2, -1}, {-2, 1}, {-1, 2} };
-        df = knight_moves[knight_idx][0];
-        dr = knight_moves[knight_idx][1];
-    }
-    else {
-        int sub_idx = plane - 64;
-        int dir_idx = sub_idx / 3;
-        int p_idx = sub_idx % 3;
-        df = dir_idx - 1;
-        dr = 1;
-
-        if (p_idx == 0) promotion = KNIGHT;
-        else if (p_idx == 1) promotion = BISHOP;
-        else promotion = ROOK;
-    }
-
-    int dest_f = orig_f + df;
-    int dest_r = orig_r + dr;
-
-    if (is_black) {
-        orig_r = 7 - orig_r;
-        dest_r = 7 - dest_r;
-    }
-
-    if (board.getSquare(orig_f, orig_r).getPiece().getType() == PAWN) {
-        if ((!is_black && dest_r == 7) || (is_black && dest_r == 0)) {
-            if (promotion == NONE) {
-                promotion = QUEEN;
-            }
-        }
-    }
-
-    return board.movePiece(orig_f, orig_r, dest_f, dest_r, promotion, false);
+    // Le decodage vit desormais dans Chessboard, seul endroit qui connait
+    // l'encodage des index et l'orientation du camp au trait.
+    const Move move = board.decodeMoveIndex(index);
+    return board.movePiece(
+        move.getOrigSquare().getFile(), move.getOrigSquare().getRank(),
+        move.getDestSquare().getFile(), move.getDestSquare().getRank(),
+        move.getPromotion(), false);
 }
 
 
