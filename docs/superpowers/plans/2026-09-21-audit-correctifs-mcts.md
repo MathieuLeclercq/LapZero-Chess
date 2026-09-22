@@ -494,6 +494,8 @@ Les indices synthétiques servent à tester le contrat de liste de l'expansion, 
 
 ## 10. R8 : inclure la position initiale dans l'identité UCI
 
+**Statut (2026-09-21) : fait et validé.** `UCIEngine` mémorise `base_identity` : `startpos` explicite, ou les six champs FEN normalisés sur les espaces. Les chemins « ne rien changer » et « avancer d'un coup » exigent la même base ; sinon le plateau et l'arbre sont reconstruits. L'identité est mise à jour à chaque commande et remise à zéro par `ucinewgame` ; elle ne suit jamais le plateau courant. Vérification dans `python_src/tests/test_uci_position.py` : compteurs différents, faux prolongement par préfixe, roques différents, vraies réutilisations, cycle du bot avec enregistrement de son propre coup, base sans coups et changement de base. Détection par mutation prouvée : en forçant `meme_base`, les trois tests d'identité échouent. Commit : `Inclut la position de base dans l identite UCI`.
+
 ### Constat
 
 `UCIEngine.parse_position` compare `new_move_list` et `last_move_list` pour garder ou décaler l'arbre. La position de base, `startpos` ou FEN, n'entre pas dans cette décision.
@@ -507,13 +509,13 @@ Deux commandes `position fen ... moves ...` avec une même liste non vide peuven
 
 ### Implémentation recommandée
 
-- [ ] Mémoriser un identifiant de position de base en plus de la liste de coups.
-- [ ] Recommandation conservatrice : une identité explicite pour `startpos` ; pour `fen`, les six champs normalisés seulement pour les espaces. Ne pas ignorer le trait, les roques, l'en passant ou les compteurs.
-- [ ] Exiger une identité de base égale avant le chemin « ne rien changer » ou « avancer d'un coup ».
-- [ ] Si la base change, reconstruire le plateau et réinitialiser l'arbre, même si les listes de coups sont identiques ou partagent un préfixe.
-- [ ] Mettre à jour l'identité mémorisée après une reconstruction réussie. La réinitialiser sur une nouvelle partie selon la logique existante.
-- [ ] Conserver `stop_search()` avant toute modification du plateau ou de l'arbre.
-- [ ] Conserver la mise à jour de `last_move_list` après le coup joué par le moteur. L'identité de la base ne doit pas devenir l'identité du plateau courant.
+- [x] Mémoriser un identifiant de position de base en plus de la liste de coups.
+- [x] Recommandation conservatrice : une identité explicite pour `startpos` ; pour `fen`, les six champs normalisés seulement pour les espaces. Ne pas ignorer le trait, les roques, l'en passant ou les compteurs.
+- [x] Exiger une identité de base égale avant le chemin « ne rien changer » ou « avancer d'un coup ».
+- [x] Si la base change, reconstruire le plateau et réinitialiser l'arbre, même si les listes de coups sont identiques ou partagent un préfixe.
+- [x] Mettre à jour l'identité mémorisée après une reconstruction réussie. La réinitialiser sur une nouvelle partie selon la logique existante.
+- [x] Conserver `stop_search()` avant toute modification du plateau ou de l'arbre.
+- [x] Conserver la mise à jour de `last_move_list` après le coup joué par le moteur. L'identité de la base ne doit pas devenir l'identité du plateau courant.
 
 Traiter un `startpos` et sa FEN équivalente comme deux identités différentes est acceptable : cela reconstruit davantage, mais reste correct. Une canonicalisation plus ambitieuse n'est pas nécessaire pour réparer le défaut.
 
@@ -533,10 +535,10 @@ Traiter un `startpos` et sa FEN équivalente comme deux identités différentes 
 
 ### Acceptation
 
-- [ ] Même base + prolongement légal conserve la réutilisation.
-- [ ] Base différente interdit la réutilisation, même avec listes identiques.
-- [ ] Les tests utilisent le moteur UCI injecté sans charger de modèle.
-- [ ] Aucune régression de l'arrêt préalable de la recherche.
+- [x] Même base + prolongement légal conserve la réutilisation.
+- [x] Base différente interdit la réutilisation, même avec listes identiques.
+- [x] Les tests utilisent le moteur UCI injecté sans charger de modèle.
+- [x] Aucune régression de l'arrêt préalable de la recherche.
 
 ## 11. R9 : corriger l'interprétation et la fin des lots self-play
 
@@ -738,7 +740,7 @@ Pour chaque lot, fournir :
 - [x] R5 : sorties invalides rejetées avant accès et insertion, reprise propre.
 - [ ] R6 : tests discriminants de correspondance des lignes et de padding.
 - [x] R7 : totalité des coups conservée, jamais de hit de politique tronquée.
-- [ ] R8 : identité UCI fondée sur la base et les coups, réutilisation normale conservée.
+- [x] R8 : identité UCI fondée sur la base et les coups, réutilisation normale conservée.
 - [ ] R9 : rapports corrigés et décision explicite sur la collecte des parties engagées.
 - [x] R10 : aucune réservation ne survit à l'arbre qu'elle référence après échec de fusion.
 

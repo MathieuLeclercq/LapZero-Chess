@@ -109,6 +109,11 @@ class UCIEngine:
         # Historique pour le Root Shifting
         self.last_move_list = []
         self.real_ply = 0
+        # Identite de la position de base de la derniere commande position :
+        # "startpos" ou les six champs FEN. Sans elle, deux bases differentes
+        # suivies de la meme liste de coups seraient traitees comme une simple
+        # avancee, et la racine serait decalee sur un plateau etranger.
+        self.base_identity = None
 
     @staticmethod
     def q_to_cp(q_value):
@@ -150,6 +155,7 @@ class UCIEngine:
             elif command == "ucinewgame":
                 self.mcts.reset_analysis()
                 self.last_move_list = []
+                self.base_identity = None
 
             elif command == "position":
                 self.parse_position(tokens[1:])
@@ -170,6 +176,18 @@ class UCIEngine:
                 self.stop_search()
                 break
 
+    @staticmethod
+    def _base_identity(tokens):
+        """Identite de la position de base : "startpos" explicite, ou les six
+        champs FEN normalises sur les espaces. Le trait, les droits de roque,
+        la prise en passant et les compteurs en font partie : deux commandes
+        qui ne different que par eux ne sont pas la meme position."""
+        if len(tokens) > 0 and tokens[0] == "startpos":
+            return "startpos"
+        if len(tokens) > 0 and tokens[0] == "fen" and len(tokens) >= 7:
+            return "fen " + " ".join(tokens[1:7])
+        return None
+
     def parse_position(self, tokens):
         # La recherche doit etre arretee AVANT toute modification de l'arbre ou
         # du plateau. update_root detruit le reste de l'arbre par unique_ptr, et
@@ -185,13 +203,18 @@ class UCIEngine:
 
         new_move_list = tokens[moves_idx:] if moves_idx != -1 else []
 
+        nouvelle_base = self._base_identity(tokens)
+        meme_base = (nouvelle_base is not None
+                     and nouvelle_base == self.base_identity)
+
         # 1. Ponder Hit Parfait ou redondance GUI (On ne touche à rien)
-        if len(self.last_move_list) > 0 and new_move_list == self.last_move_list:
+        if meme_base and len(self.last_move_list) > 0 and new_move_list == self.last_move_list:
             pass
 
         # 2. Avancée normale d'un coup (On décale la racine)
-        elif len(self.last_move_list) > 0 and len(new_move_list) == len(
-                self.last_move_list) + 1 and new_move_list[:-1] == self.last_move_list:
+        elif (meme_base and len(self.last_move_list) > 0
+              and len(new_move_list) == len(self.last_move_list) + 1
+              and new_move_list[:-1] == self.last_move_list):
             last_uci = new_move_list[-1]
             is_black = (self.board.turn == chess_engine.Color.BLACK)
             orig_f, orig_r, dest_f, dest_r, promo = parse_uci_to_coords(last_uci)
@@ -200,7 +223,8 @@ class UCIEngine:
             self.mcts.update_root(move_idx)
             self.board.move_piece(orig_f, orig_r, dest_f, dest_r, promo)
 
-        # 3. 1er coup de la partie, Ponder Miss, ou Nouvelle Partie : on reconstruit tout PROPREMENT
+        # 3. 1er coup de la partie, Ponder Miss, Nouvelle Partie ou base
+        # différente : on reconstruit tout PROPREMENT
         else:
             self.mcts.reset_analysis()
             self.board = chess_engine.Chessboard()
@@ -216,6 +240,7 @@ class UCIEngine:
                 self.board.move_piece(orig_f, orig_r, dest_f, dest_r, promo)
 
         self.last_move_list = new_move_list
+        self.base_identity = nouvelle_base
 
         if len(tokens) > 0 and tokens[0] == "startpos":
             self.real_ply = len(new_move_list)
