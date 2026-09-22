@@ -18,8 +18,27 @@ suite :
   C - 1 dernières à la destruction du gestionnaire, avec un biais plausible vers les
   parties courtes dans les données collectées. À quantifier avant de conclure.
 
-- [ ] Traiter R2 puis R1 du plan de correctifs, prérequis du rebalayage.
-- [ ] Exécuter le rebalayage de virtual loss après R1 :
+**État au 2026-09-21.** Lots R1, R2, R3, R4, R5 et R10 faits et validés sur la branche
+`codex/audit-mcts` ; R6 fait sauf R6-T7 ; R7, R8 et R9 restants. Aucun défaut de jeu
+n'est modifié par ces correctifs, ils sont neutres en performance.
+
+**Rebalayage, première passe (lecture préliminaire, rien n'est décidé).** Mesures sur
+iter316, GPU, lot fixe 8, 8 workers, tranches 64, 700 simulations, 5 passages x 6
+répétitions, JSON dans `out/multicore/rebalayage-*.json`. La répétition E / E bis concorde
+à 2-4 %, la session est donc stable. Mais A (vloss 1, fpu 0.30) est la première invocation
+complète et sa dispersion va de 628 à 2050 simulations par seconde : elle a payé
+l'échauffement de la session et ne peut pas servir de référence. Face à E (vloss 1,
+fpu 0.45), mesuré deux fois, les candidats gagnent 10 à 20 % sur `step_analysis`, et les
+collisions en milieu passent de 3384 (A) à 2072 (B) et 1501 (C). Lecture provisoire : le
+rejet de `virtual_loss = 2` de septembre ne se reproduit pas après R1, mais la comparaison
+propre vloss 1 contre vloss 2 en alternance dans une même session reste à faire, suivie du
+préfiltre qualité de 500 puzzles. Aucun défaut n'est modifié tant que ce n'est pas franchi.
+Prochaine mesure minimale et silencieuse : deux invocations A/B alternées, environ cinq
+minutes de GPU.
+
+- [x] Traiter R2 puis R1 du plan de correctifs, prérequis du rebalayage.
+- [ ] Exécuter le rebalayage de virtual loss après R1 : neutralité, comparaison A/B
+      interleaved propre, puis préfiltre 500 puzzles pour tout candidat retenu :
       `superpowers/plans/2026-09-21-rebalayage-virtual-loss.md`.
 - [ ] Mesurer et décider R9-B (fin de génération self-play) après le diagnostic R9-A :
       `superpowers/plans/2026-09-21-fin-de-lot-self-play.md`.
