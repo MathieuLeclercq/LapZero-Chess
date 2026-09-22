@@ -50,6 +50,9 @@ src/                     moteur C++
   mcts_batch.cpp         noyau run_search (séquentiel et batché à virtual loss)
   mcts_wave.*            collecte de feuilles par vagues (multicœur)
   mcts_reservation.*     NodeState + PathReservation, propriété des feuilles
+  search_children.hpp    matérialisation des enfants depuis une sonde de table
+  search_terminal.hpp    valeur terminale partagée, mat prioritaire sur les nulles
+  board_rollback.hpp     garde RAII : restauration du plateau sur toute sortie
   search_executor.*      pool de workers persistants, barrières de vague
   mcts_observe.cpp       compteurs, invariants, inspect_tree
   search_timing.*        chronométrages optionnels par phase
@@ -63,6 +66,7 @@ python_src/              orchestration Python
   dataset.py sharded_dataset.py convert_pgn_to_binary.py   pipeline supervisé
   train_supervised.py    entraînement supervisé (Lightning)
   train_self_play.py     boucle self-play complète (génération, buffer, training)
+  run_selftrain.py       lanceur de campagne self-play distante (itérations successives)
   convert_ckpt.py transfer_weights.py   outils de checkpoints
   stockfish_player.py    ancrage Stockfish (adversaire de référence)
   tournament_elo.py      tournoi multi-modèles avec Whole History Rating
@@ -136,7 +140,13 @@ compteurs ; `tournament_elo.py` donne l'Elo par WHR.
 - **Concurrence par propriété explicite.** Un noeud passe par
   `Unexpanded -> Pending -> Expanded/Terminal`. Une descente réserve son chemin
   et revendique la feuille : deux workers ne développent jamais le même noeud,
-  et les porteurs de pointeurs survivent à tout `update_root`.
+  et les porteurs de pointeurs survivent à tout `update_root`. Chaque entrée du
+  chemin mémorise le nombre exact d'unités posées, égal à l'amplitude du virtual
+  loss, et les rend telles quelles.
+- **Restauration sur toute sortie.** `BoardRollback` (`src/board_rollback.hpp`)
+  défait les coups d'une descente à la fermeture du scope, exception comprise ;
+  `select_leaf` l'arme coup par coup, si bien qu'une erreur de l'évaluateur ne
+  peut plus laisser le plateau sur une feuille.
 - **Persistance à deux formats.** Checkpoints PyTorch `.pt`/`.ckpt` pour
   l'entraînement, ONNX pour l'inférence C++, shards `.npz` pour le replay
   buffer.
@@ -156,7 +166,11 @@ compteurs ; `tournament_elo.py` donne l'Elo par WHR.
   reste à confirmer par tournoi.
 - **Virtual loss à la LC0.** `n_in_flight` n'entre que dans le dénominateur du
   terme U de l'UCB, jamais dans `q_value()`. Le FPU réduit la valeur d'un noeud
-  non visité de 0.30 (défaut).
+  non visité de 0.30 (défaut). L'amplitude 2 est active dans le bot, la GUI, le
+  tournoi et l'ancrage Stockfish depuis le rebalayage du 2026-09-22, qui donne
+  +9 à +20 % de débit et une qualité non inférieure ; le self-play garde 1, où
+  elle est inerte, et la classe `MCTS` garde 1 par défaut pour ne pas fausser
+  les anciens rapports.
 - **Lot de forme fixe.** Chaque vague est paddée à la taille de lot avant
   l'appel ONNX Runtime, sinon le changement de forme quadruple le coût de
   `session->Run`. Les sorties dupliquées sont ignorées, la recherche est
@@ -164,7 +178,10 @@ compteurs ; `tournament_elo.py` donne l'Elo par WHR.
 - **Recherche multicœur par vagues.** Workers persistants, collecte parallèle
   avec réservation précoce, collisions de feuilles comptées et abandonnées ; le
   débit plafonne dès 2 workers, 8 est retenu pour la marge de queue. Le gain
-  vient du remplissage des lots et de la préparation CPU, pas du GPU.
+  vient du remplissage des lots et de la préparation CPU, pas du GPU. Les vagues
+  du bot collectent plusieurs feuilles du même arbre, donc le virtual loss y
+  agit, contrairement au self-play ; la qualité y est vérifiée sur le même
+  échantillon de 500 puzzles que le préfiltre.
 - **Le GPU est le goulet.** L'évaluateur représente 96.6 à 98.7 % du temps
   mural de la recherche. Toute optimisation doit passer par le remplissage ou
   la forme des lots, pas par la génération de coups.
@@ -186,7 +203,9 @@ compteurs ; `tournament_elo.py` donne l'Elo par WHR.
   depuis le 2026-09-20.
 - Le self-play et le bot vivent dans deux univers de configuration : le premier
   est piloté par `train_self_play.py`, le second par les constantes en tête de
-  `uci.py`. Toute activation mesurée doit être répercutée dans les deux.
+  `uci.py`. Toute activation mesurée doit être répercutée là où elle agit : le
+  virtual loss, inerte en self-play, ne vit que dans les lanceurs du bot, de la
+  GUI, du tournoi et de l'ancrage Stockfish.
 
 Dettes et pistes ouvertes : `docs/backlog.md`. Journal des découvertes et des
 pistes abandonnées : `docs/devlog.md`.

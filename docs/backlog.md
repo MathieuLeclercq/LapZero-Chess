@@ -18,9 +18,9 @@ suite :
   C - 1 dernières à la destruction du gestionnaire, avec un biais plausible vers les
   parties courtes dans les données collectées. À quantifier avant de conclure.
 
-**État au 2026-09-22.** Les dix lots de l'audit sont faits et validés sur la branche
-`codex/audit-mcts` ; les tests restants sont des campagnes GPU ou des points documentés
-comme sans objet.
+**État au 2026-09-22.** Audit clos : les dix lots sont faits, validés et fusionnés dans
+`main`, et les quatre points de la revue externe sont traités (section 15 du plan). Les
+seuls restes sont des campagnes ou des mesures optionnelles, listées ci-dessous.
 
 **Rebalayage : fait, `virtual_loss = 2` activé.** Quatre invocations A, B, B, A en
 alternance : +9 à +20 % de débit sur les trois positions, p95 de latence en baisse de 13 à
