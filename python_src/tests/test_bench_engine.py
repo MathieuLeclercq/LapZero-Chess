@@ -255,6 +255,28 @@ def test_main_de_bout_en_bout_sur_un_petit_echantillon(tmp_path, monkeypatch):
     assert sidecar["simulations"] == 8
 
 
+def test_le_binding_self_play_avec_compteurs_ne_plante_pas(modele):
+    """La variante de diagnostic renvoie un tuple, ses compteurs, et l'acces
+    aux tenseurs reste valide apres le retour.
+
+    Regression : construire un py::tuple dans une lambda dont le GIL est
+    relache plantait en access violation juste apres la generation.
+    """
+    chemin, _ = modele
+    evaluateur = chess_engine.ONNXEvaluator(str(chemin), False)
+    parties, stats = chess_engine.generate_self_play_games_with_stats(
+        evaluateur, 4, 20, 5, 4, 0.25, 8192,
+        str(RACINE / "training_data" / "puzzles_train.txt"))
+
+    assert len(parties) == 4
+    assert stats.games_started == 4
+    assert stats.games_completed == 4
+    assert stats.active_slots == 0
+    assert stats.new_plies > 0
+    assert stats.replayed_plies >= 0
+    assert parties[0].state_tensors.shape[1:] == (119, 8, 8)
+
+
 def _horloge_factice(pas_s: float = 0.02):
     temps = [0.0]
 

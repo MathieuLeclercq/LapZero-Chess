@@ -338,7 +338,8 @@ PYBIND11_MODULE(chess_engine, m) {
         "Génère un dataset de parties en self-play en utilisant un batching GPU massif.");
 
     // Variante de diagnostic : meme generation, plus les compteurs. La fonction
-    // de production garde son type de retour.
+    // de production garde son type de retour. Renvoyer un std::tuple, jamais un
+    // py::tuple construit ici : le GIL est relache pendant l'appel.
     m.def("generate_self_play_games_with_stats", [](
         ONNXEvaluator* evaluator,
         int concurrent_games,
@@ -350,7 +351,7 @@ PYBIND11_MODULE(chess_engine, m) {
                 evaluator, concurrent_games, slow_sims, fast_sims, slow_ratio,
                 tt_size, puzzles_path);
             auto parties = manager.generate_games(total_games);
-            return py::make_tuple(std::move(parties), manager.get_stats());
+            return std::make_tuple(std::move(parties), manager.get_stats());
         },
         py::call_guard<py::gil_scoped_release>(),
         py::arg("evaluator"),
