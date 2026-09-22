@@ -1,11 +1,14 @@
 #include "controlled_evaluator.hpp"
 #include "discriminating_evaluator.hpp"
 #include "mcts.hpp"
+#include "mcts_test_access.hpp"
 #include "selfplay_manager.hpp"
 #include "test_support.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -32,6 +35,35 @@ public:
     static void forcer_fin_apres(SelfPlayManager& manager, int game_idx,
                                  int plies) {
         manager.m_forced_end_plies[static_cast<std::size_t>(game_idx)] = plies;
+    }
+
+    static void seed_rng(SelfPlayManager& manager, std::uint32_t graine) {
+        manager.m_rng.seed(graine);
+    }
+
+    static void reset_game(SelfPlayManager& manager, int game_idx) {
+        manager.reset_game(game_idx);
+    }
+
+    static void play_best_move(SelfPlayManager& manager, int game_idx) {
+        manager.play_best_move(game_idx);
+    }
+
+    static int sims_target(const SelfPlayManager& manager, int game_idx) {
+        return manager.m_sims_target[static_cast<std::size_t>(game_idx)];
+    }
+
+    static bool is_slow_move(const SelfPlayManager& manager, int game_idx) {
+        return manager.m_is_slow_move[static_cast<std::size_t>(game_idx)] != 0;
+    }
+
+    static bool tactical_boost(const SelfPlayManager& manager, int game_idx) {
+        return manager.m_tactical_boost[static_cast<std::size_t>(game_idx)]
+            != 0;
+    }
+
+    static MCTS& mcts(SelfPlayManager& manager) {
+        return *manager.m_shared_mcts;
     }
 
     static std::string fen(SelfPlayManager& manager, int game_idx) {
@@ -432,6 +464,88 @@ void test_imposed_ends_start_and_collect_each_game_once() {
                  "the collected games do not match the imposed ends");
 }
 
+std::string ecrire_fixture_puzzle() {
+    const std::string chemin = "puzzles_test_fixture.txt";
+    std::ofstream fichier(chemin);
+    fichier << "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+               "|e2e4 e7e5|e7e5|1500|fork\n";
+    return chemin;
+}
+
+bool chercher_graine_injectee(SelfPlayManager& manager) {
+    // L'injection est tiree au hasard : on cherche une graine qui la
+    // declenche, sans attendre ni dependre du temps.
+    for (std::uint32_t graine = 1; graine <= 2000; ++graine) {
+        SelfPlayTestAccess::seed_rng(manager, graine);
+        SelfPlayTestAccess::reset_game(manager, 0);
+        if (SelfPlayTestAccess::tactical_boost(manager, 0)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void test_puzzle_first_move_boost_then_normal_move() {
+    const std::string fixture = ecrire_fixture_puzzle();
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 1, 2, 1, 0.5f, 8192, fixture);
+    std::remove(fixture.c_str());
+
+    require_test(chercher_graine_injectee(manager),
+                 "no seed injected the puzzle");
+    require_test(SelfPlayTestAccess::sims_target(manager, 0) == 4000,
+                 "the puzzle first move lost its tactical budget");
+    require_test(SelfPlayTestAccess::is_slow_move(manager, 0),
+                 "the puzzle first move is not a slow move");
+    require_test(SelfPlayTestAccess::pending_epsilon(manager, 0) == 0.0f,
+                 "the tactical noise was not consumed");
+    require_test(SelfPlayTestAccess::root(manager, 0) != nullptr,
+                 "the puzzle root is missing");
+
+    // Le coup suivant retrouve un budget normal et abandonne l'epsilon
+    // tactique : le bruit normal est soit deja applique, soit en attente.
+    SelfPlayTestAccess::play_best_move(manager, 0);
+    require_test(!SelfPlayTestAccess::tactical_boost(manager, 0),
+                 "the tactical boost was not consumed");
+    const int cible = SelfPlayTestAccess::sims_target(manager, 0);
+    require_test(cible == 1 || cible == 2,
+                 "the next move did not return to a normal budget");
+    require_test(SelfPlayTestAccess::pending_epsilon(manager, 0) <= 0.12f,
+                 "the tactical epsilon survived the first move");
+}
+
+void test_puzzle_first_move_served_by_the_table_keeps_the_boost() {
+    const std::string fixture = ecrire_fixture_puzzle();
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 1, 2, 1, 0.5f, 8192, fixture);
+    std::remove(fixture.c_str());
+
+    // Prechauffe la table avec la position du puzzle.
+    Chessboard position;
+    position.loadFEN(
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    require_test(position.movePieceUCI("e2e4"), "e2e4 failed");
+    require_test(position.movePieceUCI("e7e5"), "e7e5 failed");
+    const std::vector<int> legal = position.getLegalMoveIndices();
+    std::vector<float> policy(POLICY_SIZE, 0.0f);
+    for (int idx : legal) policy[static_cast<std::size_t>(idx)] = 1.0f;
+    MCTSTestAccess::store(SelfPlayTestAccess::mcts(manager), position, legal,
+                          policy, 0.1f);
+
+    require_test(chercher_graine_injectee(manager),
+                 "no seed injected the puzzle");
+    MCTSNode* root = SelfPlayTestAccess::root(manager, 0);
+    require_test(root != nullptr, "the puzzle root is missing");
+    require_test(root->state.load() == NodeState::Expanded,
+                 "a TT hit left the puzzle root undeveloped");
+    require_test(!root->children.empty(),
+                 "a TT hit lost the puzzle root children");
+    require_test(SelfPlayTestAccess::pending_epsilon(manager, 0) == 0.0f,
+                 "the tactical noise was not consumed on a TT hit");
+    require_test(SelfPlayTestAccess::sims_target(manager, 0) == 4000,
+                 "a TT hit lost the tactical budget");
+}
+
 }  // namespace
 
 int main() {
@@ -445,6 +559,8 @@ int main() {
         test_selfplay_batch_associates_each_game_with_its_own_tensor();
         test_one_active_slot_finishes_with_partial_batches();
         test_imposed_ends_start_and_collect_each_game_once();
+        test_puzzle_first_move_boost_then_normal_move();
+        test_puzzle_first_move_served_by_the_table_keeps_the_boost();
         return 0;
     }
     catch (const std::exception& error) {
