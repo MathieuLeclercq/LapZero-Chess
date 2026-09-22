@@ -27,6 +27,13 @@ public:
         manager.demarrer_slot(game_idx);
     }
 
+    // Impose la fin d'une partie apres un nombre de plies connu. Le levier est
+    // a zero par defaut et ne sert qu'aux tests de comptabilite.
+    static void forcer_fin_apres(SelfPlayManager& manager, int game_idx,
+                                 int plies) {
+        manager.m_forced_end_plies[static_cast<std::size_t>(game_idx)] = plies;
+    }
+
     static std::string fen(SelfPlayManager& manager, int game_idx) {
         return manager.m_boards[static_cast<std::size_t>(game_idx)].toFEN();
     }
@@ -396,6 +403,35 @@ void test_one_active_slot_finishes_with_partial_batches() {
                  "the inactive slot received a root");
 }
 
+void test_imposed_ends_start_and_collect_each_game_once() {
+    // Une place finit tot, l'autre tard, et les fins sont imposees a des
+    // moments connus : aucune attente d'horloge, aucun terminal aleatoire.
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 2, 2, 1, 0.5f, 8192);
+    SelfPlayTestAccess::forcer_fin_apres(manager, 0, 2);
+    SelfPlayTestAccess::forcer_fin_apres(manager, 1, 8);
+
+    const std::vector<GameResult> games = manager.generate_games(3);
+    const SelfPlayStats stats = manager.get_stats();
+
+    require_test(games.size() == 3,
+                 "the generation did not collect exactly three games");
+    require_test(stats.games_started == 3 && stats.games_completed == 3,
+                 "the starts and completions do not match the quota");
+    require_test(stats.active_slots == 0,
+                 "a place stayed active after the generation");
+
+    // Identites : la place 0 a joue deux parties de 2 plies, la place 1 une
+    // partie de 8. Aucune partie fantome, aucune collecte en double.
+    std::vector<int> longueurs;
+    for (const GameResult& game : games) {
+        longueurs.push_back(game.total_real_moves);
+    }
+    std::sort(longueurs.begin(), longueurs.end());
+    require_test(longueurs == std::vector<int>({2, 2, 8}),
+                 "the collected games do not match the imposed ends");
+}
+
 }  // namespace
 
 int main() {
@@ -408,6 +444,7 @@ int main() {
         test_successive_selfplay_generations_are_independent();
         test_selfplay_batch_associates_each_game_with_its_own_tensor();
         test_one_active_slot_finishes_with_partial_batches();
+        test_imposed_ends_start_and_collect_each_game_once();
         return 0;
     }
     catch (const std::exception& error) {

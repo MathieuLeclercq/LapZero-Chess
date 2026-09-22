@@ -72,6 +72,10 @@ private:
     std::vector<char> m_slot_active;
     SelfPlayStats m_stats;
 
+    // Levier de test : fin de partie imposee apres un nombre de plies connu,
+    // 0 pour desactiver. Toujours a zero en production.
+    std::vector<int> m_forced_end_plies;
+
     Evaluator* m_evaluator;
 
     // L'état complet des parties en cours

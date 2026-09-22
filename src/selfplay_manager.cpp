@@ -36,6 +36,7 @@ SelfPlayManager::SelfPlayManager(
     m_sims_target.resize(num_concurrent_games, 0);
     m_is_slow_move.resize(num_concurrent_games, false);
     m_pending_epsilon.resize(num_concurrent_games, 0.0f);
+    m_forced_end_plies.resize(num_concurrent_games, 0);
 
     m_game_states.resize(num_concurrent_games);
     m_game_policies.resize(num_concurrent_games);
@@ -253,7 +254,14 @@ void SelfPlayManager::play_best_move(int game_idx) {
 
     // 5. Détection fin de partie
     bool game_over = false;
-    if (m_boards[game_idx].checkThreefoldRepetition() ||
+    if (m_forced_end_plies[game_idx] > 0
+        && static_cast<int>(m_boards[game_idx].getMoveHistory().size())
+               >= m_forced_end_plies[game_idx]) {
+        // Levier de test : fin imposee a un nombre de plies connu, sans
+        // terminal reel ni attente. Toujours inactif en production.
+        game_over = true;
+    }
+    else if (m_boards[game_idx].checkThreefoldRepetition() ||
         m_boards[game_idx].getHalfMoveClock() >= 100 ||
         m_boards[game_idx].checkInsufficientMaterial()) {
         game_over = true;
