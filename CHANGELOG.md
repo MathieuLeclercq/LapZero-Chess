@@ -5,6 +5,7 @@ encodings, `training` training loop, `data` datasets, `uci` UCI and Lichess
 bot, `tools` benchmarks and interfaces, `build` build and dependencies,
 `misc` project life.
 
+- 2026-09-22 : `mcts` virtual loss 2 activated after the R1-clean sweep.
 - 2026-09-22 : `tools` policy move coding (encode and decode) unified in C++, perft roundtrip check.
 - 2026-09-22 : `tools` perft calibrated tier (43.5M nodes) in CTest.
 - 2026-09-20 : `uci` lichess-bot update, faster games, bots first.

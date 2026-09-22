@@ -1,5 +1,11 @@
 # Rebalayage du virtual loss apres R1 : plan d'implementation
 
+**Statut (2026-09-22) : execute.** A/B interleaved, prefiltre 500, campagne 2500,
+decision et propagation faits ; `virtual_loss = 2` est active. Resultats et
+reserves : `../specs/2026-09-22-rebalayage-virtual-loss-resultats.md`. La
+comparaison ancien contre nouveau scheduler de R9 reste hors perimetre, elle
+demanderait de reconstruire l'ancien commit.
+
 > **Pour les agents charges de l'execution :** executer les taches en ligne, une par
 > une, avec le skill `superpowers:executing-plans` si disponible. Aucun sous-agent.
 > Les cases a cocher servent au suivi. Aucune campagne qualite longue ni aucun commit

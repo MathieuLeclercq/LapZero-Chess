@@ -18,32 +18,52 @@ suite :
   C - 1 dernières à la destruction du gestionnaire, avec un biais plausible vers les
   parties courtes dans les données collectées. À quantifier avant de conclure.
 
-**État au 2026-09-21.** Lots R1, R2, R3, R4, R5 et R10 faits et validés sur la branche
-`codex/audit-mcts` ; R6 fait sauf R6-T7 ; R7, R8 et R9 restants. Aucun défaut de jeu
-n'est modifié par ces correctifs, ils sont neutres en performance.
+**État au 2026-09-22.** Les dix lots de l'audit sont faits et validés sur la branche
+`codex/audit-mcts` ; les tests restants sont des campagnes GPU ou des points documentés
+comme sans objet.
 
-**Rebalayage, première passe (lecture préliminaire, rien n'est décidé).** Mesures sur
-iter316, GPU, lot fixe 8, 8 workers, tranches 64, 700 simulations, 5 passages x 6
-répétitions, JSON dans `out/multicore/rebalayage-*.json`. La répétition E / E bis concorde
-à 2-4 %, la session est donc stable. Mais A (vloss 1, fpu 0.30) est la première invocation
-complète et sa dispersion va de 628 à 2050 simulations par seconde : elle a payé
-l'échauffement de la session et ne peut pas servir de référence. Face à E (vloss 1,
-fpu 0.45), mesuré deux fois, les candidats gagnent 10 à 20 % sur `step_analysis`, et les
-collisions en milieu passent de 3384 (A) à 2072 (B) et 1501 (C). Lecture provisoire : le
-rejet de `virtual_loss = 2` de septembre ne se reproduit pas après R1, mais la comparaison
-propre vloss 1 contre vloss 2 en alternance dans une même session reste à faire, suivie du
-préfiltre qualité de 500 puzzles. Aucun défaut n'est modifié tant que ce n'est pas franchi.
-Prochaine mesure minimale et silencieuse : deux invocations A/B alternées, environ cinq
-minutes de GPU.
+**Rebalayage : fait, `virtual_loss = 2` activé.** Quatre invocations A, B, B, A en
+alternance : +9 à +20 % de débit sur les trois positions, p95 de latence en baisse de 13 à
+20 %, collisions en milieu de 3284 à 2054. Barrière qualité franchie sur 500 puis 2500
+puzzles : 1926 contre 1928, IC95 [-0,4 ; +0,56], McNemar p = 0,87, réseau seul identique au
+bit près. Le rejet de septembre venait bien de la fuite R1. Le réglage est propagé au bot,
+au self-play, au tournoi, à la GUI et à l'ancrage Stockfish. Rapport complet :
+`superpowers/specs/2026-09-22-rebalayage-virtual-loss-resultats.md`.
+
+**Pools self-play, mesure préliminaire.** À 100/20 simulations, la matrice (128, 256),
+(256, 512) et (512, 512) donne 192,9, 231,2 et 254,4 plies nouveaux par seconde, avec
+départs = fins = total partout. Le plus grand pool est le plus rapide à budget réduit, ce
+qui va contre l'intuition du genou à 128. Une confirmation à 700/100 est nécessaire avant
+de changer la taille de production, qui reste 256.
 
 - [x] Traiter R2 puis R1 du plan de correctifs, prérequis du rebalayage.
-- [ ] Exécuter le rebalayage de virtual loss après R1 : neutralité, comparaison A/B
-      interleaved propre, puis préfiltre 500 puzzles pour tout candidat retenu :
+- [x] Exécuter le rebalayage de virtual loss après R1 : comparaison A/B interleaved,
+      préfiltre 500 puis campagne 2500, décision et propagation :
       `superpowers/plans/2026-09-21-rebalayage-virtual-loss.md`.
 - [x] Mesurer et décider R9-B (fin de génération self-play) après le diagnostic R9-A :
-      compteurs et génération finie faits (`Termine exactement les parties demandees`) ;
-      la mesure avant/après de débit (tâche 5 du plan) reste à faire, sans GPU pour
-      l'instant : `superpowers/plans/2026-09-21-fin-de-lot-self-play.md`.
+      compteurs, génération finie et rapport honnête faits ; la matrice de pools est
+      mesurée à budget réduit, la confirmation à 700/100 reste à faire :
+      `superpowers/plans/2026-09-21-fin-de-lot-self-play.md`.
+
+## Banc de puzzles batché sur GPU (inspiration self-play)
+
+Le banc actuel tourne sur 16 processus CPU, chaque puzzle cherche seul avec un lot de 8,
+et le GPU reste inutilisé : 2500 puzzles prennent environ 12 minutes, proche du plafond
+CPU de 16 cœurs. Le self-play montre la voie : une feuille par partie, un seul appel
+réseau pour 256 positions. Le coût par position tombe de 0,41 à 0,65 ms au lot de 8 à
+0,10 à 0,16 ms aux lots de 128 à 256, soit un facteur 2 à 3 attendu sur la campagne.
+
+- [ ] Prototype Python : 256 instances MCTS indépendantes, une par puzzle (table propre,
+      pas de contamination entre puzzles), un évaluateur GPU partagé, collecte d'une
+      feuille par instance via `advance_to_leaf`, un `evaluate_batch` commun, puis
+      `expand_and_backup`.
+- [ ] Petite surcharge C++ nécessaire : lire les statistiques d'une racine quelconque
+      (`get_analysis_results(root)`), la méthode actuelle ne lisant que la racine
+      d'analyse.
+- [ ] Mesurer sur 500 puzzles contre le mode 16 processus, puis décider d'un pilote C++
+      propre si le facteur 2 à 3 se confirme.
+- [ ] Contrainte : un mode batché produit une nouvelle référence, à ne pas mélanger avec
+      les chiffres historiques, comme la règle 700 contre 800.
 
 ## Prochaine tâche décidée
 
@@ -400,8 +420,15 @@ qui ouvre sur la section de comparaison appariée. Le chiffre à suivre est
 l'écart médian du prior du coup solution (`avec - sans`), accompagné de la part
 de visites, de la value, des taux de résolution avec McNemar apparié et de
 l'accord des coups de recherche. La fonction pure `comparer_historique` vit
-dans `bench_metrics.py` et se teste sans modèle. Reste à lancer la campagne sur
-le modèle courant puis après réentraînement sur les données corrigées.
+dans `bench_metrics.py` et se teste sans modèle.
+
+**Campagne de référence faite le 2026-09-22, modèle iter436.** Sur 2500 puzzles :
+prior médian du coup solution 0,288 avec historique contre 0,516 sans, écart
+médian **-0,089** ; value -0,216 contre +0,930, écart **-1,064** ; résolution
+1911 contre 2077, soit **+6,6 points sans historique**, McNemar 173 contre 339,
+p = 3e-13. Le raccourci est donc bien présent et coûte cher en mesure. Le chiffre
+à suivre doit converger vers zéro après réentraînement sur les données corrigées.
+Campagne complète : `out/multicore/hist-2500.md`.
 
 Le banc doit rester disjoint de l'entraînement, c'est le cas aujourd'hui
 (0 recouvrement entre les 5 000 puzzles du banc et les 100 000 de
