@@ -71,6 +71,13 @@ ce qui est une des raisons pour lesquelles le balayage de septembre etait non
 interpretable. Le gestionnaire garde donc le defaut 1, avec un commentaire qui
 documente l'inerte.
 
+Les deux affirmations sont verrouillees par des tests C++. Un test avec
+l'evaluateur discriminant montre que le chemin mono batche, celui du banc de
+puzzles, change bien de distribution de visites entre amplitude 1 et 2, donc la
+barriere qualite n'est pas vide. Un autre test genere deux fois les memes
+parties avec la meme graine et verifie qu'elles sont identiques au bit pres a
+amplitude 1 et 2, ce qui etablit l'inerte du self-play.
+
 Le defaut de la classe `MCTS` et des bancs reste 1 : les campagnes historiques
 gardent leur sens, et un banc qui n'explicite pas le reglage mesure toujours le
 defaut d'origine. Un test Python verrouille l'accord des trois lanceurs, un test

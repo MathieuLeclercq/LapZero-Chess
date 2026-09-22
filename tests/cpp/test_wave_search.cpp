@@ -803,6 +803,36 @@ void test_a_real_position_beyond_the_cache_capacity_keeps_all_moves() {
                  "the second expansion lost legal moves");
 }
 
+void test_virtual_loss_changes_the_mono_batched_search() {
+    // Le chemin mono batché collecte jusqu'à huit feuilles d'affilée dans un
+    // seul thread : la feuille suivante voit le virtual loss des précédentes,
+    // donc l'amplitude change la recherche. Le self-play, qui descend chaque
+    // arbre une seule fois par vague, y est au contraire insensible.
+    std::vector<std::vector<MoveStats>> resultats;
+    for (int vloss : {1, 2}) {
+        DiscriminatingEvaluator evaluator;
+        MCTS mcts(&evaluator, 8192, 0);
+        mcts.set_fixed_batch(true);
+        mcts.set_tuning(SearchTuning{vloss, 0.30f, 4});
+        Chessboard board;
+        board.loadFEN(
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
+        mcts.step_analysis(board, 700, 1.4f, 8, 1);
+        resultats.push_back(mcts.get_analysis_results());
+    }
+
+    std::vector<std::pair<int, int>> visites[2];
+    for (int k = 0; k < 2; ++k) {
+        for (const MoveStats& stats : resultats[static_cast<std::size_t>(k)]) {
+            visites[k].emplace_back(stats.move_idx, stats.visits);
+        }
+        std::sort(visites[k].begin(), visites[k].end());
+    }
+    require_test(!visites[0].empty(), "no visited move in the mono search");
+    require_test(visites[0] != visites[1],
+                 "the amplitude did not change the mono batched search");
+}
+
 void test_gpu_phase_is_quiet_and_update_root_waits_for_session() {
     ControlledEvaluator evaluator;
     EvaluationGate gate;
@@ -977,6 +1007,7 @@ int main() {
         test_hot_root_noises_like_a_cold_root();
         test_expansion_keeps_moves_beyond_the_cache_capacity();
         test_a_real_position_beyond_the_cache_capacity_keeps_all_moves();
+        test_virtual_loss_changes_the_mono_batched_search();
         test_gpu_phase_is_quiet_and_update_root_waits_for_session();
         return 0;
     }

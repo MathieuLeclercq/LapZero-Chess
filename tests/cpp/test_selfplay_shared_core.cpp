@@ -632,6 +632,37 @@ void test_game_conclusion_signs_and_reasons() {
                  "insufficient material should be a draw");
 }
 
+std::vector<GameResult> generer_avec_reglages(int virtual_loss,
+                                              std::uint32_t graine) {
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 2, 2, 1, 0.5f, 8192);
+    SelfPlayTestAccess::seed_rng(manager, graine);
+    MCTSTestAccess::seed_noise(SelfPlayTestAccess::mcts(manager), graine);
+    SelfPlayTestAccess::mcts(manager).set_tuning(
+        SearchTuning{virtual_loss, 0.30f, 4});
+    return manager.generate_games(2);
+}
+
+void test_virtual_loss_is_inert_in_self_play() {
+    // Chaque arbre n'est descendu qu'une fois par vague : n_in_flight n'a pas
+    // de lecteur entre la reservation et sa liberation. Deux generations de
+    // meme graine doivent donc etre identiques, quelle que soit l'amplitude.
+    const std::vector<GameResult> reference = generer_avec_reglages(1, 12345);
+    const std::vector<GameResult> candidat = generer_avec_reglages(2, 12345);
+
+    require_test(reference.size() == candidat.size(),
+                 "the two generations do not have the same game count");
+    for (std::size_t i = 0; i < reference.size(); ++i) {
+        require_test(reference[i].flat_states == candidat[i].flat_states,
+                     "the amplitude changed the self-play states");
+        require_test(reference[i].flat_policies == candidat[i].flat_policies,
+                     "the amplitude changed the self-play policies");
+        require_test(reference[i].final_outcome == candidat[i].final_outcome
+                         && reference[i].end_reason == candidat[i].end_reason,
+                     "the amplitude changed the self-play outcome");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -649,6 +680,7 @@ int main() {
         test_puzzle_first_move_served_by_the_table_keeps_the_boost();
         test_slow_puzzle_game_is_not_lost_behind_a_fast_one();
         test_game_conclusion_signs_and_reasons();
+        test_virtual_loss_is_inert_in_self_play();
         return 0;
     }
     catch (const std::exception& error) {
