@@ -267,7 +267,8 @@ void test_selfplay_generation_is_finite_and_counted() {
         int places;
         int quota;
     };
-    const Cas cas[] = {{2, 3}, {4, 0}, {4, 1}, {4, 3}, {4, 4}, {4, 7}};
+    const Cas cas[] = {{2, 3}, {4, 0}, {4, 1}, {4, 3}, {4, 4}, {4, 5},
+                       {4, 7}};
 
     for (const Cas& c : cas) {
         ControlledEvaluator evaluator;
@@ -372,6 +373,29 @@ void test_selfplay_batch_associates_each_game_with_its_own_tensor() {
                  "the second board was not restored");
 }
 
+void test_one_active_slot_finishes_with_partial_batches() {
+    // Une place seule ne peut jamais remplir un lot de deux : la fin de
+    // generation doit avancer par lots partiels, sans attendre un lot plein et
+    // sans toucher la place inactive restee sans racine.
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 2, 2, 1, 0.5f, 8192);
+
+    const std::vector<GameResult> games = manager.generate_games(1);
+    const SelfPlayStats stats = manager.get_stats();
+
+    require_test(games.size() == 1, "the single game was not collected");
+    require_test(stats.games_started == 1 && stats.games_completed == 1,
+                 "the single active slot did not start and finish once");
+    require_test(stats.active_slots == 0, "a place stayed active");
+    require_test(!evaluator.batch_sizes.empty(),
+                 "the single game never reached the evaluator");
+    for (int taille : evaluator.batch_sizes) {
+        require_test(taille <= 1, "the drain waited for a fuller batch");
+    }
+    require_test(SelfPlayTestAccess::root(manager, 1) == nullptr,
+                 "the inactive slot received a root");
+}
+
 }  // namespace
 
 int main() {
@@ -383,6 +407,7 @@ int main() {
         test_selfplay_generation_is_finite_and_counted();
         test_successive_selfplay_generations_are_independent();
         test_selfplay_batch_associates_each_game_with_its_own_tensor();
+        test_one_active_slot_finishes_with_partial_batches();
         return 0;
     }
     catch (const std::exception& error) {

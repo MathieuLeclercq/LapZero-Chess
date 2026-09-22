@@ -41,6 +41,11 @@ public:
         return mcts.make_cache_key(board);
     }
 
+    static TTProbe probe_cache(const MCTS& mcts,
+                               const EvaluationCacheKey& key) {
+        return mcts.m_cache.probe(key);
+    }
+
     static void expand_prepared(MCTS& mcts, MCTSNode* node,
                                 const std::vector<int>& legal_moves,
                                 const EvaluationCacheKey& key,

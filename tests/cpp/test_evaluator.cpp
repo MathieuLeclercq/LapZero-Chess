@@ -1,7 +1,9 @@
 #include "controlled_evaluator.hpp"
 #include "mcts.hpp"
+#include "mcts_test_access.hpp"
 #include "test_support.hpp"
 
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -126,6 +128,51 @@ void test_root_expansion_rejects_invalid_output_and_recovers() {
                  "recovered tree violates invariants");
 }
 
+void test_rejected_output_does_not_poison_the_cache() {
+    ControlledEvaluator evaluator;
+    evaluator.corrupt_call = 1;
+    evaluator.values_corruption =
+        ControlledEvaluator::Corruption::NonFinite;
+    MCTS mcts(&evaluator, 8192, 0);
+    Chessboard board;
+    board.setStartupPieces();
+    const EvaluationCacheKey key = MCTSTestAccess::key_for(mcts, board);
+
+    bool threw = false;
+    try {
+        mcts.step_analysis(board, 0, 1.4f, 0, 1);
+    }
+    catch (const std::exception&) {
+        threw = true;
+    }
+    require_test(threw, "invalid output was accepted");
+    require_test(
+        MCTSTestAccess::probe_cache(mcts, key).status == TTProbeStatus::MISS,
+        "the rejected key was cached");
+    require_test(mcts.inspect_tree().violations == 0,
+                 "rejected expansion left the tree dirty");
+
+    // Le meme faux evaluateur, assaini, doit reevaluer la position et remplir
+    // le cache avec une entree finie. Une simulation est necessaire : a budget
+    // nul, step_analysis ne reexpand pas une racine deja creee.
+    evaluator.corrupt_call = 0;
+    mcts.step_analysis(board, 1, 1.4f, 0, 1);
+
+    const TTProbe probe = MCTSTestAccess::probe_cache(mcts, key);
+    require_test(probe.status == TTProbeStatus::HIT,
+                 "a valid evaluation did not fill the cache");
+    require_test(std::isfinite(probe.value), "non-finite cached value");
+    require_test(probe.policy_size > 0, "empty cached policy");
+    for (int i = 0; i < probe.policy_size; ++i) {
+        require_test(std::isfinite(probe.legal_policy[i].second),
+                     "non-finite cached policy entry");
+    }
+    require_test(mcts.inspect_tree().violations == 0,
+                 "recovered tree violates the invariants");
+    require_test(evaluator.batch_sizes.size() == 2,
+                 "the position was not evaluated exactly twice");
+}
+
 }  // namespace
 
 int main() {
@@ -135,6 +182,7 @@ int main() {
         test_controlled_failure_is_observable();
         test_scalar_output_is_validated_before_use();
         test_root_expansion_rejects_invalid_output_and_recovers();
+        test_rejected_output_does_not_poison_the_cache();
         return 0;
     }
     catch (const std::exception& error) {
