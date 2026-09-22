@@ -33,6 +33,10 @@ public:
         mcts.m_wave_test_hooks = hooks;
     }
 
+    static void seed_noise(MCTS& mcts, std::uint32_t seed) {
+        mcts.m_noise_rng.seed(seed);
+    }
+
     static MCTSNode* analysis_root(MCTS& mcts) {
         return mcts.m_analysis_root.get();
     }

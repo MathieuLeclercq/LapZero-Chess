@@ -10,6 +10,18 @@
 #include <stdexcept>
 #include <vector>
 
+class SelfPlayTestAccess {
+public:
+    static MCTSNode* root(SelfPlayManager& manager, int game_idx) {
+        return manager.m_roots[static_cast<std::size_t>(game_idx)].get();
+    }
+
+    static float pending_epsilon(const SelfPlayManager& manager,
+                                 int game_idx) {
+        return manager.m_pending_epsilon[static_cast<std::size_t>(game_idx)];
+    }
+};
+
 namespace {
 
 constexpr int GAME_COUNT = 8;
@@ -142,6 +154,25 @@ void test_selfplay_rejects_invalid_batch_and_cleans_up() {
     require_test(games.size() == 2, "self-play did not recover");
 }
 
+void test_selfplay_roots_are_expanded_and_noised_exactly_once() {
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 2, 2, 1, 0.5f, 8192);
+
+    // La deuxieme partie partage la position de depart de la premiere : sa
+    // racine est servie par la table et doit tout de meme avoir ses enfants et
+    // son bruit de Dirichlet.
+    for (int game = 0; game < 2; ++game) {
+        MCTSNode* root = SelfPlayTestAccess::root(manager, game);
+        require_test(root != nullptr, "missing self-play root");
+        require_test(root->state.load() == NodeState::Expanded,
+                     "self-play root was left unexpanded");
+        require_test(!root->children.empty(),
+                     "self-play root has no children");
+        require_test(SelfPlayTestAccess::pending_epsilon(manager, game) == 0.0f,
+                     "self-play root kept a pending noise");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -149,6 +180,7 @@ int main() {
         test_openmp_selfplay_core_with_shared_cache();
         test_selfplay_manager_with_controlled_evaluator();
         test_selfplay_rejects_invalid_batch_and_cleans_up();
+        test_selfplay_roots_are_expanded_and_noised_exactly_once();
         return 0;
     }
     catch (const std::exception& error) {

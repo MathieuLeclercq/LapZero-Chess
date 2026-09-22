@@ -28,6 +28,7 @@ SelfPlayManager::SelfPlayManager(
 
     m_sims_target.resize(num_concurrent_games, 0);
     m_is_slow_move.resize(num_concurrent_games, false);
+    m_pending_epsilon.resize(num_concurrent_games, 0.0f);
 
     m_game_states.resize(num_concurrent_games);
     m_game_policies.resize(num_concurrent_games);
@@ -103,7 +104,16 @@ void SelfPlayManager::reset_game(int game_idx) {
     }
 
     float current_epsilon = m_tactical_boost[game_idx] ? TACTICAL_EPSILON : NORMAL_EPSILON;
-    m_shared_mcts->add_dirichlet_noise(m_roots[game_idx].get(), current_epsilon);
+    m_pending_epsilon[game_idx] = current_epsilon;
+    apply_pending_noise(game_idx);
+}
+
+void SelfPlayManager::apply_pending_noise(int game_idx) {
+    if (m_pending_epsilon[game_idx] <= 0.0f) return;
+    MCTSNode* root = m_roots[game_idx].get();
+    if (root == nullptr || root->children.empty()) return;
+    m_shared_mcts->add_dirichlet_noise(root, m_pending_epsilon[game_idx]);
+    m_pending_epsilon[game_idx] = 0.0f;
 }
 
 void SelfPlayManager::execute_gpu_batch() {
@@ -145,18 +155,18 @@ void SelfPlayManager::execute_gpu_batch() {
                 m_waiting_leaves[i], m_boards[game_idx], single_policy,
                 value, m_waiting_reservations[i]);
 
-            if (m_waiting_leaves[i] == m_roots[game_idx].get()) {
-                float current_epsilon = m_tactical_boost[game_idx]
-                    ? TACTICAL_EPSILON : NORMAL_EPSILON;
-                m_shared_mcts->add_dirichlet_noise(
-                    m_roots[game_idx].get(), current_epsilon);
-            }
-
             for (int k = 0; k < moves_played; ++k) {
                 m_boards[game_idx].undoMove();
             }
             m_waiting_moves_played[i] = 0;
             m_sims_completed[game_idx]++;
+        }
+
+        // Une racine dont les enfants viennent d'etre materialises, par
+        // expansion ou par hit de table pendant la descente, recoit ici le
+        // bruit de Dirichlet en attente. Une seule application par coup.
+        for (int i = 0; i < current_batch_size; ++i) {
+            apply_pending_noise(m_waiting_game_indices[i]);
         }
     }
     catch (...) {
@@ -258,12 +268,11 @@ void SelfPlayManager::play_best_move(int game_idx) {
     // d'un jeu plus bruité que la normale.
     m_tactical_boost[game_idx] = false;
 
-    // Si la racine réutilisée avait déjà des enfants (rare mais possible),
-    // on applique le bruit de suite. Sinon, ça sera fait dans execute_gpu_batch.
-    if (!m_roots[game_idx]->children.empty()) {
-        float current_epsilon = m_tactical_boost[game_idx] ? TACTICAL_EPSILON : NORMAL_EPSILON;
-        m_shared_mcts->add_dirichlet_noise(m_roots[game_idx].get(), current_epsilon);
-    }
+    // Le bruit du nouveau coup est du a la racine, une seule fois. Si ses
+    // enfants ne sont pas encore materialises, il reste en attente et sera
+    // applique des qu'ils existent, dans execute_gpu_batch.
+    m_pending_epsilon[game_idx] = NORMAL_EPSILON;
+    apply_pending_noise(game_idx);
 }
 
 void SelfPlayManager::roll_next_move(int game_idx) {

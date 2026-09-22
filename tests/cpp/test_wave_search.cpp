@@ -590,6 +590,106 @@ void test_repetition_is_a_draw_in_the_search() {
                  "a repetition called the evaluator");
 }
 
+std::vector<float> politique_non_uniforme(const std::vector<int>& legal) {
+    std::vector<float> policy(POLICY_SIZE, 0.0f);
+    for (std::size_t i = 0; i < legal.size(); ++i) {
+        policy[static_cast<std::size_t>(legal[i])] =
+            1.0f + 0.05f * static_cast<float>(i);
+    }
+    return policy;
+}
+
+std::vector<float> priors_des_enfants(const MCTSNode& node) {
+    std::vector<float> priors;
+    for (const auto& child : node.children) {
+        priors.push_back(child.second->prior);
+    }
+    return priors;
+}
+
+void test_tt_hit_expands_the_root_and_does_not_pollute_the_cache() {
+    ControlledEvaluator evaluator;
+    MCTS mcts(&evaluator, 64, 0);
+    Chessboard board = startup_board();
+    const std::vector<int> legal = board.getLegalMoveIndices();
+    const std::vector<float> policy = politique_non_uniforme(legal);
+    MCTSTestAccess::store(mcts, board, legal, policy, 0.25f);
+
+    MCTSNode root(0.0f);
+    const float value = mcts.expand_node_single(&root, board);
+
+    require_test(evaluator.batch_sizes.empty(),
+                 "a TT hit called the evaluator");
+    require_test(value == 0.25f, "the TT value was not returned");
+    require_test(root.state.load() == NodeState::Expanded,
+                 "a TT hit left the root unexpanded");
+    require_test(root.children.size() == legal.size(),
+                 "a TT hit lost children");
+    require_test(root.visit_count == 0 && root.total_value == 0.0f,
+                 "the TT expansion performed a backup");
+    const std::vector<float> priors_avant = priors_des_enfants(root);
+    float somme = 0.0f;
+    for (float prior : priors_avant) somme += prior;
+    require_test(std::fabs(somme - 1.0f) < 1e-5f,
+                 "cached priors do not sum to one");
+
+    MCTSTestAccess::seed_noise(mcts, 1234);
+    mcts.add_dirichlet_noise(&root, 0.5f);
+    const std::vector<float> priors_bruites = priors_des_enfants(root);
+    require_test(priors_bruites != priors_avant,
+                 "noise did not change the root priors");
+
+    MCTSNode second(0.0f);
+    mcts.expand_node_single(&second, board);
+    const std::vector<float> priors_second = priors_des_enfants(second);
+    require_test(priors_second.size() == priors_avant.size(),
+                 "the second root lost children");
+    for (std::size_t i = 0; i < priors_avant.size(); ++i) {
+        require_test(std::fabs(priors_second[i] - priors_avant[i]) < 1e-6f,
+                     "noise polluted the cached policy");
+    }
+}
+
+void test_noise_is_deterministic_and_epsilon_zero_is_a_no_op() {
+    ControlledEvaluator evaluator;
+    MCTS mcts(&evaluator, 64, 0);
+    Chessboard board = startup_board();
+    const std::vector<int> legal = board.getLegalMoveIndices();
+    MCTSTestAccess::store(mcts, board, legal, politique_non_uniforme(legal),
+                          0.1f);
+
+    MCTSNode temoin(0.0f);
+    MCTSNode first(0.0f);
+    MCTSNode second(0.0f);
+    MCTSNode sans_bruit(0.0f);
+    mcts.expand_node_single(&temoin, board);
+    mcts.expand_node_single(&first, board);
+    mcts.expand_node_single(&second, board);
+    mcts.expand_node_single(&sans_bruit, board);
+    const std::vector<float> base = priors_des_enfants(temoin);
+
+    MCTSTestAccess::seed_noise(mcts, 42);
+    mcts.add_dirichlet_noise(&first, 0.30f);
+    MCTSTestAccess::seed_noise(mcts, 42);
+    mcts.add_dirichlet_noise(&second, 0.30f);
+    mcts.add_dirichlet_noise(&sans_bruit, 0.0f);
+
+    const std::vector<float> p1 = priors_des_enfants(first);
+    const std::vector<float> p2 = priors_des_enfants(second);
+    const std::vector<float> p3 = priors_des_enfants(sans_bruit);
+    require_test(p1 == p2, "the same seed did not reproduce the noise");
+    require_test(p3 == base, "epsilon zero changed the priors");
+    float somme = 0.0f;
+    bool fini = true;
+    for (std::size_t i = 0; i < p1.size(); ++i) {
+        somme += p1[i];
+        if (p1[i] < 0.0f || !std::isfinite(p1[i])) fini = false;
+    }
+    require_test(std::fabs(somme - 1.0f) < 1e-5f,
+                 "noised priors do not sum to one");
+    require_test(fini, "noised priors are negative or non-finite");
+}
+
 void test_gpu_phase_is_quiet_and_update_root_waits_for_session() {
     ControlledEvaluator evaluator;
     EvaluationGate gate;
@@ -759,6 +859,8 @@ int main() {
         test_mate_delivered_at_hundred_from_ninety_nine();
         test_terminal_classification_prefers_mate_over_rule_draws();
         test_repetition_is_a_draw_in_the_search();
+        test_tt_hit_expands_the_root_and_does_not_pollute_the_cache();
+        test_noise_is_deterministic_and_epsilon_zero_is_a_no_op();
         test_gpu_phase_is_quiet_and_update_root_waits_for_session();
         return 0;
     }

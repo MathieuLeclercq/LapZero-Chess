@@ -36,6 +36,8 @@ struct ThreadLocalBuffer {
 class SelfPlayManager {
 private:
 
+    friend class SelfPlayTestAccess;
+
     // constantes de config
     static constexpr float NORMAL_EPSILON = 0.12f;
     static constexpr float TACTICAL_EPSILON = 0.30f;
@@ -48,6 +50,11 @@ private:
     float m_slow_ratio;
     std::vector<int> m_sims_target;  // sims à faire pour le coup en cours
     std::vector<char> m_is_slow_move;
+
+    // Bruit de Dirichlet du a la racine du coup en cours, une seule fois par
+    // coup. Il est applique des que les enfants de la racine existent : les
+    // positions servies par la table n'en ont pas a la preparation.
+    std::vector<float> m_pending_epsilon;
 
     Evaluator* m_evaluator;
 
@@ -104,5 +111,6 @@ private:
     void play_best_move(int game_idx);
     void roll_next_move(int game_idx);
     void execute_gpu_batch();
+    void apply_pending_noise(int game_idx);
     void load_tactical_puzzles(const std::string& filepath);
 };

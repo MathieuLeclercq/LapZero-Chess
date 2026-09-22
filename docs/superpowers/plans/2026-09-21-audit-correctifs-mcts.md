@@ -280,6 +280,8 @@ Ne pas utiliser aveuglément un état de partie mémorisé si le chemin de simul
 
 ## 6. R4 : appliquer le bruit de racine même après un hit TT
 
+**Statut (2026-09-21) : fait, deux tests de bord restent.** Un hit TT dans `expand_node_single` matérialise désormais les enfants et publie `Expanded` via `make_children_from_probe`, partagé avec l'expansion paresseuse (`src/search_children.hpp`), sans inférence ni backup. Côté self-play, le bruit de la racine du coup est porté par `m_pending_epsilon` : posé à `reset_game` et au changement de coup, consommé exactement une fois dès que les enfants existent, dans la phase séquentielle (`apply_pending_noise`, appelé depuis `reset_game`, `play_best_move` et `execute_gpu_batch`). Le RNG n'est utilisé que dans ces phases séquentielles. Vérification : un hit TT donne des enfants sans appel réseau et sans backup, la politique du cache reste intacte après un bruit de 0,5, le même germe reproduit le même bruit, epsilon nul ne change rien, les priors restent normalisés, et les deux racines du self-play sont `Expanded` avec bruit consommé dès la construction. Détection par mutation prouvée sur l'expansion depuis la table. Commit : `Applique le bruit de racine apres un hit de table`. Restent non testés : R4-T2 en comparaison stricte froide/chaude par une inférence, et R4-T6 sur le premier coup d'une partie puzzle servie par la table.
+
 ### Constat
 
 Dans `expand_node_single`, le hit TT peut rendre sa valeur sans créer d'enfants. Le garde de publication remet alors le nœud non publié à `Unexpanded`. L'appel immédiat à `add_dirichlet_noise` ne fait rien, puisque la liste d'enfants est vide.
@@ -295,15 +297,15 @@ Les enfants sont matérialisés plus tard pendant la descente. Le bruit attendu 
 
 ### Implémentation recommandée
 
-- [ ] Faire en sorte qu'une expansion explicite de nœud depuis un hit TT construise ses enfants, initialise sa valeur réseau et publie `Expanded`, sans ajouter de backup ni de simulation fictive.
-- [ ] Réutiliser la construction existante des enfants depuis `TTProbe`, avec le contrat R7 sur la complétude de la politique.
-- [ ] Vérifier le chemin `mcts_search(add_dirichlet = true)` : la racine doit avoir ses enfants avant l'application du bruit, même à budget de recherche nul.
-- [ ] En self-play, couvrir non seulement `reset_game`, mais aussi une racine extraite d'un enfant encore non développé.
-- [ ] Recommandation pour le self-play : représenter explicitement le fait que le bruit de ce coup reste à appliquer. Préparer les racines et appliquer ce bruit dans les phases séquentielles, puis consommer ce drapeau exactement une fois.
-- [ ] Avant de descendre dans une nouvelle racine non développée, garantir son expansion et l'application du bruit prévu. Une expansion depuis TT n'exige pas de NN. Si la racine doit être évaluée, préserver autant que possible le passage par le batch existant.
-- [ ] Si une première version choisit une expansion scalaire anticipée pour une racine encore non développée, mesurer et documenter ce coût séparément. Ne pas transformer silencieusement toutes les préparations self-play en appels NN unitaires.
-- [ ] Ne jamais faire tirer le bruit par plusieurs workers à partir du même `m_noise_rng` non protégé. Les callbacks de publication ne doivent pas introduire une course sur le RNG.
-- [ ] Ne pas ajouter le bruit à chaque vague, à chaque reprise d'analyse ou à chaque hit de table. L'unité est la racine d'un coup de self-play.
+- [x] Faire en sorte qu'une expansion explicite de nœud depuis un hit TT construise ses enfants, initialise sa valeur réseau et publie `Expanded`, sans ajouter de backup ni de simulation fictive.
+- [x] Réutiliser la construction existante des enfants depuis `TTProbe`, avec le contrat R7 sur la complétude de la politique. Extraction dans `src/search_children.hpp`, partagée par l'expansion paresseuse et l'expansion explicite.
+- [x] Vérifier le chemin `mcts_search(add_dirichlet = true)` : la racine doit avoir ses enfants avant l'application du bruit, même à budget de recherche nul. L'expansion de racine est immédiate depuis ce lot.
+- [x] En self-play, couvrir non seulement `reset_game`, mais aussi une racine extraite d'un enfant encore non développé. Le bruit en attente est appliqué dès que la racine a des enfants, y compris après une matérialisation par la table pendant une descente.
+- [x] Recommandation pour le self-play : représenter explicitement le fait que le bruit de ce coup reste à appliquer. Préparer les racines et appliquer ce bruit dans les phases séquentielles, puis consommer ce drapeau exactement une fois.
+- [x] Avant de descendre dans une nouvelle racine non développée, garantir son expansion et l'application du bruit prévu. Une expansion depuis TT n'exige pas de NN. Si la racine doit être évaluée, préserver autant que possible le passage par le batch existant.
+- [x] Si une première version choisit une expansion scalaire anticipée pour une racine encore non développée, mesurer et documenter ce coût séparément. Non retenu : la racine non développée reste évaluée par le lot existant, le bruit est différé au lieu d'être anticipé.
+- [x] Ne jamais faire tirer le bruit par plusieurs workers à partir du même `m_noise_rng` non protégé. Les callbacks de publication ne doivent pas introduire une course sur le RNG. Le bruit n'est tiré que dans les phases séquentielles.
+- [x] Ne pas ajouter le bruit à chaque vague, à chaque reprise d'analyse ou à chaque hit de table. L'unité est la racine d'un coup de self-play.
 
 ### Tests précis
 
@@ -321,11 +323,11 @@ Les enfants sont matérialisés plus tard pendant la descente. Le bruit attendu 
 
 ### Acceptation
 
-- [ ] Le hit TT n'empêche plus le bruit demandé.
-- [ ] La politique en cache reste indépendante du bruit.
-- [ ] Aucun RNG partagé n'est utilisé sans synchronisation depuis les workers.
-- [ ] Les compteurs et budgets ne gagnent pas de visite artificielle.
-- [ ] Tout coût supplémentaire de préparation des racines est visible dans les mesures futures, pas supposé négligeable.
+- [x] Le hit TT n'empêche plus le bruit demandé.
+- [x] La politique en cache reste indépendante du bruit.
+- [x] Aucun RNG partagé n'est utilisé sans synchronisation depuis les workers.
+- [x] Les compteurs et budgets ne gagnent pas de visite artificielle.
+- [x] Tout coût supplémentaire de préparation des racines est visible dans les mesures futures, pas supposé négligeable. Aucun appel réseau ajouté ici : l'expansion depuis la table est gratuite et le coût de matérialisation des enfants est celui de l'expansion habituelle, déplacé avant la recherche.
 
 ## 7. R5 : contrôler les sorties de l'évaluateur avant toute utilisation
 
@@ -730,7 +732,7 @@ Pour chaque lot, fournir :
 - [x] R1 : unités de virtual loss équilibrées sur sorties normales et exceptionnelles.
 - [x] R2 : invariants complets, options réellement transmises et statut d'échec fiable.
 - [x] R3 : mat à 100 correctement évalué dans toutes les recherches et le self-play.
-- [ ] R4 : bruit présent sur TT hit, une fois par coup, sans pollution du cache.
+- [x] R4 : bruit présent sur TT hit, une fois par coup, sans pollution du cache.
 - [x] R5 : sorties invalides rejetées avant accès et insertion, reprise propre.
 - [ ] R6 : tests discriminants de correspondance des lignes et de padding.
 - [ ] R7 : totalité des coups conservée, jamais de hit de politique tronquée.

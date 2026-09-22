@@ -1,5 +1,6 @@
 #include "mcts.hpp"
 
+#include "search_children.hpp"
 #include "search_executor.hpp"
 #include "search_terminal.hpp"
 
@@ -12,9 +13,6 @@
 #include <utility>
 
 namespace {
-
-using NodeChildren =
-    std::vector<std::pair<int, std::unique_ptr<MCTSNode>>>;
 
 class BoardRollback {
 public:
@@ -46,32 +44,6 @@ bool is_rule_terminal(const Chessboard& board) {
 float terminal_value(Chessboard& board) {
     if (is_rule_terminal(board)) return terminal_value_for(board);
     return board.isInCheck() ? -1.0f : 0.0f;
-}
-
-NodeChildren make_children_from_probe(MCTSNode* parent,
-                                      const TTProbe& probe) {
-    if (probe.policy_size <= 0) {
-        throw std::logic_error("hit TT sans politique legale");
-    }
-
-    float sum_legal = 0.0f;
-    for (int i = 0; i < probe.policy_size; ++i) {
-        sum_legal += probe.legal_policy[i].second;
-    }
-
-    NodeChildren children;
-    children.reserve(static_cast<std::size_t>(probe.policy_size));
-    const float uniform = 1.0f / static_cast<float>(probe.policy_size);
-    for (int i = 0; i < probe.policy_size; ++i) {
-        const int move_index = probe.legal_policy[i].first;
-        const float prior = sum_legal > 0.0f
-            ? probe.legal_policy[i].second / sum_legal
-            : uniform;
-        children.emplace_back(
-            move_index,
-            std::make_unique<MCTSNode>(prior, move_index, parent));
-    }
-    return children;
 }
 
 bool acquire_slot(std::atomic<std::size_t>& available) {
@@ -207,7 +179,7 @@ LeafWork MCTS::collect_wave_leaf(
 
             if (probe.status == TTProbeStatus::HIT) {
                 node->network_value = probe.value;
-                NodeChildren children = make_children_from_probe(node, probe);
+                auto children = make_children_from_probe(node, probe);
                 if (hooks && hooks->before_tt_publish) {
                     hooks->before_tt_publish(node);
                 }

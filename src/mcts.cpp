@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <cstdint>
 
+#include "search_children.hpp"
 #include "search_executor.hpp"
 #include "search_terminal.hpp"
 
@@ -30,28 +31,6 @@ NodeChildren make_children_from_policy(
         const int move_index = legal_indices[i];
         const float prior = sum_legal > 0.0f
             ? policy[move_index] / sum_legal
-            : uniform;
-        children.emplace_back(
-            move_index,
-            std::make_unique<MCTSNode>(prior, move_index, parent));
-    }
-    return children;
-}
-
-NodeChildren make_children_from_probe(MCTSNode* parent,
-                                      const TTProbe& probe) {
-    float sum_legal = 0.0f;
-    for (int i = 0; i < probe.policy_size; ++i) {
-        sum_legal += probe.legal_policy[i].second;
-    }
-
-    NodeChildren children;
-    children.reserve(probe.policy_size);
-    const float uniform = 1.0f / static_cast<float>(probe.policy_size);
-    for (int i = 0; i < probe.policy_size; ++i) {
-        const int move_index = probe.legal_policy[i].first;
-        const float prior = sum_legal > 0.0f
-            ? probe.legal_policy[i].second / sum_legal
             : uniform;
         children.emplace_back(
             move_index,
@@ -343,6 +322,13 @@ float MCTS::expand_node_single(MCTSNode* node, Chessboard& board,
 
     if (probe.status == TTProbeStatus::HIT) {
         node->network_value = probe.value;
+        // Materialiser les enfants tout de suite. Sans cela, le noeud reste
+        // Unexpanded et un bruit de racine demande juste apres ne trouve aucune
+        // liste d'enfants : le self-play perdait le bruit de Dirichlet sur les
+        // racines servies par la table, notamment les positions de depart.
+        auto children = make_children_from_probe(node, probe);
+        node->children.swap(children);
+        publication.publish(NodeState::Expanded);
         return probe.value;
     }
 
