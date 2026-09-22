@@ -690,7 +690,7 @@ Les noms CTest existants utiles sont `reservation`, `node_state`, `wave_collecti
 
 - [x] Relancer le perft rapide si les règles terminales ou interfaces de plateau ont été touchées, sans prétendre qu'il valide les bugs spécifiques au MCTS.
 - [x] Conserver les tests de copie de plateau et de clé TT : compteur des 50 coups, contexte de répétition, droits de roque et profondeur d'historique.
-- [ ] Vérifier une analyse UCI complète avec historique, arrêt, reprise et déplacement de racine. Les tests automatisés doivent rester locaux et ne pas se connecter à Lichess. Non fait : les tests UCI du dépôt utilisent des dépendances factices.
+- [x] Vérifier une analyse UCI complète avec historique, arrêt, reprise et déplacement de racine. Les tests automatisés doivent rester locaux et ne pas se connecter à Lichess. Fait par un pilote local : uciok et readyok, historique de quatre coups, déplacement de racine avec un coup de plus, changement de base, arrêt d'un go infinite ; les quatre bestmove sont légaux selon python-chess et le journal par coup s'écrit.
 - [x] Vérifier une génération self-play minuscule avec faux évaluateur, contenant une partie normale et une partie puzzle contrôlée. Fait : la partie lente à 4000 simulations et la partie normale sont générées et collectées ensemble dans le même test.
 
 ### Niveau C : performance, seulement après validation fonctionnelle
