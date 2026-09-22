@@ -1,5 +1,7 @@
 #include "controlled_evaluator.hpp"
+#include "discriminating_evaluator.hpp"
 #include "mcts.hpp"
+#include "mcts_test_access.hpp"
 #include "test_support.hpp"
 
 #include <algorithm>
@@ -8,10 +10,12 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdint>
 #include <exception>
 #include <future>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -70,6 +74,54 @@ void require_best_move_is_legal(MCTS& mcts, Chessboard& board) {
     require_test(std::find(legal.begin(), legal.end(), stats.front().move_idx)
                      != legal.end(),
                  "best move is illegal on root board");
+}
+
+Chessboard rejouer_chemin(const Chessboard& depart, MCTS& mcts,
+                          const std::vector<int>& chemin) {
+    Chessboard replay = depart;
+    for (int idx : chemin) {
+        require_test(mcts.apply_move_by_index(replay, idx),
+                     "could not replay a tree path");
+    }
+    return replay;
+}
+
+// Verifie, pour chaque noeud materialise dont le tenseur a ete servi a
+// l'evaluateur, que la value et les priors viennent de SA ligne. Un decalage
+// entre lignes et feuilles, ou une ligne de padding consommee, echoue ici. Un
+// tenseur non servi (transposition d'historique sur un hit TT) est ignore.
+void verifier_association(MCTS& mcts, const Chessboard& depart,
+                          MCTSNode* node, std::vector<int>& chemin,
+                          const DiscriminatingEvaluator& evaluator) {
+    Chessboard plateau = rejouer_chemin(depart, mcts, chemin);
+    std::vector<float> tensor;
+    plateau.getAlphaZeroTensor(tensor);
+
+    if (evaluator.a_une_reponse(tensor)
+        && node->state.load() == NodeState::Expanded) {
+        const auto& reponse = evaluator.reponse_pour(tensor);
+        require_test(std::fabs(node->network_value - reponse.value) < 1e-6f,
+                     "a node carries the value of another batch row");
+        const std::vector<int> legal = plateau.getLegalMoveIndices();
+        float somme = 0.0f;
+        for (int idx : legal) somme += reponse.policy[static_cast<std::size_t>(idx)];
+        require_test(somme > 0.0f, "fixture policy has no legal mass");
+        require_test(node->children.size() == legal.size(),
+                     "expanded node does not expose all legal children");
+        for (const auto& child : node->children) {
+            const float attendu =
+                reponse.policy[static_cast<std::size_t>(child.first)] / somme;
+            require_test(std::fabs(child.second->prior - attendu) < 1e-5f,
+                         "a child carries the prior of another batch row");
+        }
+    }
+
+    for (const auto& child : node->children) {
+        chemin.push_back(child.first);
+        verifier_association(mcts, depart, child.second.get(), chemin,
+                             evaluator);
+        chemin.pop_back();
+    }
 }
 
 void test_budgets_and_invariants_across_configurations() {
@@ -261,6 +313,166 @@ void test_tuning_defaults_validation_and_propagation() {
     require_test(refuse, "virtual_loss nul accepte");
 }
 
+void test_each_leaf_gets_the_value_and_priors_of_its_own_tensor() {
+    DiscriminatingEvaluator evaluator;
+    Chessboard board = startup_board();
+    MCTS mcts(&evaluator, 8192, 0);
+    mcts.set_fixed_batch(true);
+    mcts.step_analysis(board, 24, 1.4f, 8, 4);
+
+    require_quiescent(mcts.inspect_tree());
+    std::vector<int> chemin;
+    verifier_association(mcts, board, MCTSTestAccess::analysis_root(mcts),
+                         chemin, evaluator);
+}
+
+void test_terminal_leaves_do_not_shift_network_rows() {
+    DiscriminatingEvaluator evaluator;
+    Chessboard board = startup_board();
+    const std::vector<int> legal = board.getLegalMoveIndices();
+    MCTS mcts(&evaluator, 8192, 0);
+
+    // Racine fabriquee : trois enfants, dont le premier est deja terminal.
+    MCTSNode root(0.0f);
+    root.state.store(NodeState::Expanded);
+    root.visit_count = 8;  // exploration_factor non nul : le virtual loss ecarte
+    const float prior = 1.0f / 3.0f;
+    for (int i = 0; i < 3; ++i) {
+        const int move = legal[static_cast<std::size_t>(i)];
+        root.children.emplace_back(
+            move, std::make_unique<MCTSNode>(prior, move, &root));
+    }
+    root.children[0].second->state.store(NodeState::Terminal);
+
+    MCTSTestAccess::run_waves(mcts, &root, board, 3, 1.4f, 8, 4);
+
+    require_test(evaluator.batch_sizes == std::vector<int>{2},
+                 "terminal leaves consumed or shifted a batch row");
+    require_test(mcts.get_counters().nn_calls == 2,
+                 "nn_calls does not match the network leaves");
+    require_test(mcts.get_counters().completed_simulations == 3,
+                 "the wave did not complete its three simulations");
+    std::vector<int> chemin;
+    verifier_association(mcts, board, &root, chemin, evaluator);
+}
+
+void test_partial_waves_pad_to_the_fixed_shape() {
+    for (int budget : {1, 3, 7}) {
+        DiscriminatingEvaluator evaluator;
+        Chessboard board = startup_board();
+        MCTS mcts(&evaluator, 8192, 0);
+        mcts.set_fixed_batch(true);
+        mcts.step_analysis(board, budget, 1.4f, 8, 4);
+
+        require_quiescent(mcts.inspect_tree());
+        require_test(!evaluator.batch_sizes.empty(), "no evaluation at all");
+        require_test(evaluator.batch_sizes.front() == 1,
+                     "root expansion must stay at batch one");
+        for (std::size_t i = 1; i < evaluator.batch_sizes.size(); ++i) {
+            require_test(evaluator.batch_sizes[i] == 8,
+                         "a partial wave lost its fixed shape");
+        }
+        std::vector<int> chemin;
+        verifier_association(mcts, board,
+                             MCTSTestAccess::analysis_root(mcts), chemin,
+                             evaluator);
+    }
+
+    DiscriminatingEvaluator evaluator;
+    Chessboard board = startup_board();
+    MCTS mcts(&evaluator, 8192, 0);
+    mcts.set_fixed_batch(true);
+    mcts.step_analysis(board, 3, 1.4f, 32, 4);
+    require_test(evaluator.batch_sizes.size() >= 2
+                     && evaluator.batch_sizes.front() == 1,
+                 "root expansion must stay at batch one");
+    for (std::size_t i = 1; i < evaluator.batch_sizes.size(); ++i) {
+        require_test(evaluator.batch_sizes[i] == 32,
+                     "batch 32 padding was not applied");
+    }
+    std::vector<int> chemin;
+    verifier_association(mcts, board, MCTSTestAccess::analysis_root(mcts),
+                         chemin, evaluator);
+}
+
+void test_terminal_root_never_sends_a_wave() {
+    DiscriminatingEvaluator evaluator;
+    MCTS mcts(&evaluator, 8192, 0);
+    Chessboard board;
+    board.loadFEN(
+        "r1bqkb1r/pppp1Qpp/2n5/4p3/2B1n3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4");
+
+    mcts.step_analysis(board, 17, 1.4f, 8, 4);
+
+    require_test(evaluator.batch_sizes.empty(),
+                 "a terminal root sent an evaluation batch");
+    require_quiescent(mcts.inspect_tree());
+}
+
+void test_padding_sentinels_are_ignored_and_counters_stay_honest() {
+    DiscriminatingEvaluator evaluator;
+    Chessboard board = startup_board();
+    evaluator.sentinelles_padding = true;
+    MCTS mcts(&evaluator, 8192, 0);
+    mcts.set_fixed_batch(true);
+    mcts.step_analysis(board, 17, 1.4f, 8, 4);
+
+    require_quiescent(mcts.inspect_tree());
+    std::vector<int> chemin;
+    verifier_association(mcts, board, MCTSTestAccess::analysis_root(mcts),
+                         chemin, evaluator);
+
+    const SearchCounters counters = mcts.get_counters();
+    require_test(
+        counters.nn_batches
+            == static_cast<std::uint64_t>(evaluator.batch_sizes.size()),
+        "nn_batches does not count physical calls");
+    std::uint64_t lignes = 0;
+    for (int taille : evaluator.batch_sizes) {
+        lignes += static_cast<std::uint64_t>(taille);
+    }
+    require_test(counters.nn_calls <= lignes,
+                 "nn_calls exceeds the physical rows of the batches");
+}
+
+class PermutingEvaluator final : public Evaluator {
+public:
+    DiscriminatingEvaluator inner;
+
+    void evaluate_batch(const std::vector<float>& input,
+                        std::vector<float>& policies,
+                        std::vector<float>& values,
+                        int batch_size) override {
+        inner.evaluate_batch(input, policies, values, batch_size);
+        if (batch_size < 2) return;
+        std::swap(values[0], values[1]);
+        for (int k = 0; k < POLICY_SIZE; ++k) {
+            std::swap(policies[static_cast<std::size_t>(k)],
+                      policies[static_cast<std::size_t>(POLICY_SIZE + k)]);
+        }
+    }
+};
+
+void test_the_association_check_detects_a_permutation() {
+    PermutingEvaluator evaluator;
+    Chessboard board = startup_board();
+    MCTS mcts(&evaluator, 8192, 0);
+    mcts.set_fixed_batch(true);
+    mcts.step_analysis(board, 17, 1.4f, 8, 4);
+
+    bool detected = false;
+    try {
+        std::vector<int> chemin;
+        verifier_association(mcts, board,
+                             MCTSTestAccess::analysis_root(mcts), chemin,
+                             evaluator.inner);
+    }
+    catch (const std::exception&) {
+        detected = true;
+    }
+    require_test(detected, "permuted batch rows were not detected");
+}
+
 void test_gpu_phase_is_quiet_and_update_root_waits_for_session() {
     ControlledEvaluator evaluator;
     EvaluationGate gate;
@@ -420,6 +632,12 @@ int main() {
         test_weighted_virtual_loss_leaves_no_residue();
         test_weighted_reservations_survive_failure_then_recover();
         test_invalid_tail_of_batch_is_rejected_before_any_publication();
+        test_each_leaf_gets_the_value_and_priors_of_its_own_tensor();
+        test_terminal_leaves_do_not_shift_network_rows();
+        test_partial_waves_pad_to_the_fixed_shape();
+        test_terminal_root_never_sends_a_wave();
+        test_padding_sentinels_are_ignored_and_counters_stay_honest();
+        test_the_association_check_detects_a_permutation();
         test_gpu_phase_is_quiet_and_update_root_waits_for_session();
         return 0;
     }

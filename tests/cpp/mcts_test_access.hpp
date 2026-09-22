@@ -33,6 +33,17 @@ public:
         mcts.m_wave_test_hooks = hooks;
     }
 
+    static MCTSNode* analysis_root(MCTS& mcts) {
+        return mcts.m_analysis_root.get();
+    }
+
+    static void run_waves(MCTS& mcts, MCTSNode* root,
+                          const Chessboard& board, int simulations,
+                          float c_puct, int batch_size, int worker_count) {
+        mcts.run_search_waves(root, board, simulations, c_puct, batch_size,
+                              worker_count);
+    }
+
     // Preuve directe que la collecte n'a laisse aucun resultat proprietaire
     // dans les contextes persistants, meme sans arbre a inspecter.
     static std::size_t pending_results(MCTS& mcts) {

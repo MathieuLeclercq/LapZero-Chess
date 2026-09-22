@@ -382,6 +382,8 @@ Permettre de cibler le numéro d'appel fautif, le type de corruption et, pour un
 
 ## 8. R6 : tester l'association des lignes du batch et le padding
 
+**Statut (2026-09-21) : fait sauf R6-T7.** `DiscriminatingEvaluator` identifie chaque ligne par la signature exacte de son tenseur et rend des valeurs et politiques distinctes par tenseur. La vérification `verifier_association` rejoue chaque chemin, recalcule le tenseur et exige pour chaque nœud la value et les priors de sa propre ligne ; les tenseurs non servis (transposition sur hit TT) sont ignorés. Couverts : R6-T1 (24 simulations, lot fixe 8), R6-T2 (racine fabriquée avec un enfant terminal, une seule ligne consommée par feuille réseau), R6-T3 (budgets 1, 3, 7 à forme 8, et forme 32), R6-T4 (racine matée, aucun lot envoyé), R6-T5 et R6-T6 (sentinelles de padding ignorées, `nn_batches` et `nn_calls` cohérents), R6-T8 (une variante qui permute deux lignes fait échouer la vérification, donc la fixture est discriminante). R6-T7, mélange des parties d'un même lot côté self-play, reste à écrire : `GameResult` ne conserve pas les valeurs du réseau, l'association par partie demande un accès de test supplémentaire. Aucun correctif de production n'a été nécessaire. Commit : `Teste l association des lignes du batch et le padding`.
+
 ### Nature du point
 
 Aucune permutation des sorties n'a été démontrée lors de la review. Le problème est que `ControlledEvaluator` renvoie la même politique uniforme et la même valeur pour chaque ligne : un mauvais décalage peut alors être invisible.
@@ -423,10 +425,10 @@ Ce lot est d'abord un renforcement de tests. Ne modifier le code de production q
 
 ### Acceptation
 
-- [ ] Tous les contrôles portent sur l'identité des positions et leurs sorties, pas seulement sur des tailles.
-- [ ] Aucune hypothèse sur l'ordre d'arrivée des workers n'est nécessaire.
-- [ ] Pas d'exigence d'arbre bit à bit identique entre exécutions multicoeurs.
-- [ ] Si le code actuel passe les nouveaux tests discriminants, le livrable est un renforcement de couverture, pas un correctif fictif.
+- [x] Tous les contrôles portent sur l'identité des positions et leurs sorties, pas seulement sur des tailles.
+- [x] Aucune hypothèse sur l'ordre d'arrivée des workers n'est nécessaire. La vérification se fait par rejeu de chemin et signature de tenseur, jamais par index de collecte.
+- [x] Pas d'exigence d'arbre bit à bit identique entre exécutions multicoeurs.
+- [x] Si le code actuel passe les nouveaux tests discriminants, le livrable est un renforcement de couverture, pas un correctif fictif. C'est le cas : aucun code de production n'a changé pour R6.
 
 ## 9. R7 : ne jamais tronquer les coups légaux à la taille du cache
 
