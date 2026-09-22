@@ -765,6 +765,44 @@ void test_hot_root_noises_like_a_cold_root() {
     }
 }
 
+void test_a_real_position_beyond_the_cache_capacity_keeps_all_moves() {
+    // Position construite par Nenad Petrovic. Fixture verifiee avec
+    // python-chess : position legale, 218 coups legaux pour les Blancs, et le
+    // moteur en trouve exactement 218.
+    ControlledEvaluator evaluator;
+    MCTS mcts(&evaluator, 8192, 0);
+    Chessboard board;
+    board.loadFEN(
+        "R6R/3Q4/1Q4Q1/4Q3/2Q4Q/Q4Q2/pp1Q4/kBNN1KB1 w - - 0 1");
+
+    const std::vector<int> legal = board.getLegalMoveIndices();
+    require_test(legal.size() > static_cast<std::size_t>(TT_MAX_MOVES),
+                 "the fixture no longer exceeds the cache capacity");
+
+    MCTSNode root(0.0f);
+    mcts.expand_node_single(&root, board);
+
+    require_test(root.children.size() == legal.size(),
+                 "the expansion lost legal moves of a real position");
+    require_test(evaluator.batch_sizes.size() == 1,
+                 "the first expansion did not use the network");
+    float somme = 0.0f;
+    for (const auto& child : root.children) somme += child.second->prior;
+    require_test(std::fabs(somme - 1.0f) < 1e-5f,
+                 "priors of the real position do not sum to one");
+    require_test(mcts.inspect_tree(&root).violations == 0,
+                 "the 218-child node violates the tree invariants");
+
+    // La politique depasse la capacite du cache : la deuxieme racine doit
+    // rappeler le reseau au lieu de relire une entree tronquee.
+    MCTSNode second(0.0f);
+    mcts.expand_node_single(&second, board);
+    require_test(evaluator.batch_sizes.size() == 2,
+                 "an oversized policy was served from the cache");
+    require_test(second.children.size() == legal.size(),
+                 "the second expansion lost legal moves");
+}
+
 void test_gpu_phase_is_quiet_and_update_root_waits_for_session() {
     ControlledEvaluator evaluator;
     EvaluationGate gate;
@@ -938,6 +976,7 @@ int main() {
         test_noise_is_deterministic_and_epsilon_zero_is_a_no_op();
         test_hot_root_noises_like_a_cold_root();
         test_expansion_keeps_moves_beyond_the_cache_capacity();
+        test_a_real_position_beyond_the_cache_capacity_keeps_all_moves();
         test_gpu_phase_is_quiet_and_update_root_waits_for_session();
         return 0;
     }
