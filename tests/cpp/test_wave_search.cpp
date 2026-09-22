@@ -377,6 +377,35 @@ void test_weighted_reservations_survive_failure_then_recover() {
         "recovery did not complete the budget");
 }
 
+void test_invalid_tail_of_batch_is_rejected_before_any_publication() {
+    ControlledEvaluator evaluator;
+    evaluator.corrupt_call = 2;
+    evaluator.values_corruption =
+        ControlledEvaluator::Corruption::NonFinite;
+    MCTS mcts(&evaluator, 8192, 0);
+    Chessboard board = startup_board();
+
+    bool failed = false;
+    try {
+        mcts.step_analysis(board, 8, 1.4f, 8, 4);
+    }
+    catch (const std::runtime_error&) {
+        failed = true;
+    }
+    require_test(failed, "invalid batch tail was accepted");
+    const TreeReport report = mcts.inspect_tree();
+    require_quiescent(report);
+    require_test(report.root_visits == 0,
+                 "invalid wave performed a backup before rejection");
+
+    evaluator.corrupt_call = 0;
+    mcts.step_analysis(board, 3, 1.4f, 3, 2);
+    const TreeReport recovered = mcts.inspect_tree();
+    require_quiescent(recovered);
+    require_test(recovered.root_visits == 3,
+                 "search did not recover after a rejected batch tail");
+}
+
 }  // namespace
 
 int main() {
@@ -390,6 +419,7 @@ int main() {
         test_tuning_defaults_validation_and_propagation();
         test_weighted_virtual_loss_leaves_no_residue();
         test_weighted_reservations_survive_failure_then_recover();
+        test_invalid_tail_of_batch_is_rejected_before_any_publication();
         test_gpu_phase_is_quiet_and_update_root_waits_for_session();
         return 0;
     }

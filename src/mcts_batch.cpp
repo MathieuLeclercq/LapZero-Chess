@@ -218,11 +218,7 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
             PhaseTimer timer(timing, SearchPhase::Evaluator);
             m_evaluator->evaluate_batch(tensors, policies, values, eval_batch);
         }
-        if (policies.size() != static_cast<std::size_t>(eval_batch) * 4672
-            || values.size() != static_cast<std::size_t>(eval_batch)) {
-            throw std::runtime_error(
-                "evaluateur : dimensions de sortie invalides");
-        }
+        validate_network_output(policies, values, eval_batch);
 
         for (int i = 0; i < batch_count; ++i) {
             expand_and_backup_prepared(batch[i].node, batch[i].legal_moves,

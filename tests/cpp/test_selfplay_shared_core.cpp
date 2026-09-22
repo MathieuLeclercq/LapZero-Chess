@@ -118,12 +118,37 @@ void test_selfplay_manager_with_controlled_evaluator() {
     }
 }
 
+void test_selfplay_rejects_invalid_batch_and_cleans_up() {
+    ControlledEvaluator evaluator;
+    // Deux expansions de racine a la construction, puis le premier lot GPU.
+    evaluator.corrupt_call = 3;
+    evaluator.values_corruption =
+        ControlledEvaluator::Corruption::NonFinite;
+    SelfPlayManager manager(&evaluator, 2, 2, 1, 0.5f, 8192);
+
+    bool failed = false;
+    try {
+        (void)manager.generate_games(2);
+    }
+    catch (const std::runtime_error&) {
+        failed = true;
+    }
+    require_test(failed, "self-play accepted an invalid batch output");
+
+    // Les reservations et les plateaux en attente doivent avoir ete nettoyes :
+    // le gestionnaire reste utilisable apres le rejet.
+    evaluator.corrupt_call = 0;
+    const std::vector<GameResult> games = manager.generate_games(2);
+    require_test(games.size() == 2, "self-play did not recover");
+}
+
 }  // namespace
 
 int main() {
     try {
         test_openmp_selfplay_core_with_shared_cache();
         test_selfplay_manager_with_controlled_evaluator();
+        test_selfplay_rejects_invalid_batch_and_cleans_up();
         return 0;
     }
     catch (const std::exception& error) {

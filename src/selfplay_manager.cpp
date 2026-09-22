@@ -131,6 +131,8 @@ void SelfPlayManager::execute_gpu_batch() {
         m_evaluator->evaluate_batch(
             m_batch_input, m_batch_policies, m_batch_values,
             current_batch_size);
+        validate_network_output(
+            m_batch_policies, m_batch_values, current_batch_size);
 
         for (int i = 0; i < current_batch_size; ++i) {
             int game_idx = m_waiting_game_indices[i];

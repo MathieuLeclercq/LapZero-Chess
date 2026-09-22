@@ -326,6 +326,8 @@ Les enfants sont matérialisés plus tard pendant la descente. Le bruit attendu 
 
 ## 7. R5 : contrôler les sorties de l'évaluateur avant toute utilisation
 
+**Statut (2026-09-21) : fait et validé.** `validate_network_output` dans `src/evaluator.hpp` valide forme et finitude avant tout accès, et l'adaptateur scalaire l'appelle avant `values[0]`. Les trois consommateurs (mono batché, vagues, `execute_gpu_batch`) passent par lui ; le self-play ne peut plus lire un lot court de façon hors bornes. Vérification : corruption ciblée par appel et par ligne (vide, trop long, non fini) sur l'adaptateur scalaire, la racine, la dernière ligne d'une vague et le premier lot self-play, avec reprise après rejet. Détection par mutation prouvée : sans validation, le test scalaire échoue, le test de vague échoue et le test self-play plante en accès mémoire. Coût : la vague scannait déjà ses sorties, le chemin mono batché et le self-play gagnent un parcours de 4672 flottants par ligne, non mesuré séparément car dominé par l'inférence. Commit : `Valide les sorties de l evaluateur avant usage`.
+
 ### Constat et danger
 
 La boucle de vagues valide les tailles et la finitude des sorties. D'autres entrées sont moins protégées. En particulier, `Evaluator::evaluate` lit `values[0]` après l'appel virtuel, sans vérifier qu'une valeur existe. `expand_node_single` peut ensuite indexer une politique trop courte ou stocker une valeur non finie dans la TT.
@@ -341,15 +343,15 @@ La validation doit précéder le premier accès, pas seulement l'expansion des e
 
 ### Implémentation recommandée
 
-- [ ] Définir une validation commune recevant les vecteurs de politiques, de valeurs et la taille physique du batch évalué.
-- [ ] Exiger exactement `batch_size * 4672` éléments de politique et `batch_size` valeurs, avec calcul de taille sûr.
-- [ ] Vérifier la finitude des politiques ET des valeurs. Garder explicite la convention d'entrée du consommateur : il reçoit les probabilités de politique, pas des logits à softmaxer ici.
-- [ ] Appeler cette validation dans l'adaptateur scalaire avant `values[0]`.
-- [ ] Appliquer le même contrat sur les autres chemins avant lecture par indice, création d'enfants ou insertion TT. Réutiliser le contrôle existant des vagues plutôt que scanner deux fois leurs mêmes sorties.
-- [ ] Valider la sortie entière d'un batch avant d'en consommer le premier élément. Un NaN en dernière ligne ne doit pas être découvert après stockage des premières lignes de ce même batch.
-- [ ] Rejeter explicitement une sortie invalide. Ne pas remplacer silencieusement un NaN par 0, une politique tronquée par une politique uniforme ou un échec NN par une nulle.
-- [ ] Préserver les évaluations valides déjà présentes dans la TT ; ne pas vider tout le cache pour masquer l'absence de contrôle à l'entrée.
-- [ ] Vérifier les nettoyages après rejet : réservations, état `Pending` et retour des plateaux à leur position d'entrée. Ajouter un garde de rollback local là où une exception de ce nouveau contrôle révélerait une restauration manquante.
+- [x] Définir une validation commune recevant les vecteurs de politiques, de valeurs et la taille physique du batch évalué.
+- [x] Exiger exactement `batch_size * 4672` éléments de politique et `batch_size` valeurs, avec calcul de taille sûr.
+- [x] Vérifier la finitude des politiques ET des valeurs. Garder explicite la convention d'entrée du consommateur : il reçoit les probabilités de politique, pas des logits à softmaxer ici.
+- [x] Appeler cette validation dans l'adaptateur scalaire avant `values[0]`.
+- [x] Appliquer le même contrat sur les autres chemins avant lecture par indice, création d'enfants ou insertion TT. Réutiliser le contrôle existant des vagues plutôt que scanner deux fois leurs mêmes sorties.
+- [x] Valider la sortie entière d'un batch avant d'en consommer le premier élément. Un NaN en dernière ligne ne doit pas être découvert après stockage des premières lignes de ce même batch.
+- [x] Rejeter explicitement une sortie invalide. Ne pas remplacer silencieusement un NaN par 0, une politique tronquée par une politique uniforme ou un échec NN par une nulle.
+- [x] Préserver les évaluations valides déjà présentes dans la TT ; ne pas vider tout le cache pour masquer l'absence de contrôle à l'entrée.
+- [x] Vérifier les nettoyages après rejet : réservations, état `Pending` et retour des plateaux à leur position d'entrée. Ajouter un garde de rollback local là où une exception de ce nouveau contrôle révélerait une restauration manquante.
 
 La politique de fallback uniforme lorsque la somme des probabilités légales vaut zéro est un contrat séparé. Ne pas la supprimer sans décision distincte. Les contrôles supplémentaires de bornes numériques doivent être discutés séparément s'ils changent des entrées jusque-là tolérées.
 
@@ -373,10 +375,10 @@ Permettre de cibler le numéro d'appel fautif, le type de corruption et, pour un
 
 ### Acceptation
 
-- [ ] Le premier accès à `values[0]` est protégé.
-- [ ] Aucune valeur invalide n'atteint la TT ni l'arbre comme résultat validé.
-- [ ] Les invariants et plateaux sont propres après erreur.
-- [ ] La validation sur les chemins normaux n'est pas exécutée deux fois inutilement ; son éventuel coût sera mesuré, pas supposé nul.
+- [x] Le premier accès à `values[0]` est protégé.
+- [x] Aucune valeur invalide n'atteint la TT ni l'arbre comme résultat validé.
+- [x] Les invariants et plateaux sont propres après erreur.
+- [x] La validation sur les chemins normaux n'est pas exécutée deux fois inutilement ; son éventuel coût sera mesuré, pas supposé nul. La vague scannait déjà une fois ; le coût ajouté aux autres chemins reste à chiffrer si un doute apparaît.
 
 ## 8. R6 : tester l'association des lignes du batch et le padding
 
@@ -724,7 +726,7 @@ Pour chaque lot, fournir :
 - [x] R2 : invariants complets, options réellement transmises et statut d'échec fiable.
 - [ ] R3 : mat à 100 correctement évalué dans toutes les recherches et le self-play.
 - [ ] R4 : bruit présent sur TT hit, une fois par coup, sans pollution du cache.
-- [ ] R5 : sorties invalides rejetées avant accès et insertion, reprise propre.
+- [x] R5 : sorties invalides rejetées avant accès et insertion, reprise propre.
 - [ ] R6 : tests discriminants de correspondance des lignes et de padding.
 - [ ] R7 : totalité des coups conservée, jamais de hit de politique tronquée.
 - [ ] R8 : identité UCI fondée sur la base et les coups, réutilisation normale conservée.

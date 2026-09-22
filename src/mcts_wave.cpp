@@ -476,21 +476,7 @@ void MCTS::run_search_waves(
                     batch_input, policies, values, eval_batch);
             }
 
-            const std::size_t expected_policy =
-                static_cast<std::size_t>(eval_batch) * 4672;
-            if (policies.size() != expected_policy
-                || values.size() != static_cast<std::size_t>(eval_batch)) {
-                throw std::runtime_error(
-                    "evaluateur : dimensions de sortie invalides");
-            }
-            if (!std::all_of(values.begin(), values.end(),
-                             [](float value) { return std::isfinite(value); })
-                || !std::all_of(
-                    policies.begin(), policies.end(),
-                    [](float value) { return std::isfinite(value); })) {
-                throw std::runtime_error(
-                    "evaluateur : sortie non finie");
-            }
+            validate_network_output(policies, values, eval_batch);
         }
 
         std::size_t network_index = 0;
