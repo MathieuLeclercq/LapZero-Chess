@@ -29,8 +29,13 @@ puzzles : 1926 contre 1928, IC95 [-0,4 ; +0,56], McNemar p = 0,87, réseau seul 
 bit près. Le rejet de septembre venait bien de la fuite R1. Le réglage est propagé au bot,
 au tournoi, à la GUI et à l'ancrage Stockfish. Le self-play n'est pas concerné :
 chaque arbre y est descendu une seule fois par vague, donc l'amplitude y est
-inerte. Rapport complet :
+inerte. La campagne de 2500 avait tourné en mono batché (`search_workers 1`) ; les mêmes
+500 lignes rejouées en vagues de 8 workers donnent 367 contre 369, IC95 [-0,4 ; +1,2],
+non-infériorité. Rapport complet :
 `superpowers/specs/2026-09-22-rebalayage-virtual-loss-resultats.md`.
+
+- [ ] Refaire la campagne qualité de 2500 puzzles sur le chemin des vagues (8 workers) si
+      la même précision que la campagne mono est nécessaire.
 
 **Pools self-play, mesure préliminaire.** À 100/20 simulations, la matrice (128, 256),
 (256, 512) et (512, 512) donne 192,9, 231,2 et 254,4 plies nouveaux par seconde, avec

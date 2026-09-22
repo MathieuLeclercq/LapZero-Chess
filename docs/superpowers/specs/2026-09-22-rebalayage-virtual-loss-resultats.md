@@ -2,8 +2,8 @@
 
 Date : 2026-09-22
 
-Statut : campagnes terminees, `virtual_loss = 2` active dans le bot, le self-play,
-le tournoi, la GUI et l'ancrage Stockfish.
+Statut : campagnes terminees, `virtual_loss = 2` active dans le bot, le tournoi,
+la GUI et l'ancrage Stockfish.
 
 Plan : `2026-09-21-rebalayage-virtual-loss.md`. Modele : `2026_04_23_23h25_iter316_unsupervised.onnx`
 pour le banc de recherche, `2026_04_30_09h53_iter436_unsupervised.onnx` pour le
@@ -19,7 +19,11 @@ sur quatre invocations alternees A, B, B, A, l'amplitude 2 gagne 9 a 20 % de
 debit sur les trois positions, abaisse le p95 de latence de 13 a 20 %, et passe
 la barriere qualite sur 2500 puzzles avec un intervalle de confiance
 [-0,4 ; +0,56] point. Le defaut de production est donc passe a 2 dans tous les
-lanceurs, et le self-play recoit le meme reglage que le bot.
+lanceurs du bot, du tournoi, de la GUI et de l'ancrage Stockfish. La campagne de
+2500 a tourne avec un seul worker de recherche par processus, donc sur le chemin
+mono batche ; une passe reduite sur les vagues (500 puzzles, 8 workers, meme
+echantillon que le prefiltre) donne 367 contre 369 reussites, non-inferiorite,
+ce qui leve l'essentiel du doute sur le chemin deploye.
 
 ## 2. Debit, A/B interleaved
 
@@ -53,6 +57,22 @@ meme modele et meme budget, seule l'amplitude change. Verdict par
 | prefiltre 500 | 366 | 368 | +0,4 pt | [-0,8 ; +1,6] | 0,75 | non-inferiorite |
 | campagne 2500 | 1926 | 1928 | +0,08 pt | [-0,4 ; +0,56] | 0,87 | non-inferiorite |
 
+Ces deux lignes ont tourne avec `search_workers = 1` : les seize
+« travailleurs » sont des processus Python independants, donc la non-inferiorite
+porte sur le chemin mono batche. Le bot deploye collecte ses feuilles par vagues
+de huit workers C++, ou les reservations sont visibles pendant les descentes
+concurrentes et ou les collisions different. Le meme sous-echantillon de 500
+lignes a donc ete rejoue sur ce chemin, deux processus de huit workers :
+
+| campagne | reference vloss 1 | candidat vloss 2 | delta | IC95 | McNemar p | verdict |
+|---|---|---|---|---|---|---|
+| vagues 500, 8 workers | 367 | 369 | +0,4 pt | [-0,4 ; +1,2] | 0,62 | non-inferiorite |
+
+Le prefiltre mono et cette passe utilisent les memes 500 lignes, verifie sur la
+colonne `ligne`, donc les chiffres sont comparables ligne a ligne. La passe de
+2500 en vagues n'a pas ete refaite : elle reste la reserve explicite de la
+section 5.
+
 La colonne reseau seul est identique au bit pres entre les deux bras, sur les
 500 puis sur les 2500 lignes : la comparaison ne porte que sur la recherche.
 
@@ -85,6 +105,10 @@ C++ verrouille la propagation au gestionnaire.
 
 ## 5. Reserves
 
+- La campagne qualite de 2500 a tourne en mono batche. Le chemin des vagues est
+  couvert par une passe reduite de 500 puzzles (non-inferiorite, IC95
+  [-0,4 ; +1,2]) ; refaire les 2500 en vagues reste la seule facon d'atteindre
+  la precision de la campagne.
 - La comparaison ancien contre nouveau scheduler de R9 n'a pas ete faite : elle
   demanderait de reconstruire l'ancien commit. La matrice de pools a la place
   mesure (128, 256), (256, 512) et (512, 512) places a 100/20 simulations :
@@ -104,5 +128,9 @@ C++ verrouille la propagation au gestionnaire.
 - 18/18 CTest, dont le perft roundtrip et le palier calibre.
 - 285 pytest, dont la propagation du tuning au gestionnaire, l'accord des trois
   lanceurs et le test de regression du binding self-play avec compteurs.
+- Depuis la revue : restauration du plateau apres une erreur d'evaluation en
+  cours de descente, invariant de la racine reutilisee pour le bruit differe,
+  test du puzzle lent rendu non vacuous, et test d'inerte du self-play passe a
+  l'evaluateur discriminant.
 - A/B interleaved pour toutes les comparaisons de debit, meme session, ordre
   alterne.
