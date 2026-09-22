@@ -749,3 +749,35 @@ Pour chaque lot, fournir :
 - [x] R10 : aucune réservation ne survit à l'arbre qu'elle référence après échec de fusion.
 
 Ne pas clore un lot uniquement parce que le bot joue une bonne partie. Ne pas refuser un correctif démontré au motif que le cas est rare. L'objectif est de préserver le bon comportement courant tout en fermant les cas limites et en rendant les preuves de validation plus solides.
+
+## 15. Cloture
+
+Audit clos le 2026-09-22 sur la branche `codex/audit-mcts`. Les dix lots R1 a R10
+sont faits, testes et valides (18/18 CTest, 285 pytest). La revue externe du
+2026-09-22 a ajoute quatre points, tous traites :
+
+- R5, restauration du plateau : une erreur de l'evaluateur en pleine descente
+  scalaire laissait le plateau sur la feuille. Garde RAII arme par `select_leaf`,
+  partage par les deux boucles de `run_search` et par `advance_to_leaf`, avec un
+  test d'erreur au deuxieme appel reseau et reprise sur le meme arbre.
+- Validation du virtual loss 2 : la campagne de 2500 avait tourne en mono batche.
+  Meme echantillon de 500 lignes en vagues de 8 workers : 367 contre 369,
+  IC95 [-0,4 ; +1,2], non-inferiorite.
+- R4, bruit differe : scenario inatteignable, les deux sites qui posent le bruit
+  developpent la racine avant de l'appliquer, verrouille par un test d'invariant
+  sur la racine reutilisee.
+- Test du puzzle lent : rendu non vacuous, la graine est cherchee sur les
+  demarrages reellement consommes par `generate_games` et le run doit porter
+  l'historique du puzzle.
+
+Les cases de la section 2 sont une methode, pas des constats : elles ont ete
+appliquees lot par lot, sans etre cochees ici.
+
+Reserves explicites, hors perimetre des correctifs :
+
+- campagne qualite de 2500 en vagues (8 workers) non refaite ;
+- confirmation de la taille de pool self-play a 700/100 ;
+- tournoi de niveau de jeu, seule mesure de force ;
+- score de la ligne complete et comparaison a temps egal, optionnels ;
+- comparaison ancien contre nouveau scheduler R9, qui demanderait de reconstruire
+  l'ancien commit.
