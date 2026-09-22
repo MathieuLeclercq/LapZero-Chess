@@ -150,12 +150,12 @@ Avec `virtual_loss = 1`, les opérations s'équilibrent. Avec 2, 3 ou davantage,
 
 ### Implémentation recommandée
 
-- [ ] Remplacer chaque pointeur stocké dans le chemin par une entrée contenant le pointeur ET le nombre exact d'unités réservées lors de cet appel.
-- [ ] Enregistrer cette entrée avant d'incrémenter l'atomique. Si l'allocation du vecteur échoue, aucun compteur ne doit avoir été modifié.
-- [ ] Dans `release()`, soustraire les unités de chaque entrée, jamais une valeur globale relue dans `SearchTuning`.
-- [ ] Préserver le transfert exclusif de propriété dans les déplacements. Une affectation par déplacement doit d'abord libérer l'ancien chemin du destinataire.
-- [ ] Préserver l'idempotence de `release()` : un second appel ne fait rien.
-- [ ] Préserver le comportement existant pour un pointeur nul ou `units == 0` : aucune réservation.
+- [x] Remplacer chaque pointeur stocké dans le chemin par une entrée contenant le pointeur ET le nombre exact d'unités réservées lors de cet appel.
+- [x] Enregistrer cette entrée avant d'incrémenter l'atomique. Si l'allocation du vecteur échoue, aucun compteur ne doit avoir été modifié.
+- [x] Dans `release()`, soustraire les unités de chaque entrée, jamais une valeur globale relue dans `SearchTuning`.
+- [x] Préserver le transfert exclusif de propriété dans les déplacements. Une affectation par déplacement doit d'abord libérer l'ancien chemin du destinataire.
+- [x] Préserver l'idempotence de `release()` : un second appel ne fait rien.
+- [x] Préserver le comportement existant pour un pointeur nul ou `units == 0` : aucune réservation.
 
 Ne pas corriger en remettant directement `n_in_flight` à zéro : plusieurs propriétaires peuvent réserver simultanément le même nœud. Ne pas augmenter les vraies visites ni modifier `total_value` pour compenser. Le mécanisme actuel doit rester un compteur séparé.
 
@@ -566,9 +566,9 @@ Ainsi, C = 256 et N = 512 donnent 767 départs pour 512 résultats récupérés.
 
 - [x] Renommer les comparaisons en configurations explicites `(concurrent, total)` ou « horizon de génération », pas « pool vide/renouvelé ».
 - [x] Ajouter un avertissement au compte rendu concerné : le gain observé n'est pas invalidé par principe, mais l'explication causale par un renouvellement nouvellement activé n'est pas démontrée. En-tête du banc et entrée de devlog.
-- [ ] Distinguer débit d'inférence, débit de simulations, parties terminées et positions effectivement conservées pour l'entraînement. Les compteurs `new_plies` et `replayed_plies` existent, le rapport du banc reste à faire avec la mesure différée.
+- [x] Distinguer débit d'inférence, débit de simulations, parties terminées et positions effectivement conservées pour l'entraînement. Fait par le rapport du banc : départs, fins, places actives, plies nouveaux, historique rejoué et exemples sont des colonnes distinctes, et le débit n'utilise que les plies nouveaux. La campagne chiffrée reste, avec la mesure différée.
 - [x] Introduire des compteurs internes de diagnostic, au moins `started`, `completed` et `active`, accessibles aux tests. Documenter leur mise à jour à chaque transition.
-- [ ] Caractériser le comportement actuel avec de petites parties scriptées : constater les départs supplémentaires et la non-récupération des parties restantes, sans faire tourner un entraînement réel. Non fait avant correctif ; l'arithmétique C + N - 1 est documentée par lecture et le comportement corrigé est verrouillé par la matrice de tests.
+- [x] Caractériser le comportement actuel avec de petites parties scriptées : constater les départs supplémentaires et la non-récupération des parties restantes, sans faire tourner un entraînement réel. Sans objet depuis le correctif : l'arithmétique C + N - 1 est documentée par lecture, et le comportement corrigé est verrouillé par la matrice de tests et par T1 avec fins imposées.
 
 Attention au dénominateur des mesures : `GameResult.total_real_moves` inclut l'historique de la partie source d'un puzzle. Ce n'est pas automatiquement le nombre de nouveaux demi-coups générés pendant cet appel. Pour une mesure de génération utile, compter séparément les nouveaux coups, les exemples retenus et, le cas échéant, le rejeu de l'historique. Ne pas rebaptiser un compteur existant sans adapter sa définition.
 
@@ -674,22 +674,24 @@ Pour atteindre les points d'entrée publics, prolonger l'accès de test existant
 
 ## 13. Validation finale des correctifs, à planifier après leur implémentation
 
+**Statut (2026-09-22) :** Niveau A fait au fil des lots. Niveau B fait sauf l'analyse UCI de bout en bout (ligne suivante). Niveaux C et D : ce sont les campagnes GPU en attente, rebalayage et mesure de débit self-play.
+
 ### Niveau A : correction rapide, sans modèle
 
-- [ ] Construire les cibles C++ existantes concernées et lancer les tests ciblés de réservation, états de nœuds, collecte, recherche, cache, évaluateur et noyau self-play.
-- [ ] Lancer les tests Python du harnais et des positions UCI avec dépendances factices.
-- [ ] Si un fichier de test C++ a été ajouté, vérifier son enregistrement CTest, son timeout et la copie de DLL utilisée par les autres cibles.
-- [ ] Utiliser des conditions/barrières déterministes pour les tests concurrents, avec timeout de sécurité ; ne pas s'appuyer sur des pauses aléatoires pour provoquer une collision.
-- [ ] Ne pas considérer les tests Python sautés faute de checkpoint comme une validation de leurs contrats. Les nouveaux cas critiques doivent justement être couverts sans ce checkpoint.
+- [x] Construire les cibles C++ existantes concernées et lancer les tests ciblés de réservation, états de nœuds, collecte, recherche, cache, évaluateur et noyau self-play.
+- [x] Lancer les tests Python du harnais et des positions UCI avec dépendances factices.
+- [x] Si un fichier de test C++ a été ajouté, vérifier son enregistrement CTest, son timeout et la copie de DLL utilisée par les autres cibles. Aucun nouveau fichier de test C++ dans cet audit ; les tests ajoutés vivent dans les cibles existantes, et le perft roundtrip est enregistré en CTest.
+- [x] Utiliser des conditions/barrières déterministes pour les tests concurrents, avec timeout de sécurité ; ne pas s'appuyer sur des pauses aléatoires pour provoquer une collision.
+- [x] Ne pas considérer les tests Python sautés faute de checkpoint comme une validation de leurs contrats. Les nouveaux cas critiques doivent justement être couverts sans ce checkpoint. Les tests ajoutés n'en dépendent pas.
 
 Les noms CTest existants utiles sont `reservation`, `node_state`, `wave_collection`, `wave_search`, `evaluation_cache`, `evaluator_contract`, `selfplay_shared_core`, `search_executor` et `multicore_stress`. Vérifier les noms au moment de l'exécution si l'arborescence a évolué.
 
 ### Niveau B : non-régression du moteur et intégration
 
-- [ ] Relancer le perft rapide si les règles terminales ou interfaces de plateau ont été touchées, sans prétendre qu'il valide les bugs spécifiques au MCTS.
-- [ ] Conserver les tests de copie de plateau et de clé TT : compteur des 50 coups, contexte de répétition, droits de roque et profondeur d'historique.
-- [ ] Vérifier une analyse UCI complète avec historique, arrêt, reprise et déplacement de racine. Les tests automatisés doivent rester locaux et ne pas se connecter à Lichess.
-- [ ] Vérifier une génération self-play minuscule avec faux évaluateur, contenant une partie normale et une partie puzzle contrôlée.
+- [x] Relancer le perft rapide si les règles terminales ou interfaces de plateau ont été touchées, sans prétendre qu'il valide les bugs spécifiques au MCTS.
+- [x] Conserver les tests de copie de plateau et de clé TT : compteur des 50 coups, contexte de répétition, droits de roque et profondeur d'historique.
+- [ ] Vérifier une analyse UCI complète avec historique, arrêt, reprise et déplacement de racine. Les tests automatisés doivent rester locaux et ne pas se connecter à Lichess. Non fait : les tests UCI du dépôt utilisent des dépendances factices.
+- [x] Vérifier une génération self-play minuscule avec faux évaluateur, contenant une partie normale et une partie puzzle contrôlée. Fait : la partie lente à 4000 simulations et la partie normale sont générées et collectées ensemble dans le même test.
 
 ### Niveau C : performance, seulement après validation fonctionnelle
 
