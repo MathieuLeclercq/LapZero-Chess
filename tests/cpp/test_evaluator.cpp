@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace {
@@ -73,15 +74,21 @@ void test_scalar_output_is_validated_before_use() {
             std::vector<float> input(119 * 64, 0.0f);
             std::vector<float> policy;
             float value = 0.0f;
+            std::string message;
             bool threw = false;
             try {
                 evaluator.evaluate(input, policy, value);
             }
-            catch (const std::exception&) {
+            catch (const std::exception& error) {
                 threw = true;
+                message = error.what();
             }
             require_test(threw,
                          "invalid scalar evaluator output was accepted");
+            require_test(!message.empty(),
+                         "the rejection carries no message");
+            require_test(message.find("evaluateur") != std::string::npos,
+                         "the rejection message does not name the evaluator");
         }
     }
 }

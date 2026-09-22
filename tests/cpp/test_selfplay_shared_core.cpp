@@ -1,4 +1,5 @@
 #include "controlled_evaluator.hpp"
+#include "discriminating_evaluator.hpp"
 #include "mcts.hpp"
 #include "selfplay_manager.hpp"
 #include "test_support.hpp"
@@ -8,6 +9,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 class SelfPlayTestAccess {
@@ -23,6 +25,74 @@ public:
 
     static void demarrer_slot(SelfPlayManager& manager, int game_idx) {
         manager.demarrer_slot(game_idx);
+    }
+
+    static std::string fen(SelfPlayManager& manager, int game_idx) {
+        return manager.m_boards[static_cast<std::size_t>(game_idx)].toFEN();
+    }
+
+    // Prepare une position distincte par partie, puis une racine deja
+    // developpee, sans passer par le scheduler.
+    static void preparer_position(SelfPlayManager& manager, int game_idx,
+                                  const std::string& uci) {
+        const std::size_t index = static_cast<std::size_t>(game_idx);
+        manager.m_boards[index].setStartupPieces();
+        if (!uci.empty()) {
+            if (!manager.m_boards[index].movePieceUCI(uci)) {
+                throw std::runtime_error("preparer_position : coup invalide");
+            }
+        }
+        manager.m_roots[index] = std::make_unique<MCTSNode>(0.0f);
+        manager.m_shared_mcts->expand_node_single(
+            manager.m_roots[index].get(), manager.m_boards[index]);
+    }
+
+    struct ResultatLot {
+        std::vector<MCTSNode*> feuilles;
+        std::vector<std::vector<float>> tenseurs;
+        std::vector<std::vector<int>> coups_legaux;
+    };
+
+    // Monte un lot a partir de feuilles de parties distinctes, comme le font
+    // les phases de generation, puis execute la consommation de production.
+    static ResultatLot executer_lot_par_partie(
+            SelfPlayManager& manager, const std::vector<int>& parties) {
+        ResultatLot resultat;
+        resultat.feuilles.assign(parties.size(), nullptr);
+        resultat.tenseurs.resize(parties.size());
+        resultat.coups_legaux.resize(parties.size());
+
+        for (std::size_t j = 0; j < parties.size(); ++j) {
+            const int i = parties[j];
+            int moves_played = 0;
+            PathReservation reservation;
+            MCTSNode* leaf = manager.m_shared_mcts->advance_to_leaf(
+                manager.m_roots[static_cast<std::size_t>(i)].get(),
+                manager.m_boards[static_cast<std::size_t>(i)], 1.4f,
+                moves_played, reservation);
+            if (leaf == nullptr) continue;
+
+            resultat.feuilles[j] = leaf;
+            resultat.coups_legaux[j] =
+                manager.m_boards[static_cast<std::size_t>(i)]
+                    .getLegalMoveIndices();
+            manager.m_boards[static_cast<std::size_t>(i)]
+                .getAlphaZeroTensor(resultat.tenseurs[j]);
+
+            manager.m_waiting_leaves.push_back(leaf);
+            manager.m_waiting_game_indices.push_back(i);
+            manager.m_waiting_moves_played.push_back(moves_played);
+            manager.m_waiting_reservations.push_back(std::move(reservation));
+            manager.m_is_waiting[i] = true;
+
+            const std::size_t offset = manager.m_waiting_leaves.size() - 1;
+            std::copy(resultat.tenseurs[j].begin(),
+                      resultat.tenseurs[j].end(),
+                      manager.m_batch_input.begin() + offset * 119 * 64);
+        }
+
+        manager.execute_gpu_batch();
+        return resultat;
     }
 };
 
@@ -131,6 +201,17 @@ void test_selfplay_manager_with_controlled_evaluator() {
             "self-play emitted a non-finite policy");
         require_test(std::isfinite(game.final_outcome),
                      "self-play emitted a non-finite outcome");
+        require_test(game.end_reason >= 0 && game.end_reason <= 5,
+                     "end reason is out of range");
+        if (game.end_reason == 0) {
+            require_test(game.final_outcome == 1.0f
+                             || game.final_outcome == -1.0f,
+                         "checkmate without a decisive outcome");
+        }
+        else {
+            require_test(game.final_outcome == 0.0f,
+                         "non-checkmate game with a decisive outcome");
+        }
     }
 }
 
@@ -233,6 +314,64 @@ void test_successive_selfplay_generations_are_independent() {
                  "the second generation did not restart its counters");
 }
 
+void test_selfplay_batch_associates_each_game_with_its_own_tensor() {
+    DiscriminatingEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 2, 1, 1, 0.5f, 8192);
+
+    // Deux positions distinctes : les tenseurs et les reponses different, un
+    // decalage entre lignes du lot et parties devient visible.
+    SelfPlayTestAccess::preparer_position(manager, 0, "e2e4");
+    SelfPlayTestAccess::preparer_position(manager, 1, "d2d4");
+    const std::string fen0 = SelfPlayTestAccess::fen(manager, 0);
+    const std::string fen1 = SelfPlayTestAccess::fen(manager, 1);
+
+    const SelfPlayTestAccess::ResultatLot lot =
+        SelfPlayTestAccess::executer_lot_par_partie(manager, {0, 1});
+
+    for (std::size_t j = 0; j < 2; ++j) {
+        require_test(lot.feuilles[j] != nullptr,
+                     "a game produced no network leaf");
+        const auto& reponse = evaluator.reponse_pour(lot.tenseurs[j]);
+        require_test(
+            std::fabs(lot.feuilles[j]->network_value - reponse.value) < 1e-6f,
+            "a game received another game's value");
+        require_test(lot.feuilles[j]->visit_count == 1,
+                     "the leaf did not receive exactly one backup");
+
+        float somme = 0.0f;
+        for (int idx : lot.coups_legaux[j]) {
+            somme += reponse.policy[static_cast<std::size_t>(idx)];
+        }
+        require_test(somme > 0.0f, "the response has no legal mass");
+        require_test(lot.feuilles[j]->children.size()
+                         == lot.coups_legaux[j].size(),
+                     "the leaf did not expose its legal children");
+        for (const auto& child : lot.feuilles[j]->children) {
+            const float attendu =
+                reponse.policy[static_cast<std::size_t>(child.first)] / somme;
+            require_test(std::fabs(child.second->prior - attendu) < 1e-5f,
+                         "a game received another game's policy");
+        }
+
+        MCTSNode* racine =
+            SelfPlayTestAccess::root(manager, static_cast<int>(j));
+        int profondeur = 0;
+        for (MCTSNode* n = lot.feuilles[j]; n->parent != nullptr;
+             n = n->parent) {
+            ++profondeur;
+        }
+        const float signe = (profondeur % 2 == 0) ? 1.0f : -1.0f;
+        require_test(
+            std::fabs(racine->total_value - signe * reponse.value) < 1e-6f,
+            "the backup sign is wrong at the root");
+    }
+
+    require_test(SelfPlayTestAccess::fen(manager, 0) == fen0,
+                 "the first board was not restored");
+    require_test(SelfPlayTestAccess::fen(manager, 1) == fen1,
+                 "the second board was not restored");
+}
+
 }  // namespace
 
 int main() {
@@ -243,6 +382,7 @@ int main() {
         test_selfplay_roots_are_expanded_and_noised_exactly_once();
         test_selfplay_generation_is_finite_and_counted();
         test_successive_selfplay_generations_are_independent();
+        test_selfplay_batch_associates_each_game_with_its_own_tensor();
         return 0;
     }
     catch (const std::exception& error) {

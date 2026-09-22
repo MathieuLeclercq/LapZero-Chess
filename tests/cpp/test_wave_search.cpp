@@ -734,6 +734,37 @@ void test_expansion_keeps_moves_beyond_the_cache_capacity() {
                  "the 129-child node violates the tree invariants");
 }
 
+void test_hot_root_noises_like_a_cold_root() {
+    DiscriminatingEvaluator evaluator;
+    MCTS mcts(&evaluator, 64, 0);
+    Chessboard board = startup_board();
+
+    MCTSNode froid(0.0f);
+    mcts.expand_node_single(&froid, board);
+    require_test(evaluator.batch_sizes.size() == 1,
+                 "la racine froide n'a pas appele le reseau");
+    MCTSTestAccess::seed_noise(mcts, 777);
+    mcts.add_dirichlet_noise(&froid, 0.30f);
+
+    // Meme position servie par la table : meme politique, meme bruit.
+    MCTSNode chaud(0.0f);
+    mcts.expand_node_single(&chaud, board);
+    require_test(evaluator.batch_sizes.size() == 1,
+                 "la racine chaude a rappele le reseau");
+    MCTSTestAccess::seed_noise(mcts, 777);
+    mcts.add_dirichlet_noise(&chaud, 0.30f);
+
+    const std::vector<float> p_froid = priors_des_enfants(froid);
+    const std::vector<float> p_chaud = priors_des_enfants(chaud);
+    require_test(p_froid.size() == p_chaud.size(),
+                 "les deux racines n'ont pas les memes enfants");
+    for (std::size_t i = 0; i < p_froid.size(); ++i) {
+        require_test(
+            std::fabs(p_froid[i] - p_chaud[i]) < 1e-6f,
+            "une racine chaude ne se bruite pas comme une racine froide");
+    }
+}
+
 void test_gpu_phase_is_quiet_and_update_root_waits_for_session() {
     ControlledEvaluator evaluator;
     EvaluationGate gate;
@@ -905,6 +936,7 @@ int main() {
         test_repetition_is_a_draw_in_the_search();
         test_tt_hit_expands_the_root_and_does_not_pollute_the_cache();
         test_noise_is_deterministic_and_epsilon_zero_is_a_no_op();
+        test_hot_root_noises_like_a_cold_root();
         test_expansion_keeps_moves_beyond_the_cache_capacity();
         test_gpu_phase_is_quiet_and_update_root_waits_for_session();
         return 0;
