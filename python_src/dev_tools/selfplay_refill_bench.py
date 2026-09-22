@@ -32,36 +32,58 @@ MODELE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))
 
 
 def mesurer(evaluateur, concurrent, total, slow, fast, ratio, tt_size):
+    """Une configuration (places, horizon), avec les compteurs du scheduler.
+
+    Le debit de jeu nouveau se mesure sur les plies reellement joues, jamais sur
+    total_real_moves, qui inclut l'historique rejoue d'un puzzle et gonflerait
+    un compteur presente comme du jeu produit.
+    """
     debut = time.perf_counter()
-    parties = chess_engine.generate_self_play_games(
+    parties, stats = chess_engine.generate_self_play_games_with_stats(
         evaluateur, concurrent, slow, fast, total, ratio, tt_size)
     duree = time.perf_counter() - debut
 
-    plies = sum(p.total_real_moves for p in parties)
     positions = sum(p.state_tensors.shape[0] for p in parties)
     return {
         "concurrent": concurrent,
         "total": total,
         "duree": duree,
         "parties": len(parties),
-        "parties_par_s": len(parties) / duree,
-        "plies": plies,
-        "plies_par_s": plies / duree,
-        "ms_par_ply": 1000.0 * duree / plies,
+        "debuts": int(stats.games_started),
+        "fins": int(stats.games_completed),
+        "actives": int(stats.active_slots),
+        "nouveaux_plies": int(stats.new_plies),
+        "historique_rejoue": int(stats.replayed_plies),
         "positions": positions,
+        "parties_par_s": len(parties) / duree,
+        "nouveaux_plies_par_s": stats.new_plies / duree,
+        "ms_par_ply": (1000.0 * duree / stats.new_plies
+                       if stats.new_plies else 0.0),
         "positions_par_s": positions / duree,
     }
 
 
-def afficher(resultats):
-    entete = "  {:>10} {:>7} {:>10} {:>11} {:>10} {:>10}"
-    print("[bench]" + entete.format("pool", "total", "duree (s)", "parties/s",
-                                    "plies/s", "ms/ply"))
+def formater_bilan(resultats):
+    """Tableau honnete : debuts, fins, plies nouveaux et historique rejoue sont
+    des colonnes distinctes, et le debit n'utilise que les plies nouveaux."""
+    entete = ("  {:>11} {:>7} {:>6} {:>8} {:>11} {:>12} {:>9} {:>10} "
+              "{:>14} {:>8}")
+    lignes = ["[bench]" + entete.format(
+        "places/horizon", "debuts", "fins", "actives", "nouv. plies",
+        "hist. rejoue", "exemples", "duree (s)", "nouv. plies/s", "ms/ply")]
     for r in resultats:
-        print("[bench]" + entete.format(
-            f"({r['concurrent']},{r['total']})", str(r["total"]),
-            f"{r['duree']:.0f}", f"{r['parties_par_s']:.3f}",
-            f"{r['plies_par_s']:.1f}", f"{r['ms_par_ply']:.2f}"))
+        lignes.append("[bench]" + entete.format(
+            f"({r['concurrent']},{r['total']})", str(r["debuts"]),
+            str(r["fins"]), str(r["actives"]), str(r["nouveaux_plies"]),
+            str(r["historique_rejoue"]), str(r["positions"]),
+            f"{r['duree']:.0f}", f"{r['nouveaux_plies_par_s']:.1f}",
+            f"{r['ms_par_ply']:.2f}"))
+    return lignes
+
+
+def afficher(resultats):
+    for ligne in formater_bilan(resultats):
+        print(ligne)
 
 
 def main():
@@ -97,7 +119,8 @@ def main():
         if a["concurrent"] == b["concurrent"]:
             print(f"[bench] places {a['concurrent']} : ({a['concurrent']},"
                   f"{a['total']}) contre ({b['concurrent']},{b['total']}) = "
-                  f"x{b['plies_par_s'] / a['plies_par_s']:.2f} sur les plies, "
+                  f"x{b['nouveaux_plies_par_s'] / a['nouveaux_plies_par_s']:.2f} "
+                  f"sur les plies nouveaux, "
                   f"x{b['parties_par_s'] / a['parties_par_s']:.2f} sur les parties, "
                   f"{a['ms_par_ply']:.2f} -> {b['ms_par_ply']:.2f} ms/ply")
 

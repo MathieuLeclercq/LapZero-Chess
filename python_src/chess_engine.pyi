@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BISHOP', 'BLACK', 'CHECKMATE', 'Chessboard', 'Color', 'DRAW_50_MOVES', 'DRAW_INSUFF_MATERIAL', 'DRAW_REPETITION', 'EvaluationCacheKey', 'GameResult', 'GameState', 'KING', 'KNIGHT', 'MCTS', 'Move', 'MoveStats', 'NONE', 'NO_COLOR', 'ONGOING', 'ONNXEvaluator', 'PAWN', 'Piece', 'PieceType', 'QUEEN', 'ROOK', 'STALEMATE', 'SearchCounters', 'SearchTiming', 'Square', 'TreeReport', 'WHITE', 'generate_self_play_games']
+__all__: list[str] = ['BISHOP', 'BLACK', 'CHECKMATE', 'Chessboard', 'Color', 'DRAW_50_MOVES', 'DRAW_INSUFF_MATERIAL', 'DRAW_REPETITION', 'EvaluationCacheKey', 'GameResult', 'GameState', 'KING', 'KNIGHT', 'MCTS', 'Move', 'MoveStats', 'NONE', 'NO_COLOR', 'ONGOING', 'ONNXEvaluator', 'PAWN', 'Piece', 'PieceType', 'QUEEN', 'ROOK', 'STALEMATE', 'SearchCounters', 'SearchTiming', 'SelfPlayStats', 'Square', 'TreeReport', 'WHITE', 'generate_self_play_games', 'generate_self_play_games_with_stats']
 class Chessboard:
     def __init__(self) -> None:
         ...
@@ -391,6 +391,22 @@ class SearchTiming:
     @property
     def worker_wait_ns(self) -> int:
         ...
+class SelfPlayStats:
+    @property
+    def active_slots(self) -> int:
+        ...
+    @property
+    def games_completed(self) -> int:
+        ...
+    @property
+    def games_started(self) -> int:
+        ...
+    @property
+    def new_plies(self) -> int:
+        ...
+    @property
+    def replayed_plies(self) -> int:
+        ...
 class Square:
     @typing.overload
     def __init__(self) -> None:
@@ -433,6 +449,10 @@ class TreeReport:
 def generate_self_play_games(evaluator: ONNXEvaluator, concurrent_games: typing.SupportsInt | typing.SupportsIndex, slow_sims: typing.SupportsInt | typing.SupportsIndex, fast_sims: typing.SupportsInt | typing.SupportsIndex, total_games: typing.SupportsInt | typing.SupportsIndex, slow_ratio: typing.SupportsFloat | typing.SupportsIndex = 0.25, tt_size: typing.SupportsInt | typing.SupportsIndex = 2097143, puzzles_path: str = '../training_data/puzzles_train.txt') -> list[GameResult]:
     """
     Génère un dataset de parties en self-play en utilisant un batching GPU massif.
+    """
+def generate_self_play_games_with_stats(evaluator: ONNXEvaluator, concurrent_games: typing.SupportsInt | typing.SupportsIndex, slow_sims: typing.SupportsInt | typing.SupportsIndex, fast_sims: typing.SupportsInt | typing.SupportsIndex, total_games: typing.SupportsInt | typing.SupportsIndex, slow_ratio: typing.SupportsFloat | typing.SupportsIndex = 0.25, tt_size: typing.SupportsInt | typing.SupportsIndex = 2097143, puzzles_path: str = '../training_data/puzzles_train.txt') -> tuple[list[GameResult], SelfPlayStats]:
+    """
+    Genere des parties de self-play et renvoie aussi les compteurs.
     """
 BISHOP: PieceType  # value = <PieceType.BISHOP: 2>
 BLACK: Color  # value = <Color.BLACK: 1>

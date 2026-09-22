@@ -289,6 +289,13 @@ PYBIND11_MODULE(chess_engine, m) {
         .def_readonly("final_outcome", &GameResult::final_outcome)
         .def_readonly("end_reason", &GameResult::end_reason);
 
+    py::class_<SelfPlayStats>(m, "SelfPlayStats")
+        .def_readonly("games_started", &SelfPlayStats::games_started)
+        .def_readonly("games_completed", &SelfPlayStats::games_completed)
+        .def_readonly("active_slots", &SelfPlayStats::active_slots)
+        .def_readonly("new_plies", &SelfPlayStats::new_plies)
+        .def_readonly("replayed_plies", &SelfPlayStats::replayed_plies);
+
     // --- Fonction de génération globale ---
     m.def("generate_self_play_games", [](
         ONNXEvaluator* evaluator,
@@ -312,4 +319,30 @@ PYBIND11_MODULE(chess_engine, m) {
         py::arg("tt_size") = 2097143,
         py::arg("puzzles_path") = "../training_data/puzzles_train.txt",
         "Génère un dataset de parties en self-play en utilisant un batching GPU massif.");
+
+    // Variante de diagnostic : meme generation, plus les compteurs. La fonction
+    // de production garde son type de retour.
+    m.def("generate_self_play_games_with_stats", [](
+        ONNXEvaluator* evaluator,
+        int concurrent_games,
+        int slow_sims, int fast_sims,
+        int total_games, float slow_ratio,
+        size_t tt_size = 2097143,
+        const std::string& puzzles_path = "../training_data/puzzles_train.txt") {
+            SelfPlayManager manager(
+                evaluator, concurrent_games, slow_sims, fast_sims, slow_ratio,
+                tt_size, puzzles_path);
+            auto parties = manager.generate_games(total_games);
+            return py::make_tuple(std::move(parties), manager.get_stats());
+        },
+        py::call_guard<py::gil_scoped_release>(),
+        py::arg("evaluator"),
+        py::arg("concurrent_games"),
+        py::arg("slow_sims"),
+        py::arg("fast_sims"),
+        py::arg("total_games"),
+        py::arg("slow_ratio") = 0.25f,
+        py::arg("tt_size") = 2097143,
+        py::arg("puzzles_path") = "../training_data/puzzles_train.txt",
+        "Genere des parties de self-play et renvoie aussi les compteurs.");
 }
