@@ -1,15 +1,17 @@
-"""Banc de debit self-play : pool vide contre pool renouvele.
+"""Banc de debit self-play : nombre de places contre horizon de generation.
 
-Le SelfPlayManager joue `total_games` parties avec `concurrent_games` places.
-Quand une partie finit et qu'il reste des parties a jouer, sa place est
-reprise par une nouvelle partie : le pool reste plein. Quand total == concurrent,
-aucune reprise n'a lieu et le pool se vide au fil des fins de parties, donc les
-lots d'evaluation retrecissent. Or le cout par position de l'evaluateur monte
-quand le lot descend (0.10 ms a 128, 0.18 a 32, 0.41 a 8, mesures de septembre).
+Le SelfPlayManager joue `total` parties avec `concurrent` places. Depuis le
+correctif R9, le nombre de departs est exactement `total` : les places sont
+relancees tant qu'il reste des departs a effectuer, puis les parties engagees
+finissent et sont toutes collectees. Il n'y a plus de partie abandonnee.
 
-Ce banc compare, a simulations egales, un pool vide (regime de production
-actuel : train_self_play.py passe total == concurrent) et un pool renouvele
-(total = k x concurrent), en mesurant le debit reel.
+Ce banc compare des couples (concurrent, total) en mesurant le debit reel :
+temps mural, parties par seconde, coups joues par seconde. Un total egal au
+nombre de places ne vide plus le pool au fil des fins, il reduit simplement le
+renouvellement a zero.
+
+Attention : les couples ou total est inferieur au nombre de places n'utilisent
+qu'une partie des places (min(concurrent, total) parties demarrent).
 
 Outil de diagnostic, hors validation.
 """
@@ -93,7 +95,8 @@ def main():
     for i in range(0, len(resultats) - 1, 2):
         a, b = resultats[i], resultats[i + 1]
         if a["concurrent"] == b["concurrent"]:
-            print(f"[bench] pool {a['concurrent']} : renouvele / vide = "
+            print(f"[bench] places {a['concurrent']} : ({a['concurrent']},"
+                  f"{a['total']}) contre ({b['concurrent']},{b['total']}) = "
                   f"x{b['plies_par_s'] / a['plies_par_s']:.2f} sur les plies, "
                   f"x{b['parties_par_s'] / a['parties_par_s']:.2f} sur les parties, "
                   f"{a['ms_par_ply']:.2f} -> {b['ms_par_ply']:.2f} ms/ply")

@@ -542,6 +542,8 @@ Traiter un `startpos` et sa FEN équivalente comme deux identités différentes 
 
 ## 11. R9 : corriger l'interprétation et la fin des lots self-play
 
+**Statut (2026-09-22) : R9-A et R9-B faits, mesure de débit différée.** Compteurs `SelfPlayStats` (`games_started`, `games_completed`, `active_slots`, `new_plies`, `replayed_plies`) accessibles par `get_stats`. Le constructeur ne démarre plus de partie : `generate_games(N)` initialise `min(C, N)` places, ne relance que tant que `started < N`, désactive les places sans départ et attend la collecte des N parties engagées. Places inactives exclues des descentes, de `all_blocked` et du batch. N = 0 sans démarrage ni évaluation, quotas négatifs et places nulles refusés, appels successifs indépendants. L'en-tête et les libellés du banc de remplissage sont corrigés, `docs/devlog.md` consigne l'erreur d'interprétation sans réécrire l'entrée historique. Vérification : matrice C = 4 avec N = 0, 1, 3, 4, 7 et couple (2, 3), `started == completed == N`, `active == 0`, aucun appel réseau à N = 0, deux générations successives indépendantes. Détection par mutation prouvée sur la condition de relance. Commit : `Termine exactement les parties demandees`. Restent non faits : la caractérisation chiffrée d'avant correctif (établie par lecture, C + N - 1), les tests T1/T3/T4 sur fins imposées et lots partiels, T6 sur l'unicité des identités, T7 sur le rapport, et la mesure avant/après de débit (tâche 5 du plan, GPU).
+
 ### Ce qui est établi, et ce qui ne l'est pas
 
 `SelfPlayManager::generate_games` relance une partie à chaque fin tant que le nombre de résultats terminés reste inférieur au quota. Ce renouvellement se produit aussi lorsque `total_games == concurrent_games`.
@@ -562,11 +564,11 @@ Ainsi, C = 256 et N = 512 donnent 767 départs pour 512 résultats récupérés.
 
 ### R9-A : corriger d'abord le diagnostic, sans changer le scheduler
 
-- [ ] Renommer les comparaisons en configurations explicites `(concurrent, total)` ou « horizon de génération », pas « pool vide/renouvelé ».
-- [ ] Ajouter un avertissement au compte rendu concerné : le gain observé n'est pas invalidé par principe, mais l'explication causale par un renouvellement nouvellement activé n'est pas démontrée.
-- [ ] Distinguer débit d'inférence, débit de simulations, parties terminées et positions effectivement conservées pour l'entraînement.
-- [ ] Introduire des compteurs internes de diagnostic, au moins `started`, `completed` et `active`, accessibles aux tests. Documenter leur mise à jour à chaque transition.
-- [ ] Caractériser le comportement actuel avec de petites parties scriptées : constater les départs supplémentaires et la non-récupération des parties restantes, sans faire tourner un entraînement réel.
+- [x] Renommer les comparaisons en configurations explicites `(concurrent, total)` ou « horizon de génération », pas « pool vide/renouvelé ».
+- [x] Ajouter un avertissement au compte rendu concerné : le gain observé n'est pas invalidé par principe, mais l'explication causale par un renouvellement nouvellement activé n'est pas démontrée. En-tête du banc et entrée de devlog.
+- [ ] Distinguer débit d'inférence, débit de simulations, parties terminées et positions effectivement conservées pour l'entraînement. Les compteurs `new_plies` et `replayed_plies` existent, le rapport du banc reste à faire avec la mesure différée.
+- [x] Introduire des compteurs internes de diagnostic, au moins `started`, `completed` et `active`, accessibles aux tests. Documenter leur mise à jour à chaque transition.
+- [ ] Caractériser le comportement actuel avec de petites parties scriptées : constater les départs supplémentaires et la non-récupération des parties restantes, sans faire tourner un entraînement réel. Non fait avant correctif ; l'arithmétique C + N - 1 est documentée par lecture et le comportement corrigé est verrouillé par la matrice de tests.
 
 Attention au dénominateur des mesures : `GameResult.total_real_moves` inclut l'historique de la partie source d'un puzzle. Ce n'est pas automatiquement le nombre de nouveaux demi-coups générés pendant cet appel. Pour une mesure de génération utile, compter séparément les nouveaux coups, les exemples retenus et, le cas échéant, le rejeu de l'historique. Ne pas rebaptiser un compteur existant sans adapter sa définition.
 
@@ -576,15 +578,15 @@ Plan de suivi : `docs/superpowers/plans/2026-09-21-fin-de-lot-self-play.md` (com
 
 Recommandation : démarrer exactement N parties, renouveler les places tant qu'il reste des départs à effectuer, puis laisser finir les parties restantes. Ce choix simplifie le contrat et évite de jeter des parties engagées.
 
-- [ ] Séparer `games_started` et `games_completed`.
-- [ ] Ne pas démarrer automatiquement C parties dans le constructeur alors que le quota N n'est connu qu'à `generate_games`. Le constructeur peut préparer les conteneurs et le MCTS partagé ; le démarrage effectif doit respecter N.
-- [ ] Introduire l'état actif/inactif d'un slot. Initialiser au plus `min(C, N)` slots.
-- [ ] Après une fin : enregistrer le résultat une fois, incrémenter les fins, puis redémarrer ce slot uniquement si `games_started < N`. Sinon, le désactiver.
-- [ ] Arrêter seulement après collecte des N résultats. Les slots inactifs ne doivent participer ni aux descentes, ni à la condition `all_blocked`, ni à la taille utile du batch.
-- [ ] Accepter les lots GPU plus petits pendant la fin de génération. Ne pas créer de nouvelles parties pour les remplir artificiellement.
-- [ ] Définir le comportement de N = 0 : aucun démarrage ni évaluation et un résultat vide. Rejeter les quotas négatifs et le nombre de places non positif avant allocation.
-- [ ] Définir les appels successifs sur le même gestionnaire : recommandation, une génération indépendante par appel après la fin de la précédente, avec résultats et compteurs remis à zéro et sans anciennes parties actives.
-- [ ] Préserver le format des exemples, les résultats de fin de partie et l'API Python qui renvoie les parties.
+- [x] Séparer `games_started` et `games_completed`.
+- [x] Ne pas démarrer automatiquement C parties dans le constructeur alors que le quota N n'est connu qu'à `generate_games`. Le constructeur peut préparer les conteneurs et le MCTS partagé ; le démarrage effectif doit respecter N.
+- [x] Introduire l'état actif/inactif d'un slot. Initialiser au plus `min(C, N)` slots.
+- [x] Après une fin : enregistrer le résultat une fois, incrémenter les fins, puis redémarrer ce slot uniquement si `games_started < N`. Sinon, le désactiver.
+- [x] Arrêter seulement après collecte des N résultats. Les slots inactifs ne doivent participer ni aux descentes, ni à la condition `all_blocked`, ni à la taille utile du batch.
+- [x] Accepter les lots GPU plus petits pendant la fin de génération. Ne pas créer de nouvelles parties pour les remplir artificiellement.
+- [x] Définir le comportement de N = 0 : aucun démarrage ni évaluation et un résultat vide. Rejeter les quotas négatifs et le nombre de places non positif avant allocation.
+- [x] Définir les appels successifs sur le même gestionnaire : recommandation, une génération indépendante par appel après la fin de la précédente, avec résultats et compteurs remis à zéro et sans anciennes parties actives.
+- [x] Préserver le format des exemples, les résultats de fin de partie et l'API Python qui renvoie les parties.
 
 Ce choix change le profil de débit de fin d'itération et doit être mesuré. Il n'est pas garanti qu'il réduise tous les temps muraux : terminer une partie longue coûte plus que la jeter. Le critère est d'abord la production correcte de N parties intégrales avec une comptabilité honnête du travail utile.
 
@@ -608,10 +610,10 @@ Alternative possible, hors de ce lot : conserver un gestionnaire persistant et s
 
 ### Acceptation
 
-- [ ] Le diagnostic n'affirme plus qu'un pool auparavant non renouvelé a été rendu renouvelable par le seul changement 512 vers 256.
-- [ ] Les mesures historiques sont conservées avec leur réserve d'interprétation.
-- [ ] Si R9-B est appliqué, chaque appel réussi renvoie exactement les N parties qu'il a démarrées, sans abandon implicite.
-- [ ] La décision de conserver ou changer la taille du pool se fonde ensuite sur des mesures comparables. Ne pas modifier cette taille dans le même correctif fonctionnel.
+- [x] Le diagnostic n'affirme plus qu'un pool auparavant non renouvelé a été rendu renouvelable par le seul changement 512 vers 256.
+- [x] Les mesures historiques sont conservées avec leur réserve d'interprétation. L'entrée de devlog du 2026-09-20 reste intacte, une nouvelle entrée la corrige.
+- [x] Si R9-B est appliqué, chaque appel réussi renvoie exactement les N parties qu'il a démarrées, sans abandon implicite.
+- [x] La décision de conserver ou changer la taille du pool se fonde ensuite sur des mesures comparables. Ne pas modifier cette taille dans le même correctif fonctionnel.
 
 ## 12. R10 : nettoyer les réservations si la fusion d'une vague échoue
 
@@ -741,7 +743,7 @@ Pour chaque lot, fournir :
 - [ ] R6 : tests discriminants de correspondance des lignes et de padding.
 - [x] R7 : totalité des coups conservée, jamais de hit de politique tronquée.
 - [x] R8 : identité UCI fondée sur la base et les coups, réutilisation normale conservée.
-- [ ] R9 : rapports corrigés et décision explicite sur la collecte des parties engagées.
+- [x] R9 : rapports corrigés et décision explicite sur la collecte des parties engagées. Génération finie et compteurs faits ; mesure de débit et décision de taille de pool différées.
 - [x] R10 : aucune réservation ne survit à l'arbre qu'elle référence après échec de fusion.
 
 Ne pas clore un lot uniquement parce que le bot joue une bonne partie. Ne pas refuser un correctif démontré au motif que le cas est rare. L'objectif est de préserver le bon comportement courant tout en fermant les cas limites et en rendant les preuves de validation plus solides.

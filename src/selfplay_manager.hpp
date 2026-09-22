@@ -3,6 +3,7 @@
 #include <memory>
 #include <random>
 #include <string>
+#include <cstdint>
 #include "chessboard.hpp"
 #include "evaluator.hpp"
 #include "mcts.hpp"
@@ -15,6 +16,16 @@ struct GameResult {
     int move_count; // Pour savoir comment découper le vecteur plat
     int total_real_moves;
     int end_reason;
+};
+
+// Compteurs de diagnostic d'une generation self-play. Une seule generation par
+// appel : les compteurs repartent de zero au debut de generate_games.
+struct SelfPlayStats {
+    std::uint64_t games_started = 0;    // parties reellement demarrees
+    std::uint64_t games_completed = 0;  // parties terminees et enregistrees
+    std::uint32_t active_slots = 0;     // places avec une partie en cours
+    std::uint64_t new_plies = 0;        // coups joues par la recherche
+    std::uint64_t replayed_plies = 0;   // historique de puzzle rejoue
 };
 
 struct ThreadLocalBuffer {
@@ -55,6 +66,11 @@ private:
     // coup. Il est applique des que les enfants de la racine existent : les
     // positions servies par la table n'en ont pas a la preparation.
     std::vector<float> m_pending_epsilon;
+
+    // Places actives : une place sans partie ne participe ni aux descentes, ni
+    // a la condition de lot plein, ni a la taille utile du batch.
+    std::vector<char> m_slot_active;
+    SelfPlayStats m_stats;
 
     Evaluator* m_evaluator;
 
@@ -105,9 +121,11 @@ public:
                     size_t tt_size = 2097143,
                     const std::string& puzzles_path = "../training_data/puzzles_train.txt");
     std::vector<GameResult> generate_games(int total_games_to_play);
+    SelfPlayStats get_stats() const;
 
 private:
     void reset_game(int game_idx);
+    void demarrer_slot(int game_idx);
     void play_best_move(int game_idx);
     void roll_next_move(int game_idx);
     void execute_gpu_batch();

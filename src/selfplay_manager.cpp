@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
 #include "selfplay_manager.hpp"
 #include <piece.hpp>
 
@@ -21,10 +22,16 @@ SelfPlayManager::SelfPlayManager(
     m_fast_sims(fast_sims),
     m_slow_ratio(slow_ratio)
 {
+    if (num_concurrent_games <= 0) {
+        throw std::invalid_argument(
+            "SelfPlayManager : le nombre de places doit etre positif");
+    }
+
     m_boards.resize(num_concurrent_games);
     m_roots.resize(num_concurrent_games);
     m_sims_completed.resize(num_concurrent_games, 0);
     m_is_waiting.resize(num_concurrent_games, false);
+    m_slot_active.resize(num_concurrent_games, false);
 
     m_sims_target.resize(num_concurrent_games, 0);
     m_is_slow_move.resize(num_concurrent_games, false);
@@ -39,10 +46,22 @@ SelfPlayManager::SelfPlayManager(
 
     m_tactical_boost.resize(num_concurrent_games, false);
     load_tactical_puzzles(puzzles_path);
+}
 
-    for (int i = 0; i < num_concurrent_games; ++i) {
-        reset_game(i);
+void SelfPlayManager::demarrer_slot(int game_idx) {
+    // Le quota est connu ici : aucune partie ne demarre avant generate_games.
+    reset_game(game_idx);
+    m_slot_active[game_idx] = true;
+    m_stats.games_started++;
+}
+
+SelfPlayStats SelfPlayManager::get_stats() const {
+    SelfPlayStats stats = m_stats;
+    stats.active_slots = 0;
+    for (char actif : m_slot_active) {
+        if (actif) ++stats.active_slots;
     }
+    return stats;
 }
 
 void SelfPlayManager::reset_game(int game_idx) {
@@ -68,6 +87,7 @@ void SelfPlayManager::reset_game(int game_idx) {
                 replay_ok = false;
                 break;
             }
+            m_stats.replayed_plies++;
         }
 
         if (replay_ok) {
@@ -227,7 +247,9 @@ void SelfPlayManager::play_best_move(int game_idx) {
     }
 
     // 4. Jouer le coup
-    m_shared_mcts->apply_move_by_index(m_boards[game_idx], best_move);
+    if (m_shared_mcts->apply_move_by_index(m_boards[game_idx], best_move)) {
+        m_stats.new_plies++;
+    }
 
     // 5. Détection fin de partie
     bool game_over = false;
@@ -317,6 +339,32 @@ void SelfPlayManager::roll_next_move(int game_idx) {
 }
 
 std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play) {
+    if (total_games_to_play < 0) {
+        throw std::invalid_argument(
+            "generate_games : le quota doit etre positif ou nul");
+    }
+
+    // Une generation independante : aucune partie active heritee de l'appel
+    // precedent, compteurs remis a zero.
+    m_finished_games.clear();
+    m_stats = SelfPlayStats{};
+    for (int i = 0; i < m_num_concurrent_games; ++i) {
+        m_roots[i].reset();
+        m_slot_active[i] = false;
+        m_is_waiting[i] = false;
+        m_sims_completed[i] = 0;
+        m_sims_target[i] = 0;
+        m_pending_epsilon[i] = 0.0f;
+        m_tactical_boost[i] = false;
+    }
+
+    // Le quota est connu ici : au plus min(places, quota) parties demarrent.
+    const int a_demarrer = std::min(m_num_concurrent_games,
+                                    total_games_to_play);
+    for (int i = 0; i < a_demarrer; ++i) {
+        demarrer_slot(i);
+    }
+
     int games_completed = 0;
     auto start_time = std::chrono::steady_clock::now();
 
@@ -336,7 +384,7 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
         // ==========================================================
         for (int i = 0; i < m_num_concurrent_games; ++i) {
             if (games_completed >= total_games_to_play) break;
-            if (m_is_waiting[i]) continue;
+            if (!m_slot_active[i] || m_is_waiting[i]) continue;
 
             if (m_sims_completed[i] >= m_sims_target[i] && m_sims_target[i] > 0) {
                 play_best_move(i);
@@ -386,6 +434,7 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
 
                     m_finished_games.push_back(res);
                     games_completed++;
+                    m_stats.games_completed++;
 
                     if (games_completed % 16 == 0 || games_completed == total_games_to_play) {
                         auto now = std::chrono::steady_clock::now();
@@ -398,8 +447,16 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
                             << std::flush;
                     }
 
-                    if (games_completed < total_games_to_play)
-                        reset_game(i);
+                    if (m_stats.games_started
+                            < static_cast<std::uint64_t>(
+                                  total_games_to_play)) {
+                        demarrer_slot(i);
+                    }
+                    else {
+                        // Plus aucun depart a effectuer : la place reste
+                        // inactive et les parties engagees finissent.
+                        m_slot_active[i] = false;
+                    }
                 }
             }
         }
@@ -416,7 +473,8 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
 
 #pragma omp for schedule(dynamic, 4)
             for (int i = 0; i < m_num_concurrent_games; ++i) {
-                if (m_is_waiting[i] || m_sims_completed[i] >= m_sims_target[i]) continue;
+                if (!m_slot_active[i] || m_is_waiting[i]
+                    || m_sims_completed[i] >= m_sims_target[i]) continue;
 
                 int moves_played = 0;
                 PathReservation reservation;
@@ -471,7 +529,8 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
 
         bool all_blocked = true;
         for (int i = 0; i < m_num_concurrent_games; ++i) {
-            if (m_sims_completed[i] < m_sims_target[i] && !m_is_waiting[i]) {
+            if (m_slot_active[i] && m_sims_completed[i] < m_sims_target[i]
+                && !m_is_waiting[i]) {
                 all_blocked = false;
                 break;
             }

@@ -40,8 +40,10 @@ minutes de GPU.
 - [ ] Exécuter le rebalayage de virtual loss après R1 : neutralité, comparaison A/B
       interleaved propre, puis préfiltre 500 puzzles pour tout candidat retenu :
       `superpowers/plans/2026-09-21-rebalayage-virtual-loss.md`.
-- [ ] Mesurer et décider R9-B (fin de génération self-play) après le diagnostic R9-A :
-      `superpowers/plans/2026-09-21-fin-de-lot-self-play.md`.
+- [x] Mesurer et décider R9-B (fin de génération self-play) après le diagnostic R9-A :
+      compteurs et génération finie faits (`Termine exactement les parties demandees`) ;
+      la mesure avant/après de débit (tâche 5 du plan) reste à faire, sans GPU pour
+      l'instant : `superpowers/plans/2026-09-21-fin-de-lot-self-play.md`.
 
 ## Prochaine tâche décidée
 

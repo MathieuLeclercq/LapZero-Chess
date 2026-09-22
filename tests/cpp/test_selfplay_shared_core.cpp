@@ -20,6 +20,10 @@ public:
                                  int game_idx) {
         return manager.m_pending_epsilon[static_cast<std::size_t>(game_idx)];
     }
+
+    static void demarrer_slot(SelfPlayManager& manager, int game_idx) {
+        manager.demarrer_slot(game_idx);
+    }
 };
 
 namespace {
@@ -157,6 +161,10 @@ void test_selfplay_rejects_invalid_batch_and_cleans_up() {
 void test_selfplay_roots_are_expanded_and_noised_exactly_once() {
     ControlledEvaluator evaluator;
     SelfPlayManager manager(&evaluator, 2, 2, 1, 0.5f, 8192);
+    // Le constructeur ne demarre plus de partie : le quota n'est connu que dans
+    // generate_games. On demarre deux places pour controler les racines.
+    SelfPlayTestAccess::demarrer_slot(manager, 0);
+    SelfPlayTestAccess::demarrer_slot(manager, 1);
 
     // La deuxieme partie partage la position de depart de la premiere : sa
     // racine est servie par la table et doit tout de meme avoir ses enfants et
@@ -173,6 +181,58 @@ void test_selfplay_roots_are_expanded_and_noised_exactly_once() {
     }
 }
 
+void test_selfplay_generation_is_finite_and_counted() {
+    struct Cas {
+        int places;
+        int quota;
+    };
+    const Cas cas[] = {{2, 3}, {4, 0}, {4, 1}, {4, 3}, {4, 4}, {4, 7}};
+
+    for (const Cas& c : cas) {
+        ControlledEvaluator evaluator;
+        SelfPlayManager manager(&evaluator, c.places, 2, 1, 0.5f, 8192);
+        const std::vector<GameResult> games = manager.generate_games(c.quota);
+        const SelfPlayStats stats = manager.get_stats();
+
+        require_test(games.size() == static_cast<std::size_t>(c.quota),
+                     "the generation did not return exactly N games");
+        require_test(stats.games_started == static_cast<std::uint64_t>(c.quota),
+                     "the number of starts does not match the quota");
+        require_test(stats.games_completed == static_cast<std::uint64_t>(c.quota),
+                     "the number of completions does not match the quota");
+        require_test(stats.active_slots == 0,
+                     "a place stayed active after the generation");
+        require_test(stats.replayed_plies == 0,
+                     "replayed plies were counted without puzzles");
+        if (c.quota == 0) {
+            require_test(stats.new_plies == 0, "N=0 played a move");
+            require_test(evaluator.batch_sizes.empty(),
+                         "N=0 called the evaluator");
+        }
+        else {
+            require_test(stats.new_plies > 0, "no new ply was counted");
+        }
+    }
+}
+
+void test_successive_selfplay_generations_are_independent() {
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 2, 2, 1, 0.5f, 8192);
+
+    const std::vector<GameResult> premier = manager.generate_games(2);
+    const SelfPlayStats stats_premier = manager.get_stats();
+    const std::vector<GameResult> second = manager.generate_games(3);
+    const SelfPlayStats stats_second = manager.get_stats();
+
+    require_test(premier.size() == 2, "the first generation is incomplete");
+    require_test(second.size() == 3, "the second generation is incomplete");
+    require_test(stats_premier.games_completed == 2,
+                 "the first counters were changed by the second call");
+    require_test(stats_second.games_started == 3
+                     && stats_second.games_completed == 3,
+                 "the second generation did not restart its counters");
+}
+
 }  // namespace
 
 int main() {
@@ -181,6 +241,8 @@ int main() {
         test_selfplay_manager_with_controlled_evaluator();
         test_selfplay_rejects_invalid_batch_and_cleans_up();
         test_selfplay_roots_are_expanded_and_noised_exactly_once();
+        test_selfplay_generation_is_finite_and_counted();
+        test_successive_selfplay_generations_are_independent();
         return 0;
     }
     catch (const std::exception& error) {

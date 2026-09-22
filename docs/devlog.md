@@ -75,3 +75,4 @@ et `git log`. Les détails complets restent dans ces documents, pas ici.
 2026-09-20 16:40 : [UCI] V statique du réseau publié dans les info UCI, distinct du Q moyen de la recherche.
 2026-09-20 22:06 : [TT] V des noeuds matérialisés depuis la table renseigné, il manquait dans les info UCI.
 2026-09-20 22:36 : [Entraînement] Chemin des puzzles passé depuis Python ; le chemin codé en dur dépendait du répertoire de lancement.
+2026-09-22 11:08 : [Self-play] Le banc de remplissage opposait à tort un pool qui se vide à un pool renouvelé : les deux régimes relançaient les places, seul le nombre de départs changeait. Le gestionnaire démarrait C + N - 1 parties pour N collectées et jetait les C - 1 dernières. La génération finie démarre exactement N parties, laisse finir celles qui sont engagées et les collecte toutes ; les compteurs started, completed, active et new_plies le rendent visible.
