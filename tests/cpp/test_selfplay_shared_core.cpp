@@ -546,6 +546,46 @@ void test_puzzle_first_move_served_by_the_table_keeps_the_boost() {
                  "a TT hit lost the tactical budget");
 }
 
+void test_slow_puzzle_game_is_not_lost_behind_a_fast_one() {
+    const std::string fixture = ecrire_fixture_puzzle();
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 2, 2, 1, 0.5f, 8192, fixture);
+    std::remove(fixture.c_str());
+
+    // Une place joue un puzzle, premier coup a 4000 simulations, et doit etre
+    // recuperee malgre la fin rapide de l'autre. On cherche une graine ou la
+    // place 0 est injectee et la place 1 ne l'est pas.
+    bool trouve = false;
+    for (std::uint32_t graine = 1; graine <= 4000 && !trouve; ++graine) {
+        SelfPlayTestAccess::seed_rng(manager, graine);
+        SelfPlayTestAccess::reset_game(manager, 0);
+        SelfPlayTestAccess::reset_game(manager, 1);
+        trouve = SelfPlayTestAccess::tactical_boost(manager, 0)
+            && !SelfPlayTestAccess::tactical_boost(manager, 1);
+    }
+    require_test(trouve, "no seed gave one puzzle and one normal game");
+    require_test(SelfPlayTestAccess::sims_target(manager, 0) == 4000,
+                 "the puzzle lost its tactical budget");
+
+    SelfPlayTestAccess::forcer_fin_apres(manager, 0, 4);
+    SelfPlayTestAccess::forcer_fin_apres(manager, 1, 2);
+
+    const std::vector<GameResult> games = manager.generate_games(2);
+    const SelfPlayStats stats = manager.get_stats();
+
+    require_test(games.size() == 2, "the slow game was not collected");
+    require_test(stats.games_started == 2 && stats.games_completed == 2,
+                 "the starts and completions do not match the quota");
+    require_test(stats.active_slots == 0, "a place stayed active");
+    std::vector<int> longueurs;
+    for (const GameResult& game : games) {
+        longueurs.push_back(game.total_real_moves);
+    }
+    std::sort(longueurs.begin(), longueurs.end());
+    require_test(longueurs == std::vector<int>({2, 4}),
+                 "the slow puzzle game and the fast game were not both kept");
+}
+
 }  // namespace
 
 int main() {
@@ -561,6 +601,7 @@ int main() {
         test_imposed_ends_start_and_collect_each_game_once();
         test_puzzle_first_move_boost_then_normal_move();
         test_puzzle_first_move_served_by_the_table_keeps_the_boost();
+        test_slow_puzzle_game_is_not_lost_behind_a_fast_one();
         return 0;
     }
     catch (const std::exception& error) {
