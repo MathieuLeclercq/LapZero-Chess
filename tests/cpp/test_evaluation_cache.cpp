@@ -208,7 +208,7 @@ void test_rejection_order_and_contexts() {
                  "different position hash was not a miss");
 }
 
-void test_legacy_mode_ignores_context_and_policy_is_truncated() {
+void test_oversized_policy_is_not_cached() {
     EvaluationCache cache(5, LEGACY_CACHE_HISTORY_DEPTH);
     EvaluationCacheKey stored = key_for_hash(2);
     EvaluationCacheKey changed = stored;
@@ -217,18 +217,27 @@ void test_legacy_mode_ignores_context_and_policy_is_truncated() {
     changed.history_hash ^= 1;
     changed.combined_hash ^= 1;
 
-    std::vector<int> legal;
-    for (int i = 0; i < TT_MAX_MOVES + 10; ++i) {
-        legal.push_back(i);
+    std::vector<int> trop_longue;
+    for (int i = 0; i < TT_MAX_MOVES + 1; ++i) {
+        trop_longue.push_back(i);
     }
-    const auto policy = policy_with(legal, 0.01f);
-    cache.store(stored, legal, policy.data(), 0.125f);
-    const TTProbe probe = cache.probe(changed);
+    const auto politique_longue = policy_with(trop_longue, 0.01f);
+    cache.store(stored, trop_longue, politique_longue.data(), 0.125f);
+    require_test(cache.probe(stored).status == TTProbeStatus::MISS,
+                 "an oversized policy was cached");
 
+    // La frontiere exacte reste stockee et relue integralement.
+    std::vector<int> exacte;
+    for (int i = 0; i < TT_MAX_MOVES; ++i) {
+        exacte.push_back(i);
+    }
+    const auto politique_exacte = policy_with(exacte, 0.01f);
+    cache.store(stored, exacte, politique_exacte.data(), 0.125f);
+    const TTProbe probe = cache.probe(changed);
     require_test(probe.status == TTProbeStatus::HIT,
-                 "legacy mode rejected context");
+                 "the exact capacity was not cached");
     require_test(probe.policy_size == TT_MAX_MOVES,
-                 "policy was not truncated to TT_MAX_MOVES");
+                 "the exact capacity was truncated");
 }
 
 }  // namespace
@@ -240,7 +249,7 @@ int main() {
         test_clear_forgets_stored_entries_but_not_snapshots();
         test_concurrent_collisions_never_mix_entries();
         test_rejection_order_and_contexts();
-        test_legacy_mode_ignores_context_and_policy_is_truncated();
+        test_oversized_policy_is_not_cached();
         return 0;
     }
     catch (const std::exception& error) {

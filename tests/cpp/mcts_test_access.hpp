@@ -37,6 +37,19 @@ public:
         mcts.m_noise_rng.seed(seed);
     }
 
+    static EvaluationCacheKey key_for(MCTS& mcts, const Chessboard& board) {
+        return mcts.make_cache_key(board);
+    }
+
+    static void expand_prepared(MCTS& mcts, MCTSNode* node,
+                                const std::vector<int>& legal_moves,
+                                const EvaluationCacheKey& key,
+                                const float* policy, float value,
+                                PathReservation& reservation) {
+        mcts.expand_and_backup_prepared(node, legal_moves, key, policy,
+                                        value, reservation);
+    }
+
     static MCTSNode* analysis_root(MCTS& mcts) {
         return mcts.m_analysis_root.get();
     }

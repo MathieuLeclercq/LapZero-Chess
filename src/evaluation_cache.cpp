@@ -81,6 +81,14 @@ void EvaluationCache::store(const EvaluationCacheKey& key,
                             const std::vector<int>& legal_indices,
                             const float* policy, float value,
                             SearchTiming* timing) {
+    // Tentative de mise en cache : une politique plus longue que la capacite
+    // d'une entree est ignoree. L'arbre garde tous ses coups et la position
+    // sera reevaluee ; une entree tronquee ne doit jamais etre servie comme un
+    // hit complet.
+    if (legal_indices.size() > static_cast<std::size_t>(TT_MAX_MOVES)) {
+        return;
+    }
+
     TTEntry replacement;
     {
         PhaseTimer prepare_timer(timing, SearchPhase::TTProbeStore);
@@ -90,8 +98,7 @@ void EvaluationCache::store(const EvaluationCacheKey& key,
         replacement.history_hash = key.history_hash;
         replacement.half_move_clock = key.half_move_clock;
         replacement.value = value;
-        replacement.policy_size = std::min(
-            static_cast<int>(legal_indices.size()), TT_MAX_MOVES);
+        replacement.policy_size = static_cast<int>(legal_indices.size());
         for (int i = 0; i < replacement.policy_size; ++i) {
             const int move_index = legal_indices[i];
             replacement.legal_policy[i] = {move_index, policy[move_index]};

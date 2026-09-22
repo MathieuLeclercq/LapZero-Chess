@@ -690,6 +690,50 @@ void test_noise_is_deterministic_and_epsilon_zero_is_a_no_op() {
     require_test(fini, "noised priors are negative or non-finite");
 }
 
+void test_expansion_keeps_moves_beyond_the_cache_capacity() {
+    ControlledEvaluator evaluator;
+    MCTS mcts(&evaluator, 16, 0);
+    Chessboard board = startup_board();
+    MCTSNode node(0.0f);
+    PathReservation reservation;
+    require_test(reservation.try_claim(&node), "claim failed");
+
+    std::vector<int> legal;
+    for (int i = 0; i < TT_MAX_MOVES + 1; ++i) {
+        legal.push_back(3 + 5 * i);
+    }
+    std::vector<float> policy(POLICY_SIZE, 0.0f);
+    for (int idx : legal) policy[static_cast<std::size_t>(idx)] = 1.0f;
+    const int dominant = legal.back();
+    policy[static_cast<std::size_t>(dominant)] = 10.0f;
+
+    const EvaluationCacheKey key = MCTSTestAccess::key_for(mcts, board);
+    MCTSTestAccess::expand_prepared(mcts, &node, legal, key, policy.data(),
+                                    0.1f, reservation);
+
+    require_test(node.state.load() == NodeState::Expanded,
+                 "the prepared expansion did not publish the node");
+    require_test(node.children.size() == legal.size(),
+                 "the expansion truncated the legal moves");
+    float somme = 0.0f;
+    bool dominant_trouve = false;
+    for (const auto& child : node.children) {
+        somme += child.second->prior;
+        if (child.first == dominant) {
+            dominant_trouve = true;
+            require_test(
+                std::fabs(child.second->prior - 10.0f / 138.0f) < 1e-5f,
+                "the 129th move was normalised on a truncated list");
+        }
+    }
+    require_test(dominant_trouve,
+                 "the last legal move is missing from the tree");
+    require_test(std::fabs(somme - 1.0f) < 1e-5f,
+                 "priors do not sum to one");
+    require_test(mcts.inspect_tree(&node).violations == 0,
+                 "the 129-child node violates the tree invariants");
+}
+
 void test_gpu_phase_is_quiet_and_update_root_waits_for_session() {
     ControlledEvaluator evaluator;
     EvaluationGate gate;
@@ -861,6 +905,7 @@ int main() {
         test_repetition_is_a_draw_in_the_search();
         test_tt_hit_expands_the_root_and_does_not_pollute_the_cache();
         test_noise_is_deterministic_and_epsilon_zero_is_a_no_op();
+        test_expansion_keeps_moves_beyond_the_cache_capacity();
         test_gpu_phase_is_quiet_and_update_root_waits_for_session();
         return 0;
     }

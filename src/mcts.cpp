@@ -17,8 +17,9 @@ using NodeChildren =
 NodeChildren make_children_from_policy(
         MCTSNode* parent, const std::vector<int>& legal_indices,
         const float* policy) {
-    const int policy_size = std::min(
-        static_cast<int>(legal_indices.size()), TT_MAX_MOVES);
+    // Toute la liste legale construit des enfants, sans plafond lie au cache :
+    // une position a plus de 128 coups legaux ne doit pas perdre les suivants.
+    const int policy_size = static_cast<int>(legal_indices.size());
     float sum_legal = 0.0f;
     for (int i = 0; i < policy_size; ++i) {
         sum_legal += policy[legal_indices[i]];

@@ -437,6 +437,8 @@ Ce lot est d'abord un renforcement de tests. Ne modifier le code de production q
 
 ## 9. R7 : ne jamais tronquer les coups légaux à la taille du cache
 
+**Statut (2026-09-21) : fait et validé.** `make_children_from_policy` construit les enfants sur toute la liste légale et normalise les priors sur cette liste. `EvaluationCache::store` refuse désormais une politique de plus de 128 coups : c'est une tentative de mise en cache documentée, aucune entrée tronquée n'est publiée. `TT_MAX_MOVES` reste à 128, aucune allocation par entrée, aucune campagne GPU. Vérification : frontière cache 129 (aucun hit) et 128 (relu intégralement), expansion préparée de 129 enfants avec somme des priors à 1 et 129e coup dominant présent au prior attendu, invariants d'arbre respectés sur ce nœud. Détection par mutation prouvée sur les deux sites. Commit : `Ne tronque plus les coups legaux a la taille du cache`.
+
 ### Constat
 
 `make_children_from_policy` dans `src/mcts.cpp` limite la liste à `TT_MAX_MOVES`, actuellement 128. `EvaluationCache::store` tronque également sa politique à cette capacité.
@@ -460,12 +462,12 @@ Classement : priorité basse, robustesse sur cas extrêmes, derrière R1 et R2.
 
 ### Implémentation recommandée
 
-- [ ] Construire les enfants MCTS à partir de TOUTE la liste `legal_indices` ; normaliser les priors sur cette même liste complète.
-- [ ] Conserver `TT_MAX_MOVES = 128`. Aucune augmentation de capacité, aucune allocation dynamique par entrée TT, aucune campagne GPU pour ce point.
-- [ ] Recommandation simple : si une politique dépasse la capacité TT, ne pas la mettre en cache. L'arbre garde tous ses enfants et la prochaine rencontre pourra refaire une évaluation. C'est ce contournement qui préserve l'optimisation mémoire, pas un agrandissement de la table.
-- [ ] Une politique partielle ne doit jamais être publiée comme un hit complet. Le test du dépassement doit avoir lieu avant toute publication d'entrée tronquée.
-- [ ] Conserver le stockage normal pour 128 coups ou moins.
-- [ ] Vérifier que les deux consommateurs de `TTProbe`, mono-worker et vagues, continuent de recevoir des snapshots complets.
+- [x] Construire les enfants MCTS à partir de TOUTE la liste `legal_indices` ; normaliser les priors sur cette même liste complète.
+- [x] Conserver `TT_MAX_MOVES = 128`. Aucune augmentation de capacité, aucune allocation dynamique par entrée TT, aucune campagne GPU pour ce point.
+- [x] Recommandation simple : si une politique dépasse la capacité TT, ne pas la mettre en cache. L'arbre garde tous ses enfants et la prochaine rencontre pourra refaire une évaluation. C'est ce contournement qui préserve l'optimisation mémoire, pas un agrandissement de la table.
+- [x] Une politique partielle ne doit jamais être publiée comme un hit complet. Le test du dépassement doit avoir lieu avant toute publication d'entrée tronquée.
+- [x] Conserver le stockage normal pour 128 coups ou moins.
+- [x] Vérifier que les deux consommateurs de `TTProbe`, mono-worker et vagues, continuent de recevoir des snapshots complets. Le contrat de `TTProbe` est inchangé, seule l'écriture est refusée au-delà de la capacité.
 
 Le contournement d'une insertion trop grande n'exige pas de nouvelle sémantique de succès. Si l'API reste `void`, documenter qu'il s'agit d'une tentative de mise en cache. Ne pas inventer un hit partiel « suffisamment bon ».
 
@@ -485,10 +487,10 @@ Les indices synthétiques servent à tester le contrat de liste de l'expansion, 
 
 ### Acceptation
 
-- [ ] Aucun enfant légal fourni à l'expansion n'est perdu.
-- [ ] Aucun hit TT ne représente une politique incomplète.
-- [ ] La mémoire par entrée TT reste celle de 128 emplacements ; aucun budget RAM supplémentaire n'est demandé.
-- [ ] Le lot reste classé en robustesse de cas limite, sans gain de force attendu ; il ne bloque ni R1 ni R2 et les mesures courantes ne servent pas à nier l'existence du cas rare.
+- [x] Aucun enfant légal fourni à l'expansion n'est perdu.
+- [x] Aucun hit TT ne représente une politique incomplète.
+- [x] La mémoire par entrée TT reste celle de 128 emplacements ; aucun budget RAM supplémentaire n'est demandé.
+- [x] Le lot reste classé en robustesse de cas limite, sans gain de force attendu ; il ne bloque ni R1 ni R2 et les mesures courantes ne servent pas à nier l'existence du cas rare.
 
 ## 10. R8 : inclure la position initiale dans l'identité UCI
 
@@ -735,7 +737,7 @@ Pour chaque lot, fournir :
 - [x] R4 : bruit présent sur TT hit, une fois par coup, sans pollution du cache.
 - [x] R5 : sorties invalides rejetées avant accès et insertion, reprise propre.
 - [ ] R6 : tests discriminants de correspondance des lignes et de padding.
-- [ ] R7 : totalité des coups conservée, jamais de hit de politique tronquée.
+- [x] R7 : totalité des coups conservée, jamais de hit de politique tronquée.
 - [ ] R8 : identité UCI fondée sur la base et les coups, réutilisation normale conservée.
 - [ ] R9 : rapports corrigés et décision explicite sur la collecte des parties engagées.
 - [x] R10 : aucune réservation ne survit à l'arbre qu'elle référence après échec de fusion.
