@@ -45,8 +45,11 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
 
     if (batch_size == 0) {
         for (int sim = 0; sim < simulations; sim++) {
+            // Le garde restaure le plateau a la fin de la simulation, y compris
+            // si l'evaluation de la feuille leve.
+            BoardRollback rollback(board);
             auto [node, moves_played] = select_leaf(root, board, c_puct,
-                                                    timing);
+                                                    rollback, timing);
 
             const NodeState state =
                 node->state.load(std::memory_order_acquire);
@@ -56,7 +59,6 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
 
                 node->network_value = value;
                 backup(node, value, timing);
-                for (int i = 0; i < moves_played; i++) board.undoMove();
                 m_completed_simulations.fetch_add(
                     1, std::memory_order_relaxed);
                 continue;
@@ -71,9 +73,6 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
                     "run_search sequentiel : noeud Pending inattendu");
             }
 
-            for (int i = 0; i < moves_played; i++) {
-                board.undoMove();
-            }
             m_completed_simulations.fetch_add(
                 1, std::memory_order_relaxed);
         }
@@ -96,8 +95,11 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
 
         while (static_cast<int>(batch.size()) < batch_size &&
                completed + static_cast<int>(batch.size()) < simulations) {
+            // Une iteration de collecte : le garde restaure le plateau sur
+            // toutes les sorties, y compris une erreur avant le retour.
+            BoardRollback rollback(board);
             auto [node, moves_played] = select_leaf(root, board, c_puct,
-                                                    timing);
+                                                    rollback, timing);
 
             const NodeState state =
                 node->state.load(std::memory_order_acquire);
@@ -106,7 +108,6 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
                 const float value = terminal_value_for(board);
                 node->network_value = value;
                 backup(node, value, timing);
-                for (int i = 0; i < moves_played; i++) board.undoMove();
                 completed++;
                 m_completed_simulations.fetch_add(
                     1, std::memory_order_relaxed);
@@ -117,7 +118,6 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
             // retrouvee. On evalue alors le lot partiel, comme LC0 apres
             // TryStartScoreUpdate, plutot que de forcer une nouvelle descente.
             if (state == NodeState::Pending) {
-                for (int i = 0; i < moves_played; i++) board.undoMove();
                 break;
             }
 
@@ -141,7 +141,6 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
             FeuilleCollectee leaf;
             leaf.node = node;
             if (!leaf.reservation.try_claim(node)) {
-                for (int i = 0; i < moves_played; i++) board.undoMove();
                 break;
             }
             reserver_chemin(leaf.reservation, node,
@@ -158,7 +157,6 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
                 node->network_value = terminal;
                 backup(node, terminal, timing);
                 leaf.reservation.release();
-                for (int i = 0; i < moves_played; i++) board.undoMove();
                 completed++;
                 m_completed_simulations.fetch_add(
                     1, std::memory_order_relaxed);
@@ -175,8 +173,6 @@ void MCTS::run_search(MCTSNode* root, Chessboard& board, int simulations,
                                current_tensor.end());
             }
             batch.push_back(std::move(leaf));
-
-            for (int i = 0; i < moves_played; i++) board.undoMove();
         }
 
         if (batch.empty()) continue;

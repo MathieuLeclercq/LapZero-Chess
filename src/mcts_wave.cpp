@@ -14,27 +14,6 @@
 
 namespace {
 
-class BoardRollback {
-public:
-    explicit BoardRollback(Chessboard& board) : m_board(board) {}
-
-    BoardRollback(const BoardRollback&) = delete;
-    BoardRollback& operator=(const BoardRollback&) = delete;
-
-    ~BoardRollback() {
-        while (m_moves_played > 0) {
-            m_board.undoMove();
-            --m_moves_played;
-        }
-    }
-
-    void move_played() noexcept { ++m_moves_played; }
-
-private:
-    Chessboard& m_board;
-    int m_moves_played = 0;
-};
-
 bool is_rule_terminal(const Chessboard& board) {
     return board.checkThreefoldRepetition()
         || board.getHalfMoveClock() >= 100

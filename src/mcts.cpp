@@ -197,6 +197,7 @@ void MCTS::backup(MCTSNode* node, float value, SearchTiming* timing) {
 
 std::pair<MCTSNode*, int> MCTS::select_leaf(MCTSNode* root, Chessboard& board,
                                            float c_puct,
+                                           BoardRollback& rollback,
                                            SearchTiming* timing) {
     MCTSNode* node = root;
     int moves_played = 0;
@@ -275,6 +276,7 @@ std::pair<MCTSNode*, int> MCTS::select_leaf(MCTSNode* root, Chessboard& board,
         if (!apply_move_by_index(board, best_move_idx)) {
             throw std::runtime_error("Problème lors de l'application du coup dans select_leaf");
         }
+        rollback.move_played();
 
         node = best_child;
         moves_played++;
@@ -605,7 +607,11 @@ std::vector<MoveStats> MCTS::get_analysis_results() const {
 MCTSNode* MCTS::advance_to_leaf(MCTSNode* root, Chessboard& board,
                                 float c_puct, int& moves_played,
                                 PathReservation& reservation) {
-    auto [node, moves] = select_leaf(root, board, c_puct);
+    // Sur le chemin nominal, l'appelant garde le plateau sur la feuille pour
+    // lire le tenseur, puis le restaure avec moves_played : release() lui
+    // transfere ce compte. Toute sortie anticipee est restauree par le garde.
+    BoardRollback rollback(board);
+    auto [node, moves] = select_leaf(root, board, c_puct, rollback);
     moves_played = moves;
 
     const NodeState state = node->state.load(std::memory_order_acquire);
@@ -613,15 +619,12 @@ MCTSNode* MCTS::advance_to_leaf(MCTSNode* root, Chessboard& board,
         const float value = terminal_value_for(board);
         node->network_value = value;
         backup(node, value);
-        for (int i = 0; i < moves_played; i++) board.undoMove();
         return nullptr;
     }
     if (state == NodeState::Pending) {
-        for (int i = 0; i < moves_played; i++) board.undoMove();
         return nullptr;
     }
     if (state != NodeState::Unexpanded) {
-        for (int i = 0; i < moves_played; i++) board.undoMove();
         throw std::logic_error(
             "advance_to_leaf : select_leaf a rendu un noeud Expanded");
     }
@@ -634,17 +637,16 @@ MCTSNode* MCTS::advance_to_leaf(MCTSNode* root, Chessboard& board,
     if (probe.status == TTProbeStatus::HIT) {
         node->network_value = probe.value;
         backup(node, probe.value);
-        for (int i = 0; i < moves_played; i++) board.undoMove();
         return nullptr;
     }
 
     if (!reservation.try_claim(node)) {
-        for (int i = 0; i < moves_played; i++) board.undoMove();
         return nullptr;
     }
     reserve_path(reservation, node,
                  static_cast<std::uint32_t>(m_tuning.virtual_loss));
 
+    moves_played = rollback.release();
     return node;
 }
 

@@ -504,6 +504,35 @@ void test_mate_at_hundred_is_a_loss_in_every_search_path() {
     }
 }
 
+void test_scalar_search_restores_the_board_after_an_evaluator_error() {
+    // Le deuxieme appel reseau echoue : la racine est deja developpee, donc
+    // l'erreur tombe sur une feuille, en pleine descente.
+    ControlledEvaluator evaluator;
+    evaluator.fail_on_call = 2;
+    MCTS mcts(&evaluator, 8192, 0);
+    Chessboard board = startup_board();
+    const std::string avant = board.toFEN();
+
+    bool leve = false;
+    try {
+        mcts.step_analysis(board, 4, 1.4f, 0, 1);
+    }
+    catch (const std::exception&) {
+        leve = true;
+    }
+    require_test(leve, "the evaluator error did not propagate");
+    require_test(board.toFEN() == avant,
+                 "the scalar search left the board on the leaf");
+
+    // La reprise sur le meme arbre doit aboutir, sans noeud reste reserve.
+    evaluator.fail_on_call = 0;
+    mcts.step_analysis(board, 8, 1.4f, 0, 1);
+    require_test(mcts.inspect_tree().root_visits == 8,
+                 "the search did not resume after the error");
+    require_test(board.toFEN() == avant,
+                 "the resumed search left the board on a leaf");
+}
+
 void test_mate_delivered_at_hundred_from_ninety_nine() {
     ControlledEvaluator evaluator;
     MCTS mcts(&evaluator, 8192, 0);
@@ -999,6 +1028,7 @@ int main() {
         test_padding_sentinels_are_ignored_and_counters_stay_honest();
         test_the_association_check_detects_a_permutation();
         test_mate_at_hundred_is_a_loss_in_every_search_path();
+        test_scalar_search_restores_the_board_after_an_evaluator_error();
         test_mate_delivered_at_hundred_from_ninety_nine();
         test_terminal_classification_prefers_mate_over_rule_draws();
         test_repetition_is_a_draw_in_the_search();

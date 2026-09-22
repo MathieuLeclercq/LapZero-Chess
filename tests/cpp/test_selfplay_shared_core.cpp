@@ -546,6 +546,33 @@ void test_puzzle_first_move_served_by_the_table_keeps_the_boost() {
                  "a TT hit lost the tactical budget");
 }
 
+void test_reused_root_has_children_and_consumes_its_noise() {
+    const std::string fixture = ecrire_fixture_puzzle();
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 1, 2, 1, 0.5f, 8192, fixture);
+    std::remove(fixture.c_str());
+
+    SelfPlayTestAccess::preparer_position(manager, 0, "");
+    require_test(SelfPlayTestAccess::pending_epsilon(manager, 0) == 0.0f,
+                 "the prepared root kept a pending noise");
+
+    // Une vague developpe un enfant, puis le meilleur coup le promeut en
+    // racine. La nouvelle racine doit deja porter ses enfants et avoir
+    // consomme son bruit, sans dependre d'un passage GPU ulterieur : les deux
+    // sites qui posent le bruit (reset_game et play_best_move) developpent la
+    // racine avant de l'appliquer, donc la descente ne materialise jamais une
+    // racine sans enfants depuis la table.
+    SelfPlayTestAccess::executer_lot_par_partie(manager, {0});
+    SelfPlayTestAccess::play_best_move(manager, 0);
+
+    MCTSNode* racine = SelfPlayTestAccess::root(manager, 0);
+    require_test(racine != nullptr, "the reused root is missing");
+    require_test(!racine->children.empty(),
+                 "the reused root has no children");
+    require_test(SelfPlayTestAccess::pending_epsilon(manager, 0) == 0.0f,
+                 "the reused root kept its noise pending");
+}
+
 void test_slow_puzzle_game_is_not_lost_behind_a_fast_one() {
     const std::string fixture = ecrire_fixture_puzzle();
     ControlledEvaluator evaluator;
@@ -553,37 +580,45 @@ void test_slow_puzzle_game_is_not_lost_behind_a_fast_one() {
     std::remove(fixture.c_str());
 
     // Une place joue un puzzle, premier coup a 4000 simulations, et doit etre
-    // recuperee malgre la fin rapide de l'autre. On cherche une graine ou la
-    // place 0 est injectee et la place 1 ne l'est pas.
-    bool trouve = false;
-    for (std::uint32_t graine = 1; graine <= 4000 && !trouve; ++graine) {
-        SelfPlayTestAccess::seed_rng(manager, graine);
-        SelfPlayTestAccess::reset_game(manager, 0);
-        SelfPlayTestAccess::reset_game(manager, 1);
-        trouve = SelfPlayTestAccess::tactical_boost(manager, 0)
-            && !SelfPlayTestAccess::tactical_boost(manager, 1);
-    }
-    require_test(trouve, "no seed gave one puzzle and one normal game");
-    require_test(SelfPlayTestAccess::sims_target(manager, 0) == 4000,
-                 "the puzzle lost its tactical budget");
-
+    // recuperee malgre la fin rapide de l'autre. La graine est cherchee sur les
+    // demarrages reellement consommes par generate_games : sans historique
+    // rejoue, les longueurs {2,4} viendraient des seules fins forcees et le
+    // test ne prouverait rien.
     SelfPlayTestAccess::forcer_fin_apres(manager, 0, 4);
     SelfPlayTestAccess::forcer_fin_apres(manager, 1, 2);
 
-    const std::vector<GameResult> games = manager.generate_games(2);
-    const SelfPlayStats stats = manager.get_stats();
+    bool trouve = false;
+    std::vector<GameResult> games;
+    SelfPlayStats stats;
+    for (std::uint32_t graine = 1; graine <= 400 && !trouve; ++graine) {
+        SelfPlayTestAccess::seed_rng(manager, graine);
+        games = manager.generate_games(2);
+        stats = manager.get_stats();
+
+        std::vector<int> longueurs;
+        for (const GameResult& game : games) {
+            longueurs.push_back(game.total_real_moves);
+        }
+        std::sort(longueurs.begin(), longueurs.end());
+        trouve = stats.replayed_plies == 2
+            && longueurs == std::vector<int>({2, 4});
+    }
+    require_test(trouve,
+                 "no seed gave a slow puzzle game behind a fast one");
 
     require_test(games.size() == 2, "the slow game was not collected");
     require_test(stats.games_started == 2 && stats.games_completed == 2,
                  "the starts and completions do not match the quota");
     require_test(stats.active_slots == 0, "a place stayed active");
-    std::vector<int> longueurs;
+
+    // La partie de 4 plies est celle du puzzle : deux plies rejoues puis deux
+    // joues, dont le premier coup tactique enregistre comme slow move.
+    const GameResult* puzzle = nullptr;
     for (const GameResult& game : games) {
-        longueurs.push_back(game.total_real_moves);
+        if (game.total_real_moves == 4) puzzle = &game;
     }
-    std::sort(longueurs.begin(), longueurs.end());
-    require_test(longueurs == std::vector<int>({2, 4}),
-                 "the slow puzzle game and the fast game were not both kept");
+    require_test(puzzle != nullptr && puzzle->move_count >= 1,
+                 "the tactical first move was not recorded");
 }
 
 void test_game_conclusion_signs_and_reasons() {
@@ -634,7 +669,7 @@ void test_game_conclusion_signs_and_reasons() {
 
 std::vector<GameResult> generer_avec_reglages(int virtual_loss,
                                               std::uint32_t graine) {
-    ControlledEvaluator evaluator;
+    DiscriminatingEvaluator evaluator;
     SelfPlayManager manager(&evaluator, 2, 2, 1, 0.5f, 8192);
     SelfPlayTestAccess::seed_rng(manager, graine);
     MCTSTestAccess::seed_noise(SelfPlayTestAccess::mcts(manager), graine);
@@ -678,6 +713,7 @@ int main() {
         test_imposed_ends_start_and_collect_each_game_once();
         test_puzzle_first_move_boost_then_normal_move();
         test_puzzle_first_move_served_by_the_table_keeps_the_boost();
+        test_reused_root_has_children_and_consumes_its_noise();
         test_slow_puzzle_game_is_not_lost_behind_a_fast_one();
         test_game_conclusion_signs_and_reasons();
         test_virtual_loss_is_inert_in_self_play();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "board_rollback.hpp"
 #include "chessboard.hpp"
 #include <vector>
 #include <memory>
@@ -197,8 +198,11 @@ private:
                   const std::vector<int>& legal_indices,
                   const float* policy, float value,
                   SearchTiming* timing = nullptr);
+    // Chaque coup joue est arme sur le garde : la descente peut ainsi etre
+    // restauree meme si elle est interrompue par une erreur.
     std::pair<MCTSNode*, int> select_leaf(MCTSNode* root, Chessboard& board,
                                          float c_puct,
+                                         BoardRollback& rollback,
                                          SearchTiming* timing = nullptr);
     void expand_and_backup_prepared(MCTSNode* leaf_node,
                                     const std::vector<int>& legal_indices,
