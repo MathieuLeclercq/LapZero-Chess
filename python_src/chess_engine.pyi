@@ -11,6 +11,10 @@ class Chessboard:
         ...
     def clear(self) -> None:
         ...
+    def decode_move_index(self, index: typing.SupportsInt | typing.SupportsIndex) -> tuple[int, int, int, int, PieceType]:
+        """
+        Decode un index de policy (0 a 4671) en coordonnees absolues et promotion, orientation du trait incluse.
+        """
     def get_all_legal_moves(self) -> list[Move]:
         ...
     def get_alphazero_tensor(self) -> numpy.typing.NDArray[numpy.float32]:

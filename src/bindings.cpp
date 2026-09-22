@@ -76,6 +76,17 @@ PYBIND11_MODULE(chess_engine, m) {
         .def("set_startup_pieces", &Chessboard::setStartupPieces)
         .def("load_fen", &Chessboard::loadFEN, py::arg("fen"))
         .def("set_kiwipete", &Chessboard::setKiwipete)
+        .def("decode_move_index", [](const Chessboard& board, int index) {
+            const Move move = board.decodeMoveIndex(index);
+            return py::make_tuple(
+                move.getOrigSquare().getFile(),
+                move.getOrigSquare().getRank(),
+                move.getDestSquare().getFile(),
+                move.getDestSquare().getRank(),
+                move.getPromotion());
+        }, py::arg("index"),
+           "Decode un index de policy (0 a 4671) en coordonnees absolues et "
+           "promotion, orientation du trait incluse.")
         .def("get_square", static_cast<const Square & (Chessboard::*)(int, int) const>(&Chessboard::getSquare))
         .def("get_legal_moves", [](Chessboard& cb, int file, int rank)
             {
