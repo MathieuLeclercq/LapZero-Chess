@@ -38,19 +38,22 @@ complet :
 - [x] Refaire la campagne qualité de 2500 puzzles sur le chemin des vagues (8 workers) :
       1924 contre 1931, IC95 [-0,2 ; +0,76], non-infériorité.
 
-**Pools self-play, mesure préliminaire.** À 100/20 simulations, la matrice (128, 256),
+**Pools self-play, confirmation faite.** À 100/20 simulations, la matrice (128, 256),
 (256, 512) et (512, 512) donne 192,9, 231,2 et 254,4 plies nouveaux par seconde, avec
-départs = fins = total partout. Le plus grand pool est le plus rapide à budget réduit, ce
-qui va contre l'intuition du genou à 128. Une confirmation à 700/100 est nécessaire avant
-de changer la taille de production, qui reste 256.
+départs = fins = total partout. La confirmation à 700/100 sur les deux candidats de
+production, à horizon égal de 512 parties, donne (256, 512) 32,8 plies nouveaux par seconde
+et 30,47 ms par ply contre (512, 512) 35,6 et 28,09, soit x1,09, départs = fins = total
+partout. Le grand pool gagne environ 9 % au budget réel ; la production reste 256 en
+attendant la décision de la passer à 512.
 
 - [x] Traiter R2 puis R1 du plan de correctifs, prérequis du rebalayage.
 - [x] Exécuter le rebalayage de virtual loss après R1 : comparaison A/B interleaved,
       préfiltre 500 puis campagne 2500, décision et propagation :
       `superpowers/plans/2026-09-21-rebalayage-virtual-loss.md`.
 - [x] Mesurer et décider R9-B (fin de génération self-play) après le diagnostic R9-A :
-      compteurs, génération finie et rapport honnête faits ; la matrice de pools est
-      mesurée à budget réduit, la confirmation à 700/100 reste à faire :
+      compteurs, génération finie et rapport honnête faits ; matrice de pools mesurée à
+      budget réduit puis confirmée à 700/100 (x1,09 pour 512 places), décision de
+      production en attente :
       `superpowers/plans/2026-09-21-fin-de-lot-self-play.md`.
 
 ## Banc de puzzles batché sur GPU (inspiration self-play)

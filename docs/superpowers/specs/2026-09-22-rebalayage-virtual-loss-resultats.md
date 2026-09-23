@@ -109,8 +109,12 @@ C++ verrouille la propagation au gestionnaire.
   demanderait de reconstruire l'ancien commit. La matrice de pools a la place
   mesure (128, 256), (256, 512) et (512, 512) places a 100/20 simulations :
   192,9, 231,2 et 254,4 plies nouveaux par seconde, avec departs = fins = total
-  partout. Une confirmation a 700/100 est necessaire avant de changer la taille
-  de pool de production, qui reste 256.
+  partout. La confirmation a 700/100 est faite sur les deux candidats de
+  production, a horizon egal de 512 parties : (256, 512) donne 32,8 plies
+  nouveaux par seconde et 30,47 ms par ply, (512, 512) 35,6 et 28,09, soit
+  x1,09, avec departs = fins = total partout. Le gain du grand pool se confirme
+  au budget reel ; le passage de la production de 256 a 512 reste une decision
+  du proprietaire.
 - Les chiffres sont mesures sur iter316. Le serveur de self-play n'a pas besoin
   du reglage : l'amplitude y est inerte (section 4), seuls le bot et ses chemins
   batches en beneficient.
