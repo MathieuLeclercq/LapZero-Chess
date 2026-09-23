@@ -21,9 +21,9 @@ la barriere qualite sur 2500 puzzles avec un intervalle de confiance
 [-0,4 ; +0,56] point. Le defaut de production est donc passe a 2 dans tous les
 lanceurs du bot, du tournoi, de la GUI et de l'ancrage Stockfish. La campagne de
 2500 a tourne avec un seul worker de recherche par processus, donc sur le chemin
-mono batche ; une passe reduite sur les vagues (500 puzzles, 8 workers, meme
-echantillon que le prefiltre) donne 367 contre 369 reussites, non-inferiorite,
-ce qui leve l'essentiel du doute sur le chemin deploye.
+mono batche ; la campagne de 2500 rejouee sur les vagues de huit workers donne
+1924 contre 1931, IC95 [-0,2 ; +0,76], non-inferiorite, donc le chemin deploye
+est valide a la meme precision que le mono.
 
 ## 2. Debit, A/B interleaved
 
@@ -61,17 +61,17 @@ Ces deux lignes ont tourne avec `search_workers = 1` : les seize
 « travailleurs » sont des processus Python independants, donc la non-inferiorite
 porte sur le chemin mono batche. Le bot deploye collecte ses feuilles par vagues
 de huit workers C++, ou les reservations sont visibles pendant les descentes
-concurrentes et ou les collisions different. Le meme sous-echantillon de 500
-lignes a donc ete rejoue sur ce chemin, deux processus de huit workers :
+concurrentes et ou les collisions different. Le meme echantillon de 2500 lignes
+a donc ete rejoue sur ce chemin, seize processus de huit workers (le nombre de
+processus ne change pas la recherche, chaque puzzle est independant) :
 
 | campagne | reference vloss 1 | candidat vloss 2 | delta | IC95 | McNemar p | verdict |
 |---|---|---|---|---|---|---|
-| vagues 500, 8 workers | 367 | 369 | +0,4 pt | [-0,4 ; +1,2] | 0,62 | non-inferiorite |
+| vagues 2500, 8 workers | 1924 | 1931 | +0,28 pt | [-0,2 ; +0,76] | 0,32 | non-inferiorite |
 
-Le prefiltre mono et cette passe utilisent les memes 500 lignes, verifie sur la
-colonne `ligne`, donc les chiffres sont comparables ligne a ligne. La passe de
-2500 en vagues n'a pas ete refaite : elle reste la reserve explicite de la
-section 5.
+Les deux chemins donnent des chiffres qui se recouvrent : 1926 contre 1928 en
+mono, 1924 contre 1931 en vagues, sur les memes 2500 lignes verifiees par la
+colonne `ligne`. La reserve de validation du chemin deploye est donc levee.
 
 La colonne reseau seul est identique au bit pres entre les deux bras, sur les
 500 puis sur les 2500 lignes : la comparaison ne porte que sur la recherche.
@@ -105,10 +105,6 @@ C++ verrouille la propagation au gestionnaire.
 
 ## 5. Reserves
 
-- La campagne qualite de 2500 a tourne en mono batche. Le chemin des vagues est
-  couvert par une passe reduite de 500 puzzles (non-inferiorite, IC95
-  [-0,4 ; +1,2]) ; refaire les 2500 en vagues reste la seule facon d'atteindre
-  la precision de la campagne.
 - La comparaison ancien contre nouveau scheduler de R9 n'a pas ete faite : elle
   demanderait de reconstruire l'ancien commit. La matrice de pools a la place
   mesure (128, 256), (256, 512) et (512, 512) places a 100/20 simulations :
