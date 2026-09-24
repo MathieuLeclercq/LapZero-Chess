@@ -56,6 +56,26 @@ attendant la décision de la passer à 512.
       production en attente :
       `superpowers/plans/2026-09-21-fin-de-lot-self-play.md`.
 
+## Diagnostic du plateau de septembre (run jn1mx1pu)
+
+Analyse du 2026-09-24 : pas de déclin pendant les 70 itérations, mais une marche
+d'environ -55 Elo entre avril et septembre, confondue avec le passage de Stockfish 18 à 19
+et les changements de la recherche d'évaluation. Rien ne permet encore de dire si le
+réseau a progressé, stagné ou régressé. Les checkpoints iter437 à 506 sont sur la machine
+d'entraînement, pas sur celle-ci.
+
+- [ ] Rétablir la ligne de base : réévaluer iter436 dans les conditions actuelles
+      (Stockfish 19, code actuel), au moins 128 parties.
+- [ ] Match direct iter436 contre iter504 avec `tournament_elo.py`, au moins 200 parties :
+      même moteur de chaque côté, aucune ancre externe à calibrer.
+- [ ] Banc de puzzles sur iter504, comparaison appariée avec la référence iter436.
+- [ ] Évaluation en cours d'entraînement : 64 parties toutes les 16 itérations au lieu de
+      16 toutes les 4, même coût, intervalle deux fois plus étroit par point.
+- [ ] Loss de validation sur un lot fixe de parties jamais entraînées, pour distinguer
+      apprentissage et surapprentissage du buffer.
+- [ ] Seulement ensuite, et un paramètre à la fois : ratio d'échantillonnage (14 vers 4 à 8)
+      ou taille du buffer, puis décroissance du learning rate, constant à 4e-5 depuis avril.
+
 ## Banc de puzzles batché sur GPU (inspiration self-play)
 
 Le banc actuel tourne sur 16 processus CPU, chaque puzzle cherche seul avec un lot de 8,
