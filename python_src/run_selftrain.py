@@ -54,6 +54,9 @@ def analyser_arguments():
     parser.add_argument("--buffer", type=int, default=750_000,
                         help="plafond du replay buffer sur disque")
     parser.add_argument("--sampling-ratio", type=float, default=14.0)
+    parser.add_argument("--dataloader-workers", type=int, default=0,
+                        help="processus de chargement des donnees ; sur Windows "
+                             "chaque worker relance Python, donc 0 par defaut")
     parser.add_argument("--eval-every", type=int, default=8,
                         help="evaluer contre Stockfish tous les N tours")
     parser.add_argument("--checkpoint", default=None,
@@ -101,6 +104,7 @@ def main():
         stockfish_path=args.stockfish or STOCKFISH_PATH,
         stockfish_elo=args.stockfish_elo,
         stockfish_nodes=200_000,
+        data_workers=args.dataloader_workers,
     )
 
 

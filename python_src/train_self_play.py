@@ -114,7 +114,8 @@ def generate_games(
 #                     TRAINING
 # ============================================================
 def train_on_shards(model, optimizer, scaler, device, buffer_folder, learning_rate,
-                    batch_size=256, global_step=0, samples_per_epoch=15000):
+                    batch_size=256, global_step=0, samples_per_epoch=15000,
+                    data_workers=0):
     import glob, random
 
     model.train()
@@ -149,8 +150,11 @@ def train_on_shards(model, optimizer, scaler, device, buffer_folder, learning_ra
 
         dataset = ShardedDataset(shard_path)
         sampler = RandomSampler(dataset, replacement=True, num_samples=shard_samples)
+        # Sur Windows, chaque worker relance Python, et le chargeur est recree
+        # a chaque shard : data_workers > 0 se paie en demarrages de processus.
         loader = DataLoader(dataset, batch_size=batch_size,
-                            sampler=sampler, num_workers=0, pin_memory=True)
+                            sampler=sampler, num_workers=data_workers,
+                            pin_memory=True)
 
         for x, target_pi, y_value in loader:
             x = x.to(device)
@@ -215,7 +219,8 @@ def pipeline(
         stockfish_path=None,
         stockfish_elo=2500,
         stockfish_nodes=200_000,
-        num_sim_eval_sf=700
+        num_sim_eval_sf=700,
+        data_workers=0
 ):
     logging.getLogger("torch").setLevel(logging.ERROR)
     hyperparams = locals().copy()
@@ -285,7 +290,7 @@ def pipeline(
         global_step = train_on_shards(
             model, optimizer, scaler, gpu_device, buffer_folder, learning_rate,
             batch_size=batch_size, global_step=global_step,
-            samples_per_epoch=samples_per_epoch
+            samples_per_epoch=samples_per_epoch, data_workers=data_workers
         )
 
         num_games = max(1, games_per_iter)
