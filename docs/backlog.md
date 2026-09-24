@@ -459,7 +459,7 @@ médian **-0,089** ; value -0,216 contre +0,930, écart **-1,064** ; résolution
 1911 contre 2077, soit **+6,6 points sans historique**, McNemar 173 contre 339,
 p = 3e-13. Le raccourci est donc bien présent et coûte cher en mesure. Le chiffre
 à suivre doit converger vers zéro après réentraînement sur les données corrigées.
-Campagne complète : `out/multicore/hist-2500.md`.
+Campagne complète : `bench_puzzles_results/iter436/hist-2500.md`.
 
 Le banc doit rester disjoint de l'entraînement, c'est le cas aujourd'hui
 (0 recouvrement entre les 5 000 puzzles du banc et les 100 000 de
