@@ -15,6 +15,7 @@ import argparse
 import csv
 import statistics
 from math import comb
+from pathlib import Path
 
 COLONNE_REUSSITE = "reussi_recherche"
 COLONNES_CONTINUES = (
@@ -85,22 +86,30 @@ def comparer(reference, candidat):
     return resultat
 
 
+def libelle(chemin):
+    """Nom court d'un passage, dossier parent inclus pour lever l'ambiguite."""
+    chemin = Path(chemin)
+    return f"{chemin.parent.name}/{chemin.name}" if chemin.parent.name else chemin.name
+
+
 def formater(resultat, reference, candidat):
+    gauche = libelle(reference)
+    droite = libelle(candidat)
     lignes = [
         f"Puzzles apparies : {resultat['communs']}",
         f"Lignes en erreur : {resultat['erreurs']}",
-        f"Resolution recherche : {reference} {resultat['reference_reussis']}"
+        f"Resolution recherche : {gauche} {resultat['reference_reussis']}"
         f"/{resultat['communs']}"
-        f" | {candidat} {resultat['candidat_reussis']}/{resultat['communs']}",
-        f"Discordants : {reference} seul {resultat['reference_seul']}, "
-        f"{candidat} seul {resultat['candidat_seul']}",
+        f" | {droite} {resultat['candidat_reussis']}/{resultat['communs']}",
+        f"Discordants : {gauche} seul {resultat['reference_seul']}, "
+        f"{droite} seul {resultat['candidat_seul']}",
         f"McNemar exact bilateral : p = {resultat['p_mcnemar']:.4f}",
     ]
-    for colonne, libelle in COLONNES_CONTINUES:
-        gauche, droite, ecart = resultat["medias"][colonne]
+    for colonne, texte in COLONNES_CONTINUES:
+        valeur_gauche, valeur_droite, ecart = resultat["medias"][colonne]
         lignes.append(
-            f"{libelle} : mediane {reference} {gauche:+.4f}, "
-            f"{candidat} {droite:+.4f}, ecart median {ecart:+.4f}")
+            f"{texte} : mediane {gauche} {valeur_gauche:+.4f}, "
+            f"{droite} {valeur_droite:+.4f}, ecart median {ecart:+.4f}")
     return "\n".join(lignes)
 
 
