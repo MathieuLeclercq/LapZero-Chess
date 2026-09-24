@@ -107,3 +107,58 @@ def test_appariement_par_ligne_et_erreurs(tmp_path):
     texte = compare_bench_models.formater(resultat, "ref.csv", "cand.csv")
     assert "Puzzles apparies : 4" in texte
     assert "McNemar exact bilateral" in texte
+
+
+def test_message_tailles_differentes(tmp_path):
+    reference = tmp_path / "reference.csv"
+    candidat = tmp_path / "candidat.csv"
+    ecrire(reference, [ligne(0, True, 0.2), ligne(1, True, 0.3),
+                       ligne(2, False, 0.1)])
+    ecrire(candidat, [ligne(0, True, 0.25), ligne(1, False, 0.35),
+                      ligne(2, True, 0.15), ligne(3, False, 0.4),
+                      ligne(4, True, 0.5)])
+
+    resultat = compare_bench_models.comparer(
+        compare_bench_models.charger(reference),
+        compare_bench_models.charger(candidat))
+
+    assert resultat["reference_lignes"] == 3
+    assert resultat["candidat_lignes"] == 5
+    assert resultat["communs"] == 3
+
+    texte = compare_bench_models.formater(resultat, "ref.csv", "cand.csv")
+    assert "Tailles differentes : ref.csv 3 lignes, cand.csv 5 lignes" in texte
+    assert "comparaison sur les 3 puzzles communs" in texte
+
+
+def test_message_lignes_ecartees_a_taille_egale(tmp_path):
+    reference = tmp_path / "reference.csv"
+    candidat = tmp_path / "candidat.csv"
+    ecrire(reference, [ligne(0, True, 0.2), ligne(1, True, 0.3),
+                       ligne(2, False, 0.1)])
+    ecrire(candidat, [ligne(1, True, 0.25), ligne(2, False, 0.35),
+                      ligne(3, True, 0.15)])
+
+    resultat = compare_bench_models.comparer(
+        compare_bench_models.charger(reference),
+        compare_bench_models.charger(candidat))
+
+    assert resultat["communs"] == 2
+    texte = compare_bench_models.formater(resultat, "ref.csv", "cand.csv")
+    assert "Puzzles communs : 2 sur 3 lignes" in texte
+
+
+def test_aucun_message_quand_les_perimetres_sont_identiques(tmp_path):
+    reference = tmp_path / "reference.csv"
+    candidat = tmp_path / "candidat.csv"
+    lignes = [ligne(0, True, 0.2), ligne(1, False, 0.3)]
+    ecrire(reference, lignes)
+    ecrire(candidat, lignes)
+
+    resultat = compare_bench_models.comparer(
+        compare_bench_models.charger(reference),
+        compare_bench_models.charger(candidat))
+
+    texte = compare_bench_models.formater(resultat, "ref.csv", "cand.csv")
+    assert "Tailles differentes" not in texte
+    assert "Puzzles communs" not in texte

@@ -48,6 +48,8 @@ def mcnemar_exact(gauche_seul, droite_seul):
 def comparer(reference, candidat):
     communs = sorted(set(reference) & set(candidat))
     resultat = {
+        "reference_lignes": len(reference),
+        "candidat_lignes": len(candidat),
         "communs": len(communs),
         "erreurs": sum(
             1 for ligne in communs
@@ -92,11 +94,28 @@ def libelle(chemin):
     return f"{chemin.parent.name}/{chemin.name}" if chemin.parent.name else chemin.name
 
 
+def message_perimetre(resultat, gauche, droite):
+    """Signale les lignes ecartees quand les deux passages ne couvrent pas le meme ensemble."""
+    lignes_gauche = resultat["reference_lignes"]
+    lignes_droite = resultat["candidat_lignes"]
+    if resultat["communs"] >= max(lignes_gauche, lignes_droite):
+        return None
+    if lignes_gauche != lignes_droite:
+        return (f"Tailles differentes : {gauche} {lignes_gauche} lignes, "
+                f"{droite} {lignes_droite} lignes ; comparaison sur les "
+                f"{resultat['communs']} puzzles communs.")
+    return (f"Puzzles communs : {resultat['communs']} sur {lignes_gauche} lignes "
+            "de chaque cote ; les lignes non communes sont ecartees.")
+
+
 def formater(resultat, reference, candidat):
     gauche = libelle(reference)
     droite = libelle(candidat)
-    lignes = [
-        f"Puzzles apparies : {resultat['communs']}",
+    lignes = [f"Puzzles apparies : {resultat['communs']}"]
+    perimetre = message_perimetre(resultat, gauche, droite)
+    if perimetre:
+        lignes.append(perimetre)
+    lignes += [
         f"Lignes en erreur : {resultat['erreurs']}",
         f"Resolution recherche : {gauche} {resultat['reference_reussis']}"
         f"/{resultat['communs']}"
