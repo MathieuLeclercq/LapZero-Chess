@@ -70,10 +70,10 @@ def part(numerateur_ns: float, total_ns: float) -> float:
 def resumer_passage(timing, zones_python_s: dict, debit: dict,
                     config: dict | None = None) -> dict:
     """Rassemble un passage en une structure unique, sans arrondi trompeur."""
-    wall = int(getattr(timing, "generation_wall_ns"))
+    wall = int(timing.generation_wall_ns)
     phases = []
     for index, nom in enumerate(PHASES):
-        duree = int(getattr(timing, "phase_wall_ns")[index])
+        duree = int(timing.phase_wall_ns[index])
         phases.append({
             "nom": nom,
             "lisibles": PHASES_LISIBLES[index],
@@ -81,11 +81,11 @@ def resumer_passage(timing, zones_python_s: dict, debit: dict,
             "part_generation_pct": part(duree, wall),
         })
     sous_onnx = {
-        "run_ns": int(getattr(timing, "onnx_run_ns")),
-        "softmax_ns": int(getattr(timing, "onnx_softmax_ns")),
-        "racines_run_ns": int(getattr(timing, "root_expansion_onnx_run_ns")),
+        "run_ns": int(timing.onnx_run_ns),
+        "softmax_ns": int(timing.onnx_softmax_ns),
+        "racines_run_ns": int(timing.root_expansion_onnx_run_ns),
         "racines_softmax_ns": int(
-            getattr(timing, "root_expansion_onnx_softmax_ns")),
+            timing.root_expansion_onnx_softmax_ns),
     }
     sous_onnx["total_ns"] = (
         sous_onnx["run_ns"] + sous_onnx["softmax_ns"]
@@ -94,7 +94,7 @@ def resumer_passage(timing, zones_python_s: dict, debit: dict,
     appel_evaluateur_ns = phases[4]["duree_ns"]
     histogramme = [
         {"borne": BATCH_HISTOGRAMME_BORNES[index], "appels": int(compte)}
-        for index, compte in enumerate(getattr(timing, "batch_histogram"))
+        for index, compte in enumerate(timing.batch_histogram)
     ]
 
     return {
@@ -103,7 +103,7 @@ def resumer_passage(timing, zones_python_s: dict, debit: dict,
         "temps": {
             "generation_wall_ns": wall,
             "phases": phases,
-            "residu_ns": int(getattr(timing, "generation_other_wall_ns")),
+            "residu_ns": int(timing.generation_other_wall_ns),
             "sous_onnx": sous_onnx,
             "part_onnx_de_l_appel_pct": part(sous_onnx["total_ns"],
                                             appel_evaluateur_ns),
@@ -114,41 +114,41 @@ def resumer_passage(timing, zones_python_s: dict, debit: dict,
                 1e9 * sum(zones_python_s.values())),
         },
         "reseau": {
-            "appels_batch": int(getattr(timing, "batch_calls")),
-            "lignes_batch": int(getattr(timing, "batch_rows")),
+            "appels_batch": int(timing.batch_calls),
+            "lignes_batch": int(timing.batch_rows),
             "lignes_moyennes": (
-                getattr(timing, "batch_rows") / getattr(timing, "batch_calls")
-                if getattr(timing, "batch_calls") else 0.0),
-            "lignes_max": int(getattr(timing, "max_batch_rows")),
-            "changements_taille": int(getattr(timing, "batch_size_changes")),
-            "appels_unitaires": int(getattr(timing, "unit_network_calls")),
-            "lignes_unitaires": int(getattr(timing, "unit_network_rows")),
-            "requetes_feuilles": int(getattr(timing, "leaf_requests")),
+                timing.batch_rows / timing.batch_calls
+                if timing.batch_calls else 0.0),
+            "lignes_max": int(timing.max_batch_rows),
+            "changements_taille": int(timing.batch_size_changes),
+            "appels_unitaires": int(timing.unit_network_calls),
+            "lignes_unitaires": int(timing.unit_network_rows),
+            "requetes_feuilles": int(timing.leaf_requests),
             "histogramme": histogramme,
         },
         "attente": {
-            "tours": int(getattr(timing, "loop_turns")),
-            "tours_lot_pret_non_envoye": int(getattr(timing, "deferred_turns")),
+            "tours": int(timing.loop_turns),
+            "tours_lot_pret_non_envoye": int(timing.deferred_turns),
             "duree_lot_pret_non_envoye_ns": int(
-                getattr(timing, "deferred_wall_ns")),
+                timing.deferred_wall_ns),
             "age_max_lot_en_attente_ns": int(
-                getattr(timing, "max_pending_age_ns")),
+                timing.max_pending_age_ns),
         },
         "fin": {
-            "simulations_terminees": int(getattr(timing, "completed_sims")),
-            "sans_reseau": int(getattr(timing, "no_network_sims")),
-            "terminales": int(getattr(timing, "terminal_sims")),
-            "hits_table": int(getattr(timing, "tt_hits")),
-            "misses_table": int(getattr(timing, "tt_misses")),
-            "expansions_racine": int(getattr(timing, "root_expansions")),
+            "simulations_terminees": int(timing.completed_sims),
+            "sans_reseau": int(timing.no_network_sims),
+            "terminales": int(timing.terminal_sims),
+            "hits_table": int(timing.tt_hits),
+            "misses_table": int(timing.tt_misses),
+            "expansions_racine": int(timing.root_expansions),
             "exemples_lents_sauves": int(
-                getattr(timing, "slow_examples_saved")),
+                timing.slow_examples_saved),
         },
         "workers": {
-            "mode": int(getattr(timing, "mode")),
-            "nombre": int(getattr(timing, "worker_count")),
-            "somme_ns": int(getattr(timing, "worker_busy_sum_ns")),
-            "maximum_ns": int(getattr(timing, "worker_busy_max_ns")),
+            "mode": int(timing.mode),
+            "nombre": int(timing.worker_count),
+            "somme_ns": int(timing.worker_busy_sum_ns),
+            "maximum_ns": int(timing.worker_busy_max_ns),
         },
     }
 
@@ -198,7 +198,7 @@ def formater_diagnostic(resume: dict) -> str:
         f"[diag]   requetes feuilles {reseau['requetes_feuilles']}, "
         f"appels unitaires {reseau['appels_unitaires']}")
     lignes.append(
-        f"[diag]   histogramme : " + ", ".join(
+        "[diag]   histogramme : " + ", ".join(
             f"{element['borne']}:{element['appels']}"
             for element in reseau["histogramme"] if element["appels"]))
     lignes.append(

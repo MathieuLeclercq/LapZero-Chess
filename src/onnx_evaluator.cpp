@@ -1,4 +1,5 @@
 #include "onnx_evaluator.hpp"
+#include "softmax.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -79,25 +80,11 @@ void ONNXEvaluator::evaluate_batch(
         ? std::chrono::steady_clock::now()
         : std::chrono::steady_clock::time_point{};
 
-    // Softmax indépendant pour CHAQUE position du batch
+    // Softmax indépendant pour CHAQUE position du batch. Les lignes sont
+    // reparties entre threads au-dela du seuil, sans changer l'arithmetique
+    // d'une ligne ; les petits lots du bot restent sequentiels.
+    softmax_rows(policy_data, policies.data(), batch_size, 4672);
     for (int b = 0; b < batch_size; ++b) {
-        int offset = b * 4672;
-
-        float max_logit = *std::max_element(policy_data + offset, policy_data + offset + 4672);
-        float sum_exp = 0.0f;
-
-        for (int i = 0; i < 4672; ++i) {
-            float e = std::exp(policy_data[offset + i] - max_logit);
-            policies[offset + i] = e;
-            sum_exp += e;
-        }
-
-        float inv_sum = 1.0f / sum_exp;
-        for (int i = 0; i < 4672; ++i) {
-            policies[offset + i] *= inv_sum;
-        }
-
-        // Copie de la valeur
         values[b] = value_data[b];
     }
 

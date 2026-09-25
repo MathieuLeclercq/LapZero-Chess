@@ -13,7 +13,7 @@ import pytest
 RACINE = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(RACINE / "python_src"))
 
-from selfplay_diag import (  # noqa: E402
+from selfplay_diag import (
     formater_bilan,
     formater_diagnostic,
     part,

@@ -1,25 +1,31 @@
-import warnings
-import logging
-import time
 import gc
+import logging
 import os.path
+import time
+import warnings
 from pathlib import Path
 
 import numpy as np
 
 warnings.filterwarnings("ignore", module="requests")
-import wandb
-import torch
-import torch.nn.functional as f
-from torch.utils.data import Dataset, DataLoader, RandomSampler
-from torch.amp import GradScaler
 from datetime import datetime
 
 import chess_engine
-from lib import (append_to_disk_buffer, export_model_to_onnx,
-                 calculate_performance_rating, convert_game_results, run_with_interrupt)
-from stockfish_player import evaluate_against_anchor
+import torch
+import torch.nn.functional as f
+from lib import (
+    append_to_disk_buffer,
+    calculate_performance_rating,
+    convert_game_results,
+    export_model_to_onnx,
+    run_with_interrupt,
+)
 from model import ChessNet
+from stockfish_player import evaluate_against_anchor
+from torch.amp import GradScaler
+from torch.utils.data import DataLoader, Dataset, RandomSampler
+
+import wandb
 
 # Chemin absolu : l'injection de puzzles est chargee cote C++ et un chemin
 # relatif dependrait du repertoire de lancement.
@@ -62,32 +68,63 @@ def generate_games(
         slow_sims,
         fast_sims,
         slow_ratio,
-        tt_size=2097143):
+        tt_size=2097143,
+        diagnostics=0):
     """
     Génère des parties via le SelfPlayManager C++ avec inférence batchée sur GPU.
+
+    Quand `diagnostics` vaut 1 ou 2, le rapport de phases C++ est imprimé et
+    renvoyé ; le déroulement de la génération reste identique. Le chronométrage
+    Python sépare la création de l'évaluateur, l'appel C++, la conversion et le
+    nettoyage, pour que chaque poste ait son propre dénominateur.
     """
+    zones = {"creation_evaluateur": 0.0, "appel_cpp": 0.0,
+             "conversion": 0.0, "nettoyage": 0.0}
+
+    debut = time.perf_counter()
     evaluator = chess_engine.ONNXEvaluator(onnx_path, True)
+    zones["creation_evaluateur"] = time.perf_counter() - debut
 
-    game_results = run_with_interrupt(
-        chess_engine.generate_self_play_games,
-        evaluator,
-        concurrent_games,
-        slow_sims,
-        fast_sims,
-        games_per_iter,
-        slow_ratio,
-        tt_size,
-        PUZZLES_PATH
-    )
+    debut = time.perf_counter()
+    if diagnostics > 0:
+        game_results, stats_selfplay, timing = run_with_interrupt(
+            chess_engine.generate_self_play_games_with_diagnostics,
+            evaluator,
+            concurrent_games,
+            slow_sims,
+            fast_sims,
+            games_per_iter,
+            slow_ratio,
+            tt_size,
+            PUZZLES_PATH,
+            diagnostics
+        )
+    else:
+        game_results = run_with_interrupt(
+            chess_engine.generate_self_play_games,
+            evaluator,
+            concurrent_games,
+            slow_sims,
+            fast_sims,
+            games_per_iter,
+            slow_ratio,
+            tt_size,
+            PUZZLES_PATH
+        )
+        stats_selfplay = None
+        timing = None
+    zones["appel_cpp"] = time.perf_counter() - debut
 
+    debut = time.perf_counter()
     data, stats = convert_game_results(game_results)
+    zones["conversion"] = time.perf_counter() - debut
 
     num_games = len(game_results)
     total_ply_played = sum(res.total_real_moves for res in game_results)
     avg_length = total_ply_played / num_games
 
     print(f"\n{'=' * 30}")
-    print(f"      BILAN DE L'ITERATION")
+    print("      BILAN DE L'ITERATION")
     print(f"{'=' * 30}")
     print(f"  Parties jouées                     : {num_games}")
     print(f"  Positions générées (slow moves)    : {len(data)}")
@@ -102,12 +139,40 @@ def generate_games(
     print(f"{'=' * 30}\n")
 
     # Libération explicite de l'évaluateur ONNX GPU
+    debut = time.perf_counter()
     del game_results
     del evaluator
     gc.collect()
     torch.cuda.empty_cache()
+    zones["nettoyage"] = time.perf_counter() - debut
 
-    return data, avg_length, stats
+    diagnostic = None
+    if diagnostics > 0:
+        from selfplay_diag import formater_diagnostic, resumer_passage
+
+        total_python = sum(zones.values())
+        debit = {
+            "coups_nouveaux_par_s": (
+                int(stats_selfplay.new_plies) / zones["appel_cpp"]
+                if zones["appel_cpp"] else 0.0),
+            "exemples_par_s": (len(data) / total_python
+                               if total_python else 0.0),
+            "parties_par_s": (num_games / total_python
+                              if total_python else 0.0),
+            "evaluations_reseau_par_s": (
+                (int(timing.batch_rows) + int(timing.unit_network_rows))
+                / zones["appel_cpp"] if zones["appel_cpp"] else 0.0),
+        }
+        diagnostic = resumer_passage(timing, zones, debit)
+        diagnostic["fin"]["parties_terminees"] = int(
+            stats_selfplay.games_completed)
+        diagnostic["fin"]["coups_nouveaux"] = int(stats_selfplay.new_plies)
+        diagnostic["fin"]["historique_rejoue"] = int(
+            stats_selfplay.replayed_plies)
+        diagnostic["fin"]["exemples_conserves"] = len(data)
+        print(formater_diagnostic(diagnostic))
+
+    return data, avg_length, stats, diagnostic
 
 
 # ============================================================
@@ -116,7 +181,8 @@ def generate_games(
 def train_on_shards(model, optimizer, scaler, device, buffer_folder, learning_rate,
                     batch_size=256, global_step=0, samples_per_epoch=15000,
                     data_workers=0):
-    import glob, random
+    import glob
+    import random
 
     model.train()
     shards = sorted(glob.glob(os.path.join(buffer_folder, "shard_*.npz")))
@@ -220,7 +286,8 @@ def pipeline(
         stockfish_elo=2500,
         stockfish_nodes=200_000,
         num_sim_eval_sf=700,
-        data_workers=0
+        data_workers=0,
+        selfplay_diagnostics=0
 ):
     logging.getLogger("torch").setLevel(logging.ERROR)
     hyperparams = locals().copy()
@@ -265,10 +332,11 @@ def pipeline(
 
         # ── 1. Self-Play (C++ / GPU batched) ──
         start_time = time.time()
-        new_data, avg_length, stats = generate_games(
+        new_data, avg_length, stats, diagnostic = generate_games(
             current_onnx_path, games_per_iter,
             concurrent_games, slow_sims, fast_sims, slow_ratio,
-            tt_size=4_000_000
+            tt_size=4_000_000,
+            diagnostics=selfplay_diagnostics
         )
         generation_time = time.time() - start_time
         games_per_sec = games_per_iter / generation_time
@@ -295,7 +363,7 @@ def pipeline(
 
         num_games = max(1, games_per_iter)
         draw_rate = 1 - (stats["checkmates"] / num_games)
-        wandb.log({
+        journal = {
             "selfplay/buffer_size": buffer_size,
             "selfplay/new_positions": num_new_positions,
             "selfplay/avg_game_length": avg_length,
@@ -308,7 +376,16 @@ def pipeline(
             "selfplay/games_per_sec": games_per_sec,
             "selfplay/saved_positions_per_sec": saved_pos_per_sec,
             "selfplay/iteration": iteration + 1,
-        }, step=global_step)
+        }
+        if diagnostic is not None:
+            for phase in diagnostic["temps"]["phases"]:
+                journal[f"selfplay/phases/{phase['nom']}_pct"] = (
+                    phase["part_generation_pct"])
+            journal["selfplay/phases/residu_pct"] = (
+                100.0 * diagnostic["temps"]["residu_ns"]
+                / diagnostic["temps"]["generation_wall_ns"]
+                if diagnostic["temps"]["generation_wall_ns"] else 0.0)
+        wandb.log(journal, step=global_step)
 
         # ── 4. Sauvegarde checkpoint .pt ET .onnx ──
         ckpt_filename = f"{timestamp}_iter{iteration + 1}_unsupervised"
@@ -355,7 +432,7 @@ def pipeline(
                 "eval/iteration": iteration + 1,
             }, step=global_step)
         else:
-            print(f"  Évaluation ignorée.")
+            print("  Évaluation ignorée.")
         wandb.log({}, commit=True)
 
     wandb.finish()

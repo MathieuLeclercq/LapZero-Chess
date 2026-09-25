@@ -513,6 +513,12 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
         static_cast<std::size_t>(num_threads), 0);
     std::vector<std::uint64_t> worker_iter_max(
         static_cast<std::size_t>(num_threads), 0);
+    // Compteurs ecrits par un seul worker chacun, agreges apres la barriere :
+    // un increment direct depuis la region OpenMP perdrait des mises a jour.
+    std::vector<std::uint64_t> worker_leaf_requests(
+        static_cast<std::size_t>(num_threads), 0);
+    std::vector<std::uint64_t> worker_no_network(
+        static_cast<std::size_t>(num_threads), 0);
 
     for (auto& buf : thread_buffers) {
         buf.tensors.resize(m_num_concurrent_games * 119 * 64);
@@ -616,6 +622,8 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
                 auto& buf = thread_buffers[tid];
                 std::uint64_t iter_sum = 0;
                 std::uint64_t iter_max = 0;
+                std::uint64_t requests_thread = 0;
+                std::uint64_t no_network_thread = 0;
 
 #pragma omp for schedule(dynamic, 4)
                 for (int i = 0; i < m_num_concurrent_games; ++i) {
@@ -636,7 +644,7 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
                             reservation);
 
                         if (leaf != nullptr) {
-                            if (timing != nullptr) timing->leaf_requests++;
+                            requests_thread++;
                             buf.leaves.push_back(leaf);
                             buf.game_indices.push_back(i);
                             buf.moves_played.push_back(moves_played);
@@ -652,10 +660,7 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
                         }
                         else {
                             m_sims_completed[i]++;
-                            if (timing != nullptr) {
-                                timing->completed_sims++;
-                                timing->no_network_sims++;
-                            }
+                            no_network_thread++;
                         }
                     }();
                     if (detail_workers) {
@@ -666,11 +671,25 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
                     }
                 }
 
+                worker_leaf_requests[static_cast<std::size_t>(tid)] =
+                    requests_thread;
+                worker_no_network[static_cast<std::size_t>(tid)] =
+                    no_network_thread;
                 if (detail_workers) {
                     worker_iter_sum[static_cast<std::size_t>(tid)] = iter_sum;
                     worker_iter_max[static_cast<std::size_t>(tid)] = iter_max;
                 }
             }
+        }
+        if (timing != nullptr) {
+            std::uint64_t no_network_turn = 0;
+            for (std::size_t worker = 0; worker < worker_leaf_requests.size();
+                 ++worker) {
+                timing->leaf_requests += worker_leaf_requests[worker];
+                no_network_turn += worker_no_network[worker];
+            }
+            timing->no_network_sims += no_network_turn;
+            timing->completed_sims += no_network_turn;
         }
         if (detail_workers) {
             for (std::size_t worker = 0; worker < worker_iter_sum.size();
@@ -712,7 +731,13 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
                 }
             }
 
-            // Exécution : batch plein OU tout le monde est bloqué
+            // Exécution : batch plein OU tout le monde est bloqué.
+            //
+            // Le report est volontaire : une place qui enchaine les
+            // simulations sans reseau peut retarder le lot, mais lancer a
+            // chaque tour casse la stabilite des tailles de lot. Mesure du
+            // 2026-09-25 : 30 474 changements de forme contre 238, et ONNX
+            // Runtime repayait son plan a chaque appel, 2,6 fois plus lent.
             batch_full = ((int)m_waiting_leaves.size() >= m_num_concurrent_games);
 
             for (int i = 0; i < m_num_concurrent_games; ++i) {

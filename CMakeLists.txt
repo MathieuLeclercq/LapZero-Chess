@@ -107,6 +107,11 @@ target_link_libraries(board_copy_tests PRIVATE chess_core)
 copy_onnx_runtime(board_copy_tests)
 add_test(NAME board_copy COMMAND board_copy_tests)
 
+add_executable(softmax_rows_tests tests/cpp/test_softmax_rows.cpp)
+target_link_libraries(softmax_rows_tests PRIVATE chess_core)
+copy_onnx_runtime(softmax_rows_tests)
+add_test(NAME softmax_rows COMMAND softmax_rows_tests)
+
 add_executable(evaluation_cache_tests tests/cpp/test_evaluation_cache.cpp)
 target_link_libraries(evaluation_cache_tests PRIVATE chess_core)
 copy_onnx_runtime(evaluation_cache_tests)

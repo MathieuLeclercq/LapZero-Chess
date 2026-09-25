@@ -30,7 +30,7 @@ RACINE = Path(__file__).resolve().parents[2]
 PYTHON_SRC = RACINE / "python_src"
 sys.path.insert(0, str(PYTHON_SRC))
 
-from selfplay_diag import (  # noqa: E402
+from selfplay_diag import (
     collecter_configuration,
     formater_bilan,
     formater_diagnostic,
@@ -49,9 +49,8 @@ def mesurer_passage(args, mode, puzzles):
     Un evaluateur neuf par passage : sa creation fait partie du perimetre de la
     metrique de production et doit rester visible comme zone separee.
     """
-    import torch
-
     import chess_engine
+    import torch
     from lib import convert_game_results
 
     zones = {"creation_evaluateur": 0.0, "appel_cpp": 0.0,
@@ -119,15 +118,16 @@ def main():
     parser.add_argument("--ratio", type=float, default=0.25)
     parser.add_argument("--tt", type=int, default=4_000_000)
     parser.add_argument("--puzzles", default=PUZZLES_DEFAUT)
-    parser.add_argument("--mode", type=int, default=1, choices=(1, 2),
-                        help="1 phases, 2 phases et detail par worker")
+    parser.add_argument("--mode", type=int, default=1, choices=(0, 1, 2),
+                        help="0 instrumentation eteinte (cout du profilage), "
+                             "1 phases, 2 phases et detail par worker")
     parser.add_argument("--passes", type=int, default=1)
     parser.add_argument("--output", default=str(RACINE / "out" /
                                                 "selfplay_diagnostics"))
     args = parser.parse_args()
 
-    import torch  # noqa: F401  (charge les DLL CUDA de torch avant ONNX)
     import chess_engine
+    import torch  # noqa: F401  (charge les DLL CUDA de torch avant ONNX)
 
     if not os.path.isfile(args.model):
         raise SystemExit(f"modele introuvable : {args.model}")
@@ -160,11 +160,20 @@ def main():
     for passage in range(args.passes):
         print(f"[diag] passage {passage + 1}/{args.passes} "
               f"({args.concurrent} places, {args.games} parties, "
-              f"{args.slow_sims}/{args.fast_sims} simulations)", flush=True)
+              f"{args.slow_sims}/{args.fast_sims} simulations, mode "
+              f"{args.mode})", flush=True)
         resume = mesurer_passage(args, args.mode, puzzles)
         resume["config"] = configuration
         resumes.append(resume)
-        print(formater_diagnostic(resume), flush=True)
+        if args.mode == 0:
+            # Rapport de phases vide par construction : le mode 0 sert a
+            # mesurer le cout du profilage, seul le debit Python parle.
+            print(f"[diag] instrumentation eteinte : appel C++ "
+                  f"{resume['temps']['zones_python_s']['appel_cpp']:.1f} s, "
+                  f"coups nouveaux/s "
+                  f"{resume['debit']['coups_nouveaux_par_s']:.2f}", flush=True)
+        else:
+            print(formater_diagnostic(resume), flush=True)
 
     print(formater_bilan(resumes), flush=True)
     with open(chemin_json, "w", encoding="utf-8") as fichier:

@@ -68,6 +68,10 @@ def analyser_arguments():
                         default="offline",
                         help="offline ecrit les metriques en local sans reseau, "
                              "disabled ne logue rien, online envoie directement")
+    parser.add_argument("--selfplay-diagnostics", type=int, default=0,
+                        choices=(0, 1, 2),
+                        help="0 desactive, 1 phases de generation, 2 phases et "
+                             "detail par worker ; n'influence pas la generation")
     return parser.parse_args()
 
 
@@ -105,6 +109,7 @@ def main():
         stockfish_elo=args.stockfish_elo,
         stockfish_nodes=200_000,
         data_workers=args.dataloader_workers,
+        selfplay_diagnostics=args.selfplay_diagnostics,
     )
 
 

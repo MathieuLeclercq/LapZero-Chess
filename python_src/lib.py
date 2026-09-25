@@ -402,12 +402,13 @@ def convert_game_results(games):
             key = reason_keys[reason_idx]
             stats[key] += 1
 
+        # Conversion par partie : un passage FP16 par tenseur au lieu d'un
+        # passage par position. La precision de chaque exemple est inchangee.
+        states_fp16 = states.astype(np.float16)
+        policies_fp16 = policies.astype(np.float16)
+        white_turns = states[:, 112, 0, 0] > 0.5
         for i in range(n):
-            tensor_np = states[i].astype(np.float16)
-            pi_np = policies[i].astype(np.float16)
-            is_white_turn = states[i][112, 0, 0] > 0.5
-            value = outcome if is_white_turn else -outcome
-
-            data.append((tensor_np, pi_np, value))
+            value = outcome if white_turns[i] else -outcome
+            data.append((states_fp16[i], policies_fp16[i], value))
 
     return data, stats
