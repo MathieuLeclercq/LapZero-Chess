@@ -56,6 +56,28 @@ attendant la décision de la passer à 512.
       production en attente :
       `superpowers/plans/2026-09-21-fin-de-lot-self-play.md`.
 
+## Audit de débit self-play (2026-09-25)
+
+Audit complet : `superpowers/specs/2026-09-25-selfplay-throughput-audit.md`.
+Résultats de l'instrumentation : `superpowers/specs/2026-09-25-instrumentation-selfplay-resultats.md`.
+
+- [x] A0, prérequis : instrumenter le vrai `generate_games` (phases disjointes,
+      compteurs, modes 0/1/2), binding de diagnostic, outil
+      `dev_tools/selfplay_diagnostics.py`, option `--selfplay-diagnostics` dans
+      `run_selftrain.py`. Premiers profils sur la machine de développement.
+- [ ] Exécuter le protocole de mesure sur le PC fixe, avec sa vraie configuration
+      (512 parties, 256 places, 700/100), et consigner le rapport.
+- [ ] Mesurer le coût propre du profilage par passages alternés mode 0 / mode 1,
+      répétés (la variance entre passages est forte).
+- [x] A3 premier palier : softmax par lignes, identique bit à bit, x5,8 au lot 256.
+- [x] A9 : déplacements des `GameResult` et conversion FP16 par partie.
+- [ ] A1 : rejeté en l'état (lancer à chaque tour casse la stabilité des formes de
+      lot, x2,6 plus lent). Reprendre seulement avec une variante qui stabilise les
+      formes sans ajouter plus de lignes GPU.
+- [ ] A2 (préparation et post-traitement parallèles), A4 (déduplication exacte des
+      requêtes d'un lot), A6 à A8, puis A10 à A12 : à choisir d'après le profil du
+      PC fixe, un levier à la fois.
+
 ## Diagnostic du plateau de septembre (run jn1mx1pu)
 
 Analyse du 2026-09-24 : pas de déclin pendant les 70 itérations, mais une marche

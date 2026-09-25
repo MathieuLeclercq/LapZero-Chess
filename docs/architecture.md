@@ -56,7 +56,9 @@ src/                     moteur C++
   search_executor.*      pool de workers persistants, barrières de vague
   mcts_observe.cpp       compteurs, invariants, inspect_tree
   search_timing.*        chronométrages optionnels par phase
+  softmax.hpp            softmax par lignes, identique bit à bit, parallèle au-delà du seuil
   selfplay_manager.*     parties concurrentes, pool GPU, puzzles tactiques
+  selfplay_timing.hpp    phases disjointes et compteurs du diagnostic de débit
   bindings.cpp           surface Python du module chess_engine
   main.cpp               exécutable de smoke tests C++
 python_src/              orchestration Python
@@ -76,7 +78,9 @@ python_src/              orchestration Python
   play_against_bot.py lib_gui.py   GUI Pygame
   lichess_games.py extract_lichess_puzzle.py extract_pgn_from_lichess.py
   build_puzzle_dataset.py  pipeline puzzles Lichess avec historique réel
-  dev_tools/             fuzz_movegen.py, endgame_conversion.py, selfplay_refill_bench.py
+  selfplay_diag.py       mise en forme pure du rapport de diagnostic self-play
+  dev_tools/             fuzz_movegen.py, endgame_conversion.py,
+                         selfplay_refill_bench.py, selfplay_diagnostics.py
   tests/                 pytest (UCI, MCTS, TT, bancs, règles)
   checkpoints/ checkpoints_onnx/ replay_buffer/ lichess_bot/
 tests/                   tests C++ (CTest) et données de référence
@@ -185,6 +189,23 @@ compteurs ; `tournament_elo.py` donne l'Elo par WHR.
 - **Le GPU est le goulet.** L'évaluateur représente 96.6 à 98.7 % du temps
   mural de la recherche. Toute optimisation doit passer par le remplissage ou
   la forme des lots, pas par la génération de coups.
+- **Formes de lot stables en self-play.** Mesure du 2026-09-25 sur la machine
+  de développement : un appel ONNX dont la forme vient de changer coûte environ
+  12 à 15 ms de plus qu'un appel à forme fixe, même pour une seule ligne
+  (banc `evaluator_batch_bench --variable`). Le report d'envoi du lot
+  self-play, qui laisse les feuilles s'accumuler, garde des formes stables ;
+  lancer à chaque tour a produit 30 474 changements de forme contre 238 et
+  2,6 fois plus de temps. La piste « lancer plus tôt » est donc rejetée en
+  l'état ; toute variante devra d'abord stabiliser les formes.
+- **Diagnostic de débit self-play.** `SelfPlayManager::set_diagnostics_mode`
+  (0 désactivé, 1 phases de premier niveau, 2 phases plus détail par worker)
+  remplit un `SelfPlayTiming` : phases disjointes plus résidu explicite, sous
+  durées ONNX cumulées, compteurs de lots, d'attente et de simulations. La
+  fonction Python `generate_self_play_games_with_diagnostics` et
+  `dev_tools/selfplay_diagnostics.py` l'exploitent ; `run_selftrain.py`
+  l'active par `--selfplay-diagnostics`. Le mode désactivé ne lit aucune
+  horloge. Les compteurs incrémentés dans la région OpenMP sont agrégés par
+  worker après la barrière, jamais par incrément concurrent.
 - **Instrument de qualité : le banc de puzzles.** Les puzzles sont présentés
   avec leur historique réel et une TT neuve par puzzle ; les comparaisons sont
   appariées. Toute modification de MCTS, de TT ou de réseau passe par lui avant
