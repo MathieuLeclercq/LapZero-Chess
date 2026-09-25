@@ -47,6 +47,15 @@ void verifier_identique(const std::vector<float>& logits, int rows,
         require_test(attendu[i] == obtenu[i],
                      "le softmax parallele n'est pas identique au sequentiel");
     }
+
+    // Le mode deploye, autorisation de parallelisation a faux, doit etre
+    // identique lui aussi : le desactiver ne change aucune valeur.
+    std::vector<float> deploye(attendu.size(), 0.0f);
+    softmax_rows(logits.data(), deploye.data(), rows, columns, false);
+    for (std::size_t i = 0; i < attendu.size(); ++i) {
+        require_test(attendu[i] == deploye[i],
+                     "le softmax deploye n'est pas identique au sequentiel");
+    }
     for (int row = 0; row < rows; ++row) {
         float somme = 0.0f;
         for (int i = 0; i < columns; ++i) {

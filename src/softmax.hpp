@@ -14,10 +14,16 @@ inline constexpr int SOFTMAX_PARALLEL_MIN_ROWS = 16;
 // le resultat est bit a bit le meme. La parallelisation porte sur les lignes,
 // jamais sur la reduction d'une ligne. Appele depuis une region OpenMP, le
 // chemin reste sequentiel pour ne pas imbriquer les equipes.
+//
+// Le mode parallele est desactive par defaut dans la production self-play :
+// mesure du 2026-09-25, a 128 places et machine chargee, une region OpenMP par
+// appel coutait plus cher que les exponentielles economisees (163 s de softmax
+// contre environ 50 s attendues en sequentiel). Le gain du banc isole, lot
+// fixe et machine au repos, ne se transpose pas.
 inline void softmax_rows(const float* logits, float* probabilities,
-                         int rows, int columns) {
+                         int rows, int columns, bool allow_parallel = true) {
     if (rows <= 0 || columns <= 0) return;
-    const bool parallel = rows >= SOFTMAX_PARALLEL_MIN_ROWS
+    const bool parallel = allow_parallel && rows >= SOFTMAX_PARALLEL_MIN_ROWS
         && !omp_in_parallel() && omp_get_max_threads() > 1;
 #pragma omp parallel for schedule(static) if(parallel)
     for (int row = 0; row < rows; ++row) {

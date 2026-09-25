@@ -80,10 +80,11 @@ void ONNXEvaluator::evaluate_batch(
         ? std::chrono::steady_clock::now()
         : std::chrono::steady_clock::time_point{};
 
-    // Softmax indépendant pour CHAQUE position du batch. Les lignes sont
-    // reparties entre threads au-dela du seuil, sans changer l'arithmetique
-    // d'une ligne ; les petits lots du bot restent sequentiels.
-    softmax_rows(policy_data, policies.data(), batch_size, 4672);
+    // Softmax indépendant pour CHAQUE position du batch. Le mode parallèle
+    // reste disponible dans softmax.hpp, mais il est désactivé ici : en
+    // contexte self-play chargé, sa région OpenMP par appel coûte plus cher
+    // que le calcul séquentiel (mesure du 2026-09-25).
+    softmax_rows(policy_data, policies.data(), batch_size, 4672, false);
     for (int b = 0; b < batch_size; ++b) {
         values[b] = value_data[b];
     }

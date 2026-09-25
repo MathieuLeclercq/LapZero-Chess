@@ -86,6 +86,32 @@ rapport a la production, donc les petits lots y sont surrepresentes.
 | 1 | 251,9 s | 90,8 % | 12,2 s | 2,5 % | 3,8 % | 65 020 | 1 009 697 | 15,5 |
 | 2 | 236,4 s | 90,2 % | 12,1 s | 2,8 % | 3,8 % | 61 471 | 927 366 | 15,1 |
 
+Un troisieme profil avec un pool de 128 places et 128 parties (mode 1,
+iter436, 700/100) donne une image plus proche de la production :
+
+| Mesure | Valeur | Part |
+|---|---:|---:|
+| Generation | 891,7 s | 100 % |
+| Appel a l'evaluateur | 662,1 s | 74,3 % |
+| dont ONNX Run | 497,9 s | 55,8 % |
+| dont softmax | 162,8 s | 18,2 % |
+| Collecte (descentes et tenseurs) | 117,9 s | 13,2 % |
+| Consommation des feuilles | 54,7 s | 6,1 % |
+| Assemblage et envoi | 28,3 s | 3,2 % |
+| Gestion des coups | 17,9 s | 2,0 % |
+| Validation et finalisation | 10,0 s | 1,1 % |
+| Lots | 81 833 appels, 4 321 164 lignes, moyenne 52,8, max 128 | |
+| Changements de taille | 796 | |
+| Attente | 180 096 tours sur 265 204 (68 %), 125,0 s cumulees (14 %), age max 146,1 ms | |
+| Simulations sans reseau | 247 636 sur 4 568 800 (5,4 %) | |
+
+Enseignements : la taille moyenne des lots grandit avec le pool (52,8 a 128
+places contre 15,1 a 32), l'evaluateur reste dominant mais les postes CPU
+deviennent visibles (collecte 13,2 %, consommation 6,1 %, assemblage 3,2 %), et
+le report d'envoi n'est plus negligeable (14 % du temps mural, age maximal
+146 ms). C'est la configuration ou A1 et A2 meritent d'etre etudies, avec la
+contrainte de formes stables mesuree au §5.
+
 - L'evaluateur domine, comme attendu. Le softmax represente environ 5 % de la
   generation aux lots reellement utilises.
 - Le report d'envoi existe (38 a 48 % des tours avec un lot pret non envoye)
@@ -137,20 +163,32 @@ ajouterait davantage de lignes GPU que cela n'en economiserait. Toute variante
 devra d'abord demontrer qu'elle reduit les changements de forme sans ajouter
 plus de travail GPU.
 
-## 6. A3 applique : softmax par lignes
+## 6. A3 : softmax par lignes, code mais desactive en production
 
 `src/softmax.hpp` repartit les lignes entre threads au-dela de 16 lignes, sans
 jamais parallelliser la reduction d'une ligne : le resultat est bit a bit
-identique au chemin sequentiel (tests dedies). En dessous du seuil, et depuis
-une region OpenMP, le chemin reste sequentiel.
+identique au chemin sequentiel, avec ou sans parallelisation (tests dedies).
 
-| Lot | Softmax avant | Softmax apres | Appel total |
-|---|---:|---:|---:|
-| 8 | 0,09 a 0,12 ms | 0,09 a 0,12 ms (seuil) | inchange |
-| 64 | 0,66 a 0,81 ms | 0,11 a 0,13 ms | inchange |
-| 256 | 2,46 a 2,79 ms | 0,40 a 0,44 ms | ~13 ms, domine par Run |
+Au banc isole, machine au repos et lot fixe, le gain est net :
 
-Gain attendu en production : quelques pourcents, le Run restant dominant.
+| Lot | Softmax sequentiel | Softmax parallele |
+|---|---:|---:|
+| 8 | 0,09 a 0,12 ms | 0,09 a 0,12 ms (seuil) |
+| 64 | 0,66 a 0,81 ms | 0,11 a 0,13 ms |
+| 256 | 2,46 a 2,79 ms | 0,40 a 0,44 ms |
+
+Mais le profil a 128 places contredit la transposition : 162,8 s de softmax en
+mode parallele pour 4,32 M de lignes, alors que le sequentiel en coute environ
+50 s au rythme mesure. Une region OpenMP par appel, sur une machine chargee et
+avec des tailles qui varient, coute plus cher que les exponentielles
+economisees. Le mode parallele est donc **desactive par defaut dans
+l'evaluateur** (`allow_parallel = false`), tout en restant teste et disponible.
+Le second palier de l'audit, un softmax calcule sur les seuls coups legaux
+(environ trente fois moins de travail), est la piste qui reste.
+
+Lecon generale : un gain de banc isole, lot fixe et machine au repos, ne se
+transpose pas forcement a une boucle self-play chargee ; la mesure de contexte
+prime.
 
 ## 7. A9 applique : copies en moins
 
@@ -163,7 +201,8 @@ Gain attendu en production : quelques pourcents, le Run restant dominant.
 ## 8. Suite
 
 1. Executer le protocole §2 sur le PC fixe, avec sa vraie configuration.
-2. Choisir le premier levier d'apres ce rapport : A1 seulement avec une
-   variante qui stabilise les formes, A2 si le post-traitement domine, A4 si
-   les doublons exacts sont frequents. A3 et A9 sont deja appliques.
+2. Choisir le premier levier d'apres ce rapport : A1 avec une variante qui
+   stabilise les formes (le report coute 14 % a 128 places, mais lancer a
+   chaque tour coute 2,6 fois le total), A2 si le post-traitement domine, A4 si
+   les doublons exacts sont frequents, puis le softmax legal.
 3. Repeter les passages pour la variabilite avant toute conclusion de debit.

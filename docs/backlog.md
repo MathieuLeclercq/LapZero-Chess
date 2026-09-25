@@ -71,7 +71,11 @@ Résultats de l'instrumentation : `superpowers/specs/2026-09-25-instrumentation-
       répétés : la dérive machine entre passages identiques (jusqu'à 20 %) dépasse
       tout effet du mode, aucun surcoût mesurable. Le coût reste borné par
       construction (aucun chronomètre par nœud, résidu sous 0,1 %).
-- [x] A3 premier palier : softmax par lignes, identique bit à bit, x5,8 au lot 256.
+- [x] A3 premier palier : softmax par lignes, identique bit à bit, x5,8 au lot 256
+      au banc isolé. Désactivé par défaut dans l'évaluateur : à 128 places et machine
+      chargée, la région OpenMP par appel coûte plus cher que le calcul économisé
+      (162,8 s contre environ 50 s attendues). Reste à faire : le softmax sur les seuls
+      coups légaux (environ 30 fois moins de travail).
 - [x] A9 : déplacements des `GameResult` et conversion FP16 par partie.
 - [ ] A1 : rejeté en l'état (lancer à chaque tour casse la stabilité des formes de
       lot, x2,6 plus lent). Reprendre seulement avec une variante qui stabilise les
