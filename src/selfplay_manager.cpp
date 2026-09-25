@@ -531,7 +531,7 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
         if (timing != nullptr) ++timing->loop_turns;
 
         // ==========================================================
-        // PHASE 1 : Séquentiel — Jouer les coups, gérer les fins
+        // PHASE 1 : Séquentiel - Jouer les coups, gérer les fins
         // ==========================================================
         {
             SelfPlayPhaseTimer phase_timer(
@@ -605,7 +605,7 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
         }
 
         // ==========================================================
-        // PHASE 2 : Parallèle (OpenMP) — Traversée MCTS
+        // PHASE 2 : Parallèle (OpenMP) - Traversée MCTS
         // ==========================================================
         for (auto& buf : thread_buffers) buf.clear();
         const bool detail_workers = (timing != nullptr && timing->mode >= 2);
@@ -702,7 +702,7 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
         }
 
         // ==========================================================
-        // PHASE 3 : Séquentiel — Fusion et batch GPU
+        // PHASE 3 : Séquentiel - Fusion et batch GPU
         // ==========================================================
         bool batch_full = false;
         bool all_blocked = true;

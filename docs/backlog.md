@@ -67,8 +67,10 @@ Résultats de l'instrumentation : `superpowers/specs/2026-09-25-instrumentation-
       `run_selftrain.py`. Premiers profils sur la machine de développement.
 - [ ] Exécuter le protocole de mesure sur le PC fixe, avec sa vraie configuration
       (512 parties, 256 places, 700/100), et consigner le rapport.
-- [ ] Mesurer le coût propre du profilage par passages alternés mode 0 / mode 1,
-      répétés (la variance entre passages est forte).
+- [x] Mesurer le coût propre du profilage par passages alternés mode 0 / mode 1,
+      répétés : la dérive machine entre passages identiques (jusqu'à 20 %) dépasse
+      tout effet du mode, aucun surcoût mesurable. Le coût reste borné par
+      construction (aucun chronomètre par nœud, résidu sous 0,1 %).
 - [x] A3 premier palier : softmax par lignes, identique bit à bit, x5,8 au lot 256.
 - [x] A9 : déplacements des `GameResult` et conversion FP16 par partie.
 - [ ] A1 : rejeté en l'état (lancer à chaque tour casse la stabilité des formes de

@@ -77,8 +77,8 @@ mode 0 / mode 1, repetes, car la variance entre passages est forte (voir §4).
 
 ## 4. Premiers profils (machine de developpement, 32 places)
 
-Configuration : iter436, 32 parties, 32 places, 700/100, puzzles actifs, mode 1
-ou 2. La queue de generation (peu de places actives) y est surrepresentee par
+Configuration : iter436, 32 parties, 32 places, 700/100, puzzles actifs, mode 1.
+La queue de generation (peu de places actives) y est surrepresentee par
 rapport a la production, donc les petits lots y sont surrepresentes.
 
 | Passage | Generation | Evaluateur | Softmax | Collecte | Consommation | Lots | Lignes | Moyenne |
@@ -97,10 +97,24 @@ rapport a la production, donc les petits lots y sont surrepresentes.
   selon le tirage des parties et l'etat de la machine. Toute comparaison A/B
   doit etre alternee et repetee ; un passage unique ne prouve rien.
 
-Le cout du profilage n'a pas pu etre isole par un simple mode 0 contre mode 1,
-la variance le recouvrant. Il est structurellement borne : une horloge par
-phase et par tour, deux instantanes de totaux par appel de lot, aucun
-chronometre par noeud, et le residu mesure reste sous 0,1 % de la generation.
+Le cout du profilage a ete cherche par une campagne alternee A/B/B/A sur la
+meme configuration : mode 1, mode 0, mode 0, mode 1.
+
+| Passage | Mode | Appel C++ | Generation | Coups nouveaux/s |
+|---|---:|---:|---:|---:|
+| 1 | 1 | 444,4 s | 442,1 s | 8,80 |
+| 2 | 0 | 530,1 s | 0 (silencieux) | 8,50 |
+| 3 | 0 | 442,3 s | 0 (silencieux) | 8,44 |
+| 4 | 1 | 415,0 s | 412,8 s | 9,20 |
+
+Deux passages identiques varient de 29 a 88 s (jusqu'a 20 %), et l'ordre
+observe est inverse de celui attendu si le profilage coutait : la derive de la
+machine domine, aucune conclusion de surcout n'est possible a cette echelle.
+D'autres processus utilisateur tournaient pendant la campagne (enregistreur
+vocal, application de traitement B-scan), ce que l'audit demande de
+documenter. Le cout reste borne par construction : une horloge par phase et
+par tour, aucun chronometre par noeud, deux instantanes de totaux par appel de
+lot, et le residu mesure reste sous 0,1 % de la generation.
 
 ## 5. Piste A1 rejetee en l'etat : lancer a chaque tour
 
@@ -150,6 +164,6 @@ Gain attendu en production : quelques pourcents, le Run restant dominant.
 
 1. Executer le protocole §2 sur le PC fixe, avec sa vraie configuration.
 2. Choisir le premier levier d'apres ce rapport : A1 seulement avec une
-   variante qui stabilise les formes, A2 si le post-traitement domine, A3 deja
-   fait, A4 si les doublons exacts sont frequents.
+   variante qui stabilise les formes, A2 si le post-traitement domine, A4 si
+   les doublons exacts sont frequents. A3 et A9 sont deja appliques.
 3. Repeter les passages pour la variabilite avant toute conclusion de debit.
