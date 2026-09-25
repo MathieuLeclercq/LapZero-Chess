@@ -43,8 +43,11 @@ complet :
 départs = fins = total partout. La confirmation à 700/100 sur les deux candidats de
 production, à horizon égal de 512 parties, donne (256, 512) 32,8 plies nouveaux par seconde
 et 30,47 ms par ply contre (512, 512) 35,6 et 28,09, soit x1,09, départs = fins = total
-partout. Le grand pool gagne environ 9 % au budget réel ; la production reste 256 en
-attendant la décision de la passer à 512.
+partout. Le grand pool gagne environ 9 % au budget réel **sur la machine de
+développement**. Testé sur le PC fixe, il est aussi rapide voire un peu plus lent que
+256 : A5 est écarté sur la machine cible et la production reste 256. Le profil A0
+du fixe devra expliquer pourquoi (probablement la part CPU et l'attente, qui grandissent
+avec le pool).
 
 - [x] Traiter R2 puis R1 du plan de correctifs, prérequis du rebalayage.
 - [x] Exécuter le rebalayage de virtual loss après R1 : comparaison A/B interleaved,
@@ -52,8 +55,9 @@ attendant la décision de la passer à 512.
       `superpowers/plans/2026-09-21-rebalayage-virtual-loss.md`.
 - [x] Mesurer et décider R9-B (fin de génération self-play) après le diagnostic R9-A :
       compteurs, génération finie et rapport honnête faits ; matrice de pools mesurée à
-      budget réduit puis confirmée à 700/100 (x1,09 pour 512 places), décision de
-      production en attente :
+      budget réduit puis confirmée à 700/100 (x1,09 pour 512 places) sur la machine de
+      développement. Sur le PC fixe, 512 est aussi rapide ou un peu plus lent que 256 :
+      A5 écarté, la production reste à 256 places :
       `superpowers/plans/2026-09-21-fin-de-lot-self-play.md`.
 
 ## Audit de débit self-play (2026-09-25)

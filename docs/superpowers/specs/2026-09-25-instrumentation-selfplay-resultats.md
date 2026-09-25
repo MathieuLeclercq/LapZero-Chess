@@ -201,8 +201,13 @@ prime.
 ## 8. Suite
 
 1. Executer le protocole §2 sur le PC fixe, avec sa vraie configuration.
-2. Choisir le premier levier d'apres ce rapport : A1 avec une variante qui
+2. Chercher le levier ailleurs que dans la taille du pool : A5 est ecarte sur
+   le fixe, ou 512 places est aussi rapide voire un peu plus lent que 256 (le
+   +9 % du §5 de l'audit etait une mesure de la machine de developpement). Le
+   profil devra expliquer pourquoi, en regardant la part CPU, l'attente et les
+   formes de lot, qui grandissent tous avec le pool.
+3. Choisir le premier levier d'apres ce rapport : A1 avec une variante qui
    stabilise les formes (le report coute 14 % a 128 places, mais lancer a
    chaque tour coute 2,6 fois le total), A2 si le post-traitement domine, A4 si
    les doublons exacts sont frequents, puis le softmax legal.
-3. Repeter les passages pour la variabilite avant toute conclusion de debit.
+4. Repeter les passages pour la variabilite avant toute conclusion de debit.
