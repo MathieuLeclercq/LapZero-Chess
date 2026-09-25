@@ -10,6 +10,27 @@
 #include "selfplay_manager.hpp"
 #include <piece.hpp>
 
+namespace {
+
+EvaluatorTotals delta_totals(const EvaluatorTotals& before,
+                             const EvaluatorTotals& after) {
+    EvaluatorTotals delta;
+    delta.run_calls = after.run_calls - before.run_calls;
+    delta.evaluated_rows = after.evaluated_rows - before.evaluated_rows;
+    delta.timing.run_ns = after.timing.run_ns - before.timing.run_ns;
+    delta.timing.softmax_ns =
+        after.timing.softmax_ns - before.timing.softmax_ns;
+    return delta;
+}
+
+std::uint64_t elapsed_ns_since(SelfPlayTiming::Clock::time_point start) {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            SelfPlayTiming::Clock::now() - start).count());
+}
+
+}  // namespace
+
 SelfPlayManager::SelfPlayManager(
     Evaluator* evaluator,
     int num_concurrent_games,
@@ -69,6 +90,43 @@ SelfPlayStats SelfPlayManager::get_stats() const {
     return stats;
 }
 
+void SelfPlayManager::set_diagnostics_mode(int mode) {
+    if (mode < 0 || mode > 2) {
+        throw std::invalid_argument(
+            "set_diagnostics_mode : mode attendu entre 0 et 2");
+    }
+    m_diagnostics_mode = mode;
+}
+
+int SelfPlayManager::get_diagnostics_mode() const {
+    return m_diagnostics_mode;
+}
+
+SelfPlayTiming SelfPlayManager::get_timing() const {
+    return m_timing;
+}
+
+void SelfPlayManager::expand_root(int game_idx) {
+    if (!m_timing.enabled) {
+        m_shared_mcts->expand_node_single(
+            m_roots[game_idx].get(), m_boards[game_idx]);
+        return;
+    }
+
+    m_timing.root_expansions++;
+    const EvaluatorTotals before = m_evaluator->diagnostic_totals();
+    m_shared_mcts->expand_node_single(
+        m_roots[game_idx].get(), m_boards[game_idx]);
+    const EvaluatorTotals delta =
+        delta_totals(before, m_evaluator->diagnostic_totals());
+    if (delta.run_calls > 0) {
+        m_timing.unit_network_calls += delta.run_calls;
+        m_timing.unit_network_rows += delta.evaluated_rows;
+        m_timing.root_expansion_onnx_run_ns += delta.timing.run_ns;
+        m_timing.root_expansion_onnx_softmax_ns += delta.timing.softmax_ns;
+    }
+}
+
 void SelfPlayManager::reset_game(int game_idx) {
     m_boards[game_idx].clear();
     m_boards[game_idx].setAmnesiaMode(false);
@@ -116,7 +174,7 @@ void SelfPlayManager::reset_game(int game_idx) {
     m_game_states[game_idx].clear();
     m_game_policies[game_idx].clear();
 
-    m_shared_mcts->expand_node_single(m_roots[game_idx].get(), m_boards[game_idx]);
+    expand_root(game_idx);
 
     if (m_tactical_boost[game_idx]) {
         // on force la tactique à trouver à être en slow move
@@ -144,6 +202,21 @@ void SelfPlayManager::apply_pending_noise(int game_idx) {
 void SelfPlayManager::execute_gpu_batch() {
     if (m_waiting_leaves.empty()) return;
     int current_batch_size = m_waiting_leaves.size();
+    SelfPlayTiming* const timing = m_timing.enabled ? &m_timing : nullptr;
+    if (timing != nullptr) {
+        timing->batch_calls++;
+        timing->batch_rows += static_cast<std::uint64_t>(current_batch_size);
+        if (current_batch_size > static_cast<int>(timing->max_batch_rows)) {
+            timing->max_batch_rows =
+                static_cast<std::uint64_t>(current_batch_size);
+        }
+        timing->batch_histogram[selfplay_batch_bucket(
+            static_cast<std::uint64_t>(current_batch_size))]++;
+        if (m_last_batch_rows != static_cast<std::uint64_t>(current_batch_size)) {
+            timing->batch_size_changes++;
+        }
+        m_last_batch_rows = static_cast<std::uint64_t>(current_batch_size);
+    }
 
     auto cleanup_waiting = [&]() noexcept {
         for (int i = 0; i < current_batch_size; ++i) {
@@ -161,45 +234,81 @@ void SelfPlayManager::execute_gpu_batch() {
     };
 
     try {
-        m_batch_input.resize(
-            static_cast<std::size_t>(current_batch_size) * 119 * 64);
-        m_evaluator->evaluate_batch(
-            m_batch_input, m_batch_policies, m_batch_values,
-            current_batch_size);
-        validate_network_output(
-            m_batch_policies, m_batch_values, current_batch_size);
+        const EvaluatorTotals totals_before = timing != nullptr
+            ? m_evaluator->diagnostic_totals()
+            : EvaluatorTotals{};
+        {
+            SelfPlayPhaseTimer evaluator_timer(
+                timing, SelfPlayPhase::BatchEvaluator);
+            // La reserve de fusion garde la capacite maximale ; l'appel a
+            // l'evaluateur ne voit que la taille utile exacte.
+            m_batch_input.resize(
+                static_cast<std::size_t>(current_batch_size) * 119 * 64);
+            m_evaluator->evaluate_batch(
+                m_batch_input, m_batch_policies, m_batch_values,
+                current_batch_size);
+        }
+        if (timing != nullptr) {
+            const EvaluatorTotals delta = delta_totals(
+                totals_before, m_evaluator->diagnostic_totals());
+            timing->onnx_run_ns += delta.timing.run_ns;
+            timing->onnx_softmax_ns += delta.timing.softmax_ns;
+        }
+        {
+            SelfPlayPhaseTimer validation_timer(
+                timing, SelfPlayPhase::BatchValidation);
+            validate_network_output(
+                m_batch_policies, m_batch_values, current_batch_size);
+        }
 
-        for (int i = 0; i < current_batch_size; ++i) {
-            int game_idx = m_waiting_game_indices[i];
-            int moves_played = m_waiting_moves_played[i];
+        {
+            SelfPlayPhaseTimer consume_timer(
+                timing, SelfPlayPhase::BatchConsume);
+            for (int i = 0; i < current_batch_size; ++i) {
+                int game_idx = m_waiting_game_indices[i];
+                int moves_played = m_waiting_moves_played[i];
 
-            float value = m_batch_values[i];
-            const float* single_policy =
-                m_batch_policies.data() + (i * 4672);
-            m_shared_mcts->expand_and_backup(
-                m_waiting_leaves[i], m_boards[game_idx], single_policy,
-                value, m_waiting_reservations[i]);
+                float value = m_batch_values[i];
+                const float* single_policy =
+                    m_batch_policies.data() + (i * 4672);
+                m_shared_mcts->expand_and_backup(
+                    m_waiting_leaves[i], m_boards[game_idx], single_policy,
+                    value, m_waiting_reservations[i]);
 
-            for (int k = 0; k < moves_played; ++k) {
-                m_boards[game_idx].undoMove();
+                for (int k = 0; k < moves_played; ++k) {
+                    m_boards[game_idx].undoMove();
+                }
+                m_waiting_moves_played[i] = 0;
+                m_sims_completed[game_idx]++;
+                if (timing != nullptr) timing->completed_sims++;
             }
-            m_waiting_moves_played[i] = 0;
-            m_sims_completed[game_idx]++;
         }
 
         // Une racine dont les enfants viennent d'etre materialises, par
         // expansion ou par hit de table pendant la descente, recoit ici le
         // bruit de Dirichlet en attente. Une seule application par coup.
-        for (int i = 0; i < current_batch_size; ++i) {
-            apply_pending_noise(m_waiting_game_indices[i]);
+        {
+            SelfPlayPhaseTimer finalize_timer(
+                timing, SelfPlayPhase::BatchFinalize);
+            for (int i = 0; i < current_batch_size; ++i) {
+                apply_pending_noise(m_waiting_game_indices[i]);
+            }
         }
     }
     catch (...) {
-        cleanup_waiting();
+        {
+            SelfPlayPhaseTimer finalize_timer(
+                timing, SelfPlayPhase::BatchFinalize);
+            cleanup_waiting();
+        }
         throw;
     }
 
-    cleanup_waiting();
+    {
+        SelfPlayPhaseTimer finalize_timer(
+            timing, SelfPlayPhase::BatchFinalize);
+        cleanup_waiting();
+    }
 }
 
 void SelfPlayManager::play_best_move(int game_idx) {
@@ -249,6 +358,7 @@ void SelfPlayManager::play_best_move(int game_idx) {
         m_boards[game_idx].getAlphaZeroTensor(tensor);
         m_game_states[game_idx].push_back(std::move(tensor));
         m_game_policies[game_idx].push_back(std::move(pi));
+        if (m_timing.enabled) m_timing.slow_examples_saved++;
     }
 
     // 4. Jouer le coup
@@ -288,7 +398,7 @@ void SelfPlayManager::play_best_move(int game_idx) {
     }
     else {
         m_roots[game_idx] = std::make_unique<MCTSNode>(0.0f);
-        m_shared_mcts->expand_node_single(m_roots[game_idx].get(), m_boards[game_idx]);
+        expand_root(game_idx);
     }
 
     roll_next_move(game_idx);
@@ -370,19 +480,39 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
         m_tactical_boost[i] = false;
     }
 
+    // Diagnostic de debit : remis a zero a chaque generation, meme desactive,
+    // pour qu'aucun appel n'herite du rapport precedent.
+    m_timing = SelfPlayTiming{};
+    m_timing.enabled = m_diagnostics_mode > 0;
+    m_timing.mode = m_diagnostics_mode;
+    m_last_batch_rows = 0;
+    SelfPlayTiming* const timing = m_timing.enabled ? &m_timing : nullptr;
+    m_evaluator->set_timing_enabled(m_timing.enabled);
+    const SearchCounters counters_before = m_shared_mcts->get_counters();
+    const SelfPlayTiming::Clock::time_point generation_start =
+        SelfPlayTiming::Clock::now();
+
     // Le quota est connu ici : au plus min(places, quota) parties demarrent.
     const int a_demarrer = std::min(m_num_concurrent_games,
                                     total_games_to_play);
-    for (int i = 0; i < a_demarrer; ++i) {
-        demarrer_slot(i);
+    {
+        SelfPlayPhaseTimer timer(timing, SelfPlayPhase::InitialSlots);
+        for (int i = 0; i < a_demarrer; ++i) {
+            demarrer_slot(i);
+        }
     }
 
     int games_completed = 0;
     auto start_time = std::chrono::steady_clock::now();
+    std::uint64_t pending_since_ns = 0;
 
     // Initialisation OpenMP
     const int num_threads = std::min(8, m_num_concurrent_games);
     std::vector<ThreadLocalBuffer> thread_buffers(num_threads);
+    std::vector<std::uint64_t> worker_iter_sum(
+        static_cast<std::size_t>(num_threads), 0);
+    std::vector<std::uint64_t> worker_iter_max(
+        static_cast<std::size_t>(num_threads), 0);
 
     for (auto& buf : thread_buffers) {
         buf.tensors.resize(m_num_concurrent_games * 119 * 64);
@@ -390,66 +520,79 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
     }
 
     while (games_completed < total_games_to_play) {
+        const SelfPlayTiming::Clock::time_point turn_start =
+            SelfPlayTiming::Clock::now();
+        if (timing != nullptr) ++timing->loop_turns;
 
         // ==========================================================
         // PHASE 1 : Séquentiel — Jouer les coups, gérer les fins
         // ==========================================================
-        for (int i = 0; i < m_num_concurrent_games; ++i) {
-            if (games_completed >= total_games_to_play) break;
-            if (!m_slot_active[i] || m_is_waiting[i]) continue;
+        {
+            SelfPlayPhaseTimer phase_timer(
+                timing, SelfPlayPhase::MoveManagement);
+            for (int i = 0; i < m_num_concurrent_games; ++i) {
+                if (games_completed >= total_games_to_play) break;
+                if (!m_slot_active[i] || m_is_waiting[i]) continue;
 
-            if (m_sims_completed[i] >= m_sims_target[i] && m_sims_target[i] > 0) {
-                play_best_move(i);
+                if (m_sims_completed[i] >= m_sims_target[i] && m_sims_target[i] > 0) {
+                    play_best_move(i);
 
-                if (m_roots[i] != nullptr && m_boards[i].getMoveHistory().size() >= MAX_PLIES_BEFORE_FORCED_DRAW) {
-                    m_roots[i].reset();
-                    m_sims_target[i] = 0;
-                    m_sims_completed[i] = 0;
-                }
-
-                if (m_roots[i] == nullptr) {
-                    GameResult res;
-                    res.move_count = m_game_states[i].size();
-                    res.total_real_moves = m_boards[i].getMoveHistory().size() + m_boards[i].getInitialPlyOffset();
-                    res.flat_states.reserve(res.move_count * 119 * 64);
-                    res.flat_policies.reserve(res.move_count * 4672);
-
-                    for (const auto& t : m_game_states[i])
-                        res.flat_states.insert(res.flat_states.end(), t.begin(), t.end());
-                    for (const auto& p : m_game_policies[i])
-                        res.flat_policies.insert(res.flat_policies.end(), p.begin(), p.end());
-
-                    const GameConclusion conclusion = conclure_partie(
-                        m_boards[i],
-                        m_boards[i].getMoveHistory().size()
-                            >= MAX_PLIES_BEFORE_FORCED_DRAW);
-                    res.final_outcome = conclusion.final_outcome;
-                    res.end_reason = conclusion.end_reason;
-
-                    m_finished_games.push_back(res);
-                    games_completed++;
-                    m_stats.games_completed++;
-
-                    if (games_completed % 16 == 0 || games_completed == total_games_to_play) {
-                        auto now = std::chrono::steady_clock::now();
-                        double elapsed = std::chrono::duration<double>(now - start_time).count();
-                        double speed = games_completed / elapsed;
-                        double eta = (total_games_to_play - games_completed) / speed;
-                        std::cout << "\r  Self-play: " << games_completed << "/" << total_games_to_play
-                            << " (" << std::fixed << std::setprecision(1) << speed << " parties/s"
-                            << ", ETA: " << (int)(eta / 60) << "m" << (int)((int)eta % 60) << "s)"
-                            << std::flush;
+                    if (m_roots[i] != nullptr && m_boards[i].getMoveHistory().size() >= MAX_PLIES_BEFORE_FORCED_DRAW) {
+                        m_roots[i].reset();
+                        m_sims_target[i] = 0;
+                        m_sims_completed[i] = 0;
                     }
 
-                    if (m_stats.games_started
-                            < static_cast<std::uint64_t>(
-                                  total_games_to_play)) {
-                        demarrer_slot(i);
-                    }
-                    else {
-                        // Plus aucun depart a effectuer : la place reste
-                        // inactive et les parties engagees finissent.
-                        m_slot_active[i] = false;
+                    if (m_roots[i] == nullptr) {
+                        GameResult res;
+                        res.move_count = m_game_states[i].size();
+                        res.total_real_moves = m_boards[i].getMoveHistory().size() + m_boards[i].getInitialPlyOffset();
+                        res.flat_states.reserve(res.move_count * 119 * 64);
+                        res.flat_policies.reserve(res.move_count * 4672);
+
+                        for (const auto& t : m_game_states[i])
+                            res.flat_states.insert(res.flat_states.end(), t.begin(), t.end());
+                        for (const auto& p : m_game_policies[i])
+                            res.flat_policies.insert(res.flat_policies.end(), p.begin(), p.end());
+
+                        // Les donnees par coup appartiennent desormais au
+                        // resultat : la place libere sa copie au lieu de la
+                        // garder jusqu'a un eventuel redemarrage.
+                        m_game_states[i].clear();
+                        m_game_policies[i].clear();
+
+                        const GameConclusion conclusion = conclure_partie(
+                            m_boards[i],
+                            m_boards[i].getMoveHistory().size()
+                                >= MAX_PLIES_BEFORE_FORCED_DRAW);
+                        res.final_outcome = conclusion.final_outcome;
+                        res.end_reason = conclusion.end_reason;
+
+                        m_finished_games.push_back(std::move(res));
+                        games_completed++;
+                        m_stats.games_completed++;
+
+                        if (games_completed % 16 == 0 || games_completed == total_games_to_play) {
+                            auto now = std::chrono::steady_clock::now();
+                            double elapsed = std::chrono::duration<double>(now - start_time).count();
+                            double speed = games_completed / elapsed;
+                            double eta = (total_games_to_play - games_completed) / speed;
+                            std::cout << "\r  Self-play: " << games_completed << "/" << total_games_to_play
+                                << " (" << std::fixed << std::setprecision(1) << speed << " parties/s"
+                                << ", ETA: " << (int)(eta / 60) << "m" << (int)((int)eta % 60) << "s)"
+                                << std::flush;
+                        }
+
+                        if (m_stats.games_started
+                                < static_cast<std::uint64_t>(
+                                      total_games_to_play)) {
+                            demarrer_slot(i);
+                        }
+                        else {
+                            // Plus aucun depart a effectuer : la place reste
+                            // inactive et les parties engagees finissent.
+                            m_slot_active[i] = false;
+                        }
                     }
                 }
             }
@@ -459,39 +602,82 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
         // PHASE 2 : Parallèle (OpenMP) — Traversée MCTS
         // ==========================================================
         for (auto& buf : thread_buffers) buf.clear();
+        const bool detail_workers = (timing != nullptr && timing->mode >= 2);
+        if (detail_workers) {
+            timing->worker_count = static_cast<std::uint64_t>(num_threads);
+        }
 
-#pragma omp parallel num_threads(num_threads)
         {
-            int tid = omp_get_thread_num();
-            auto& buf = thread_buffers[tid];
+            SelfPlayPhaseTimer collection_timer(
+                timing, SelfPlayPhase::Collection);
+#pragma omp parallel num_threads(num_threads)
+            {
+                int tid = omp_get_thread_num();
+                auto& buf = thread_buffers[tid];
+                std::uint64_t iter_sum = 0;
+                std::uint64_t iter_max = 0;
 
 #pragma omp for schedule(dynamic, 4)
-            for (int i = 0; i < m_num_concurrent_games; ++i) {
-                if (!m_slot_active[i] || m_is_waiting[i]
-                    || m_sims_completed[i] >= m_sims_target[i]) continue;
+                for (int i = 0; i < m_num_concurrent_games; ++i) {
+                    const SelfPlayTiming::Clock::time_point item_start =
+                        detail_workers
+                            ? SelfPlayTiming::Clock::now()
+                            : SelfPlayTiming::Clock::time_point{};
+                    [&]() {
+                        if (!m_slot_active[i] || m_is_waiting[i]
+                            || m_sims_completed[i] >= m_sims_target[i]) {
+                            return;
+                        }
 
-                int moves_played = 0;
-                PathReservation reservation;
-                MCTSNode* leaf = m_shared_mcts->advance_to_leaf(
-                    m_roots[i].get(), m_boards[i], 1.4f, moves_played,
-                    reservation);
+                        int moves_played = 0;
+                        PathReservation reservation;
+                        MCTSNode* leaf = m_shared_mcts->advance_to_leaf(
+                            m_roots[i].get(), m_boards[i], 1.4f, moves_played,
+                            reservation);
 
-                if (leaf != nullptr) {
-                    buf.leaves.push_back(leaf);
-                    buf.game_indices.push_back(i);
-                    buf.moves_played.push_back(moves_played);
-                    buf.reservations.push_back(std::move(reservation));
+                        if (leaf != nullptr) {
+                            if (timing != nullptr) timing->leaf_requests++;
+                            buf.leaves.push_back(leaf);
+                            buf.game_indices.push_back(i);
+                            buf.moves_played.push_back(moves_played);
+                            buf.reservations.push_back(std::move(reservation));
 
-                    m_boards[i].getAlphaZeroTensor(buf.tensor_scratch);
-                    int offset = (buf.leaves.size() - 1) * 119 * 64;
-                    std::copy(buf.tensor_scratch.begin(),
-                        buf.tensor_scratch.end(),
-                        buf.tensors.begin() + offset);
+                            m_boards[i].getAlphaZeroTensor(buf.tensor_scratch);
+                            int offset = (buf.leaves.size() - 1) * 119 * 64;
+                            std::copy(buf.tensor_scratch.begin(),
+                                buf.tensor_scratch.end(),
+                                buf.tensors.begin() + offset);
 
-                    m_is_waiting[i] = true;
+                            m_is_waiting[i] = true;
+                        }
+                        else {
+                            m_sims_completed[i]++;
+                            if (timing != nullptr) {
+                                timing->completed_sims++;
+                                timing->no_network_sims++;
+                            }
+                        }
+                    }();
+                    if (detail_workers) {
+                        const std::uint64_t item_ns =
+                            elapsed_ns_since(item_start);
+                        iter_sum += item_ns;
+                        if (item_ns > iter_max) iter_max = item_ns;
+                    }
                 }
-                else {
-                    m_sims_completed[i]++;
+
+                if (detail_workers) {
+                    worker_iter_sum[static_cast<std::size_t>(tid)] = iter_sum;
+                    worker_iter_max[static_cast<std::size_t>(tid)] = iter_max;
+                }
+            }
+        }
+        if (detail_workers) {
+            for (std::size_t worker = 0; worker < worker_iter_sum.size();
+                 ++worker) {
+                timing->worker_busy_sum_ns += worker_iter_sum[worker];
+                if (worker_iter_max[worker] > timing->worker_busy_max_ns) {
+                    timing->worker_busy_max_ns = worker_iter_max[worker];
                 }
             }
         }
@@ -499,44 +685,87 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
         // ==========================================================
         // PHASE 3 : Séquentiel — Fusion et batch GPU
         // ==========================================================
-        m_batch_input.resize(
-            static_cast<std::size_t>(m_num_concurrent_games) * 119 * 64);
-        for (auto& buf : thread_buffers) {
-            for (size_t j = 0; j < buf.leaves.size(); ++j) {
-                if ((int)m_waiting_leaves.size() >= m_num_concurrent_games) break;
-
-                m_waiting_leaves.push_back(buf.leaves[j]);
-                m_waiting_game_indices.push_back(buf.game_indices[j]);
-                m_waiting_moves_played.push_back(buf.moves_played[j]);
-                m_waiting_reservations.push_back(
-                    std::move(buf.reservations[j]));
-
-                int batch_offset = m_waiting_leaves.size() - 1;
-                std::copy(buf.tensors.begin() + j * 119 * 64,
-                    buf.tensors.begin() + (j + 1) * 119 * 64,
-                    m_batch_input.begin() + batch_offset * 119 * 64);
-            }
-        }
-
-        // Exécution : batch plein OU tout le monde est bloqué
-        bool batch_full = ((int)m_waiting_leaves.size() >= m_num_concurrent_games);
-
+        bool batch_full = false;
         bool all_blocked = true;
-        for (int i = 0; i < m_num_concurrent_games; ++i) {
-            if (m_slot_active[i] && m_sims_completed[i] < m_sims_target[i]
-                && !m_is_waiting[i]) {
-                all_blocked = false;
-                break;
+        {
+            SelfPlayPhaseTimer assembly_timer(
+                timing, SelfPlayPhase::AssemblyDispatch);
+            // Capacite maximale avant fusion : la reduction a la taille utile
+            // appartient a la phase d'evaluation, qui la refait juste avant
+            // l'appel ONNX.
+            m_batch_input.resize(
+                static_cast<std::size_t>(m_num_concurrent_games) * 119 * 64);
+            for (auto& buf : thread_buffers) {
+                for (size_t j = 0; j < buf.leaves.size(); ++j) {
+                    if ((int)m_waiting_leaves.size() >= m_num_concurrent_games) break;
+
+                    m_waiting_leaves.push_back(buf.leaves[j]);
+                    m_waiting_game_indices.push_back(buf.game_indices[j]);
+                    m_waiting_moves_played.push_back(buf.moves_played[j]);
+                    m_waiting_reservations.push_back(
+                        std::move(buf.reservations[j]));
+
+                    int batch_offset = m_waiting_leaves.size() - 1;
+                    std::copy(buf.tensors.begin() + j * 119 * 64,
+                        buf.tensors.begin() + (j + 1) * 119 * 64,
+                        m_batch_input.begin() + batch_offset * 119 * 64);
+                }
+            }
+
+            // Exécution : batch plein OU tout le monde est bloqué
+            batch_full = ((int)m_waiting_leaves.size() >= m_num_concurrent_games);
+
+            for (int i = 0; i < m_num_concurrent_games; ++i) {
+                if (m_slot_active[i] && m_sims_completed[i] < m_sims_target[i]
+                    && !m_is_waiting[i]) {
+                    all_blocked = false;
+                    break;
+                }
             }
         }
 
         if ((batch_full || all_blocked) && !m_waiting_leaves.empty()) {
             execute_gpu_batch();
+            if (timing != nullptr && pending_since_ns != 0) {
+                const std::uint64_t age_ns =
+                    elapsed_ns_since(generation_start) - pending_since_ns;
+                if (age_ns > timing->max_pending_age_ns) {
+                    timing->max_pending_age_ns = age_ns;
+                }
+                pending_since_ns = 0;
+            }
+        }
+        else if (timing != nullptr && !m_waiting_leaves.empty()) {
+            timing->deferred_turns++;
+            timing->deferred_wall_ns += elapsed_ns_since(turn_start);
+            if (pending_since_ns == 0) {
+                pending_since_ns = elapsed_ns_since(generation_start);
+            }
         }
     }
 
+    if (timing != nullptr) {
+        timing->generation_wall_ns = elapsed_ns_since(generation_start);
+        std::uint64_t phases_ns = 0;
+        for (const std::uint64_t phase_ns : timing->phase_wall_ns) {
+            phases_ns += phase_ns;
+        }
+        timing->generation_other_wall_ns =
+            static_cast<std::int64_t>(timing->generation_wall_ns)
+            - static_cast<std::int64_t>(phases_ns);
+
+        const SearchCounters counters_after = m_shared_mcts->get_counters();
+        timing->terminal_sims =
+            counters_after.terminal_hits - counters_before.terminal_hits;
+        timing->tt_hits = counters_after.tt_hits - counters_before.tt_hits;
+        timing->tt_misses =
+            counters_after.tt_misses - counters_before.tt_misses;
+    }
+
     std::cout << std::endl;
-    return m_finished_games;
+    // Les donnees appartiennent a l'appelant : le membre est vide apres le
+    // retour, sans copie du vecteur ni des GameResult.
+    return std::move(m_finished_games);
 }
 
 void SelfPlayManager::load_tactical_puzzles(const std::string& filepath) {

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BISHOP', 'BLACK', 'CHECKMATE', 'Chessboard', 'Color', 'DRAW_50_MOVES', 'DRAW_INSUFF_MATERIAL', 'DRAW_REPETITION', 'EvaluationCacheKey', 'GameResult', 'GameState', 'KING', 'KNIGHT', 'MCTS', 'Move', 'MoveStats', 'NONE', 'NO_COLOR', 'ONGOING', 'ONNXEvaluator', 'PAWN', 'Piece', 'PieceType', 'QUEEN', 'ROOK', 'STALEMATE', 'SearchCounters', 'SearchTiming', 'SelfPlayStats', 'Square', 'TreeReport', 'WHITE', 'encode_move', 'generate_self_play_games', 'generate_self_play_games_with_stats']
+__all__: list[str] = ['BISHOP', 'BLACK', 'CHECKMATE', 'Chessboard', 'Color', 'DRAW_50_MOVES', 'DRAW_INSUFF_MATERIAL', 'DRAW_REPETITION', 'EvaluationCacheKey', 'GameResult', 'GameState', 'KING', 'KNIGHT', 'MCTS', 'Move', 'MoveStats', 'NONE', 'NO_COLOR', 'ONGOING', 'ONNXEvaluator', 'PAWN', 'Piece', 'PieceType', 'QUEEN', 'ROOK', 'STALEMATE', 'SearchCounters', 'SearchTiming', 'SelfPlayStats', 'SelfPlayTiming', 'Square', 'TreeReport', 'WHITE', 'encode_move', 'generate_self_play_games', 'generate_self_play_games_with_diagnostics', 'generate_self_play_games_with_stats']
 class Chessboard:
     def __init__(self) -> None:
         ...
@@ -411,6 +411,100 @@ class SelfPlayStats:
     @property
     def replayed_plies(self) -> int:
         ...
+class SelfPlayTiming:
+    @property
+    def batch_calls(self) -> int:
+        ...
+    @property
+    def batch_histogram(self) -> typing.Annotated[list[int], "FixedSize(10)"]:
+        ...
+    @property
+    def batch_rows(self) -> int:
+        ...
+    @property
+    def batch_size_changes(self) -> int:
+        ...
+    @property
+    def completed_sims(self) -> int:
+        ...
+    @property
+    def deferred_turns(self) -> int:
+        ...
+    @property
+    def deferred_wall_ns(self) -> int:
+        ...
+    @property
+    def enabled(self) -> bool:
+        ...
+    @property
+    def generation_other_wall_ns(self) -> int:
+        ...
+    @property
+    def generation_wall_ns(self) -> int:
+        ...
+    @property
+    def leaf_requests(self) -> int:
+        ...
+    @property
+    def loop_turns(self) -> int:
+        ...
+    @property
+    def max_batch_rows(self) -> int:
+        ...
+    @property
+    def max_pending_age_ns(self) -> int:
+        ...
+    @property
+    def mode(self) -> int:
+        ...
+    @property
+    def no_network_sims(self) -> int:
+        ...
+    @property
+    def onnx_run_ns(self) -> int:
+        ...
+    @property
+    def onnx_softmax_ns(self) -> int:
+        ...
+    @property
+    def phase_wall_ns(self) -> typing.Annotated[list[int], "FixedSize(8)"]:
+        ...
+    @property
+    def root_expansion_onnx_run_ns(self) -> int:
+        ...
+    @property
+    def root_expansion_onnx_softmax_ns(self) -> int:
+        ...
+    @property
+    def root_expansions(self) -> int:
+        ...
+    @property
+    def slow_examples_saved(self) -> int:
+        ...
+    @property
+    def terminal_sims(self) -> int:
+        ...
+    @property
+    def tt_hits(self) -> int:
+        ...
+    @property
+    def tt_misses(self) -> int:
+        ...
+    @property
+    def unit_network_calls(self) -> int:
+        ...
+    @property
+    def unit_network_rows(self) -> int:
+        ...
+    @property
+    def worker_busy_max_ns(self) -> int:
+        ...
+    @property
+    def worker_busy_sum_ns(self) -> int:
+        ...
+    @property
+    def worker_count(self) -> int:
+        ...
 class Square:
     @typing.overload
     def __init__(self) -> None:
@@ -457,6 +551,10 @@ def encode_move(orig_f: typing.SupportsInt | typing.SupportsIndex, orig_r: typin
 def generate_self_play_games(evaluator: ONNXEvaluator, concurrent_games: typing.SupportsInt | typing.SupportsIndex, slow_sims: typing.SupportsInt | typing.SupportsIndex, fast_sims: typing.SupportsInt | typing.SupportsIndex, total_games: typing.SupportsInt | typing.SupportsIndex, slow_ratio: typing.SupportsFloat | typing.SupportsIndex = 0.25, tt_size: typing.SupportsInt | typing.SupportsIndex = 2097143, puzzles_path: str = '../training_data/puzzles_train.txt') -> list[GameResult]:
     """
     Génère un dataset de parties en self-play en utilisant un batching GPU massif.
+    """
+def generate_self_play_games_with_diagnostics(evaluator: ONNXEvaluator, concurrent_games: typing.SupportsInt | typing.SupportsIndex, slow_sims: typing.SupportsInt | typing.SupportsIndex, fast_sims: typing.SupportsInt | typing.SupportsIndex, total_games: typing.SupportsInt | typing.SupportsIndex, slow_ratio: typing.SupportsFloat | typing.SupportsIndex = 0.25, tt_size: typing.SupportsInt | typing.SupportsIndex = 2097143, puzzles_path: str = '../training_data/puzzles_train.txt', diagnostics_mode: typing.SupportsInt | typing.SupportsIndex = 1) -> tuple[list[GameResult], SelfPlayStats, SelfPlayTiming]:
+    """
+    Genere des parties de self-play et renvoie compteurs et phases.
     """
 def generate_self_play_games_with_stats(evaluator: ONNXEvaluator, concurrent_games: typing.SupportsInt | typing.SupportsIndex, slow_sims: typing.SupportsInt | typing.SupportsIndex, fast_sims: typing.SupportsInt | typing.SupportsIndex, total_games: typing.SupportsInt | typing.SupportsIndex, slow_ratio: typing.SupportsFloat | typing.SupportsIndex = 0.25, tt_size: typing.SupportsInt | typing.SupportsIndex = 2097143, puzzles_path: str = '../training_data/puzzles_train.txt') -> tuple[list[GameResult], SelfPlayStats]:
     """

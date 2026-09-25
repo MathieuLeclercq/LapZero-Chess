@@ -32,6 +32,10 @@ void ONNXEvaluator::evaluate_batch(
     const char* input_names[] = { "input" };
     const char* output_names[] = { "policy", "value" };
 
+    // Comptes toujours tenus : ils ne dependent pas des horloges.
+    m_totals.run_calls++;
+    m_totals.evaluated_rows += static_cast<std::uint64_t>(batch_size);
+
     auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
     // Le nombre EXACT d'éléments attendus pour ce batch
@@ -62,6 +66,7 @@ void ONNXEvaluator::evaluate_batch(
         m_last_timing.run_ns = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::steady_clock::now() - run_start).count());
+        m_totals.timing.run_ns += m_last_timing.run_ns;
     }
 
     const float* policy_data = output_tensors[0].GetTensorData<float>();
@@ -100,5 +105,6 @@ void ONNXEvaluator::evaluate_batch(
         m_last_timing.softmax_ns = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::steady_clock::now() - softmax_start).count());
+        m_totals.timing.softmax_ns += m_last_timing.softmax_ns;
     }
 }

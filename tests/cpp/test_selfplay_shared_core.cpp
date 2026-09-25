@@ -698,6 +698,156 @@ void test_virtual_loss_is_inert_in_self_play() {
     }
 }
 
+void test_diagnostics_are_inert_and_match_the_evaluator() {
+    // Meme graine et meme bruit : activer le diagnostic ne doit changer ni le
+    // deroulement ni les parties produites.
+    const std::uint32_t graine = 424242;
+
+    ControlledEvaluator evaluator_reference;
+    std::vector<GameResult> reference;
+    {
+        SelfPlayManager manager(&evaluator_reference, 2, 2, 1, 0.5f, 8192);
+        SelfPlayTestAccess::seed_rng(manager, graine);
+        MCTSTestAccess::seed_noise(SelfPlayTestAccess::mcts(manager), graine);
+        reference = manager.generate_games(2);
+        const SelfPlayTiming timing = manager.get_timing();
+        require_test(!timing.enabled,
+                     "the disabled diagnostic is marked enabled");
+        require_test(timing.batch_calls == 0 && timing.batch_rows == 0
+                         && timing.generation_wall_ns == 0,
+                     "the disabled diagnostic filled its report");
+    }
+
+    ControlledEvaluator evaluator_diagnostic;
+    std::vector<GameResult> candidate;
+    SelfPlayTiming timing;
+    {
+        SelfPlayManager manager(&evaluator_diagnostic, 2, 2, 1, 0.5f, 8192);
+        SelfPlayTestAccess::seed_rng(manager, graine);
+        MCTSTestAccess::seed_noise(SelfPlayTestAccess::mcts(manager), graine);
+        manager.set_diagnostics_mode(1);
+        candidate = manager.generate_games(2);
+        timing = manager.get_timing();
+    }
+
+    require_test(timing.enabled, "the diagnostic did not turn on");
+    require_test(timing.mode == 1, "the diagnostic reported the wrong mode");
+    require_test(reference.size() == candidate.size(),
+                 "the diagnostic changed the game count");
+    std::uint64_t exemples_sauves = 0;
+    for (std::size_t i = 0; i < reference.size(); ++i) {
+        require_test(reference[i].flat_states == candidate[i].flat_states,
+                     "the diagnostic changed the self-play states");
+        require_test(reference[i].flat_policies == candidate[i].flat_policies,
+                     "the diagnostic changed the self-play policies");
+        require_test(reference[i].final_outcome == candidate[i].final_outcome
+                         && reference[i].end_reason == candidate[i].end_reason,
+                     "the diagnostic changed the self-play outcome");
+        exemples_sauves += static_cast<std::uint64_t>(
+            candidate[i].move_count);
+    }
+
+    // Les compteurs reseau doivent coller aux appels reellement recus par
+    // l'evaluateur, expansions de racine comprises.
+    const std::uint64_t appels_physiques =
+        static_cast<std::uint64_t>(evaluator_diagnostic.batch_sizes.size());
+    require_test(timing.unit_network_calls + timing.batch_calls
+                     == appels_physiques,
+                 "the network call counters do not match the evaluator");
+    std::uint64_t lignes_evaluees = 0;
+    for (const int taille : evaluator_diagnostic.batch_sizes) {
+        lignes_evaluees += static_cast<std::uint64_t>(taille);
+    }
+    require_test(timing.unit_network_rows + timing.batch_rows
+                     == lignes_evaluees,
+                 "the evaluated row counters do not match the evaluator");
+    require_test(timing.unit_network_calls == timing.unit_network_rows,
+                 "a root expansion evaluated more than one line");
+
+    std::uint64_t histogramme = 0;
+    for (const std::uint64_t compte : timing.batch_histogram) {
+        histogramme += compte;
+    }
+    require_test(histogramme == timing.batch_calls,
+                 "the batch histogram does not sum to the physical calls");
+    require_test(timing.leaf_requests == timing.batch_rows,
+                 "a collected request was never launched");
+    require_test(timing.batch_calls > 0 && timing.batch_rows > 0,
+                 "the diagnostic saw no network batch");
+    require_test(timing.completed_sims
+                     == timing.batch_rows + timing.no_network_sims,
+                 "the completed simulation counter is inconsistent");
+    require_test(timing.terminal_sims <= timing.no_network_sims,
+                 "terminal simulations exceed the no-network simulations");
+    require_test(timing.slow_examples_saved == exemples_sauves,
+                 "the saved example counter does not match the results");
+    require_test(timing.root_expansions > 0,
+                 "the root expansion counter stayed empty");
+
+    std::uint64_t phases_ns = 0;
+    for (const std::uint64_t phase_ns : timing.phase_wall_ns) {
+        phases_ns += phase_ns;
+    }
+    require_test(timing.generation_wall_ns >= phases_ns,
+                 "the phases exceed the generation wall time");
+    require_test(timing.generation_other_wall_ns
+                     == static_cast<std::int64_t>(
+                            timing.generation_wall_ns)
+                        - static_cast<std::int64_t>(phases_ns),
+                 "the residue does not close the phase budget");
+    require_test(timing.deferred_turns <= timing.loop_turns,
+                 "there are more deferred turns than turns");
+    require_test(timing.deferred_wall_ns <= timing.generation_wall_ns,
+                 "the deferred turns exceed the generation");
+}
+
+void test_diagnostics_mode_two_reports_worker_times() {
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 4, 2, 1, 0.5f, 8192);
+    SelfPlayTestAccess::seed_rng(manager, 7);
+    manager.set_diagnostics_mode(2);
+    const std::vector<GameResult> games = manager.generate_games(4);
+    const SelfPlayTiming timing = manager.get_timing();
+
+    require_test(games.size() == 4, "mode 2 changed the game count");
+    require_test(timing.mode == 2, "mode 2 was not reported");
+    require_test(timing.worker_count == 4, "the wrong worker count was used");
+    require_test(timing.worker_busy_max_ns > 0,
+                 "no worker work was measured");
+    require_test(timing.worker_busy_sum_ns >= timing.worker_busy_max_ns,
+                 "the worker sum is smaller than its maximum");
+    require_test(timing.worker_busy_sum_ns
+                     <= timing.generation_wall_ns * timing.worker_count,
+                 "the worker work exceeds the available wall time");
+}
+
+void test_diagnostics_are_reset_between_generations() {
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 2, 2, 1, 0.5f, 8192);
+    SelfPlayTestAccess::seed_rng(manager, 99);
+    manager.set_diagnostics_mode(1);
+
+    manager.generate_games(2);
+    const EvaluatorTotals before = evaluator.diagnostic_totals();
+    manager.generate_games(2);
+    const EvaluatorTotals after = evaluator.diagnostic_totals();
+    const SelfPlayTiming second = manager.get_timing();
+
+    require_test(second.batch_calls + second.unit_network_calls
+                     == after.run_calls - before.run_calls,
+                 "the second generation accumulated the first counters");
+    require_test(second.batch_rows + second.unit_network_rows
+                     == after.evaluated_rows - before.evaluated_rows,
+                 "the second generation accumulated the first rows");
+
+    manager.set_diagnostics_mode(0);
+    manager.generate_games(2);
+    const SelfPlayTiming disabled = manager.get_timing();
+    require_test(!disabled.enabled && disabled.batch_calls == 0
+                     && disabled.generation_wall_ns == 0,
+                 "turning the diagnostic off left a stale report");
+}
+
 }  // namespace
 
 int main() {
@@ -717,6 +867,9 @@ int main() {
         test_slow_puzzle_game_is_not_lost_behind_a_fast_one();
         test_game_conclusion_signs_and_reasons();
         test_virtual_loss_is_inert_in_self_play();
+        test_diagnostics_are_inert_and_match_the_evaluator();
+        test_diagnostics_mode_two_reports_worker_times();
+        test_diagnostics_are_reset_between_generations();
         return 0;
     }
     catch (const std::exception& error) {

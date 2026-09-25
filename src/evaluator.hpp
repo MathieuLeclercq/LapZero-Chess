@@ -2,12 +2,29 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <vector>
 
 // Taille de la politique encodee, commune au contrat de l'evaluateur et a ses
 // consommateurs.
 inline constexpr int POLICY_SIZE = 4672;
+
+// Chronometrage interne optionnel d'un evaluateur, desactive par defaut. Sert a
+// separer session->Run du softmax C++.
+struct EvaluatorTiming {
+    std::uint64_t run_ns = 0;
+    std::uint64_t softmax_ns = 0;
+};
+
+// Totaux cumules depuis la construction, lus par l'instrumentation du
+// self-play. Les appels et les lignes sont toujours comptes ; les durees ne le
+// sont que si le chronometrage interne est actif.
+struct EvaluatorTotals {
+    std::uint64_t run_calls = 0;
+    std::uint64_t evaluated_rows = 0;
+    EvaluatorTiming timing;
+};
 
 // Valide une sortie d'evaluateur AVANT tout acces par indice ou insertion en
 // table. Le lot entier est valide avant d'en consommer le premier element : un
@@ -48,6 +65,16 @@ public:
                                 std::vector<float>& policies,
                                 std::vector<float>& values,
                                 int batch_size) = 0;
+
+    // Active ou desactive les horloges internes. Les evaluateurs de test qui
+    // ne mesurent rien gardent l'implementation vide.
+    virtual void set_timing_enabled(bool /*enabled*/) {}
+
+    // Totaux cumules, remis a zero uniquement par le constructeur du
+    // evaluateur. Un evaluateur de test rend des compteurs nuls.
+    virtual EvaluatorTotals diagnostic_totals() const {
+        return EvaluatorTotals{};
+    }
 
     void evaluate(const std::vector<float>& input,
                   std::vector<float>& policy,

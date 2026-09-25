@@ -7,6 +7,7 @@
 #include "chessboard.hpp"
 #include "evaluator.hpp"
 #include "mcts.hpp"
+#include "selfplay_timing.hpp"
 
 
 struct GameResult {
@@ -97,6 +98,12 @@ private:
     // 0 pour desactiver. Toujours a zero en production.
     std::vector<int> m_forced_end_plies;
 
+    // Diagnostic de debit, desactive par defaut. m_last_batch_rows sert au
+    // comptage des changements de taille entre deux appels physiques.
+    int m_diagnostics_mode = 0;
+    SelfPlayTiming m_timing;
+    std::uint64_t m_last_batch_rows = 0;
+
     Evaluator* m_evaluator;
 
     // L'état complet des parties en cours
@@ -148,6 +155,11 @@ public:
     std::vector<GameResult> generate_games(int total_games_to_play);
     SelfPlayStats get_stats() const;
 
+    // 0 desactive, 1 phases de premier niveau, 2 phases plus detail par worker.
+    void set_diagnostics_mode(int mode);
+    int get_diagnostics_mode() const;
+    SelfPlayTiming get_timing() const;
+
 private:
     void reset_game(int game_idx);
     void demarrer_slot(int game_idx);
@@ -156,4 +168,7 @@ private:
     void execute_gpu_batch();
     void apply_pending_noise(int game_idx);
     void load_tactical_puzzles(const std::string& filepath);
+    // Enveloppe les expansions de racine du gestionnaire pour y accrocher les
+    // compteurs et les sous-durees ONNX quand le diagnostic est actif.
+    void expand_root(int game_idx);
 };

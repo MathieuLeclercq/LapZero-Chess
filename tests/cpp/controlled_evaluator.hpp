@@ -21,6 +21,7 @@ public:
     };
 
     std::vector<int> batch_sizes;
+    EvaluatorTotals totals;
     int fail_on_call = 0;
     int truncate_policy_on_call = 0;
     int truncate_values_on_call = 0;
@@ -48,6 +49,8 @@ public:
         }
 
         batch_sizes.push_back(batch_size);
+        totals.run_calls++;
+        totals.evaluated_rows += static_cast<std::uint64_t>(batch_size);
         if (before_evaluate) {
             before_evaluate();
         }
@@ -68,6 +71,8 @@ public:
         }
         appliquer_corruption(policies, values, batch_size, call);
     }
+
+    EvaluatorTotals diagnostic_totals() const override { return totals; }
 
 private:
     std::size_t ligne_visee(int batch_size) const {

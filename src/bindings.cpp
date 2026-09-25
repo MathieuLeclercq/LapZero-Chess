@@ -313,6 +313,45 @@ PYBIND11_MODULE(chess_engine, m) {
         .def_readonly("new_plies", &SelfPlayStats::new_plies)
         .def_readonly("replayed_plies", &SelfPlayStats::replayed_plies);
 
+    // Rapport de diagnostic d'une generation self-play. Les champs de phase
+    // sont disjoints au premier niveau ; les sous-durees ONNX ne doivent pas
+    // etre ajoutees aux phases qui les contiennent.
+    py::class_<SelfPlayTiming>(m, "SelfPlayTiming")
+        .def_readonly("enabled", &SelfPlayTiming::enabled)
+        .def_readonly("mode", &SelfPlayTiming::mode)
+        .def_readonly("generation_wall_ns", &SelfPlayTiming::generation_wall_ns)
+        .def_readonly("phase_wall_ns", &SelfPlayTiming::phase_wall_ns)
+        .def_readonly("generation_other_wall_ns",
+                      &SelfPlayTiming::generation_other_wall_ns)
+        .def_readonly("onnx_run_ns", &SelfPlayTiming::onnx_run_ns)
+        .def_readonly("onnx_softmax_ns", &SelfPlayTiming::onnx_softmax_ns)
+        .def_readonly("root_expansion_onnx_run_ns",
+                      &SelfPlayTiming::root_expansion_onnx_run_ns)
+        .def_readonly("root_expansion_onnx_softmax_ns",
+                      &SelfPlayTiming::root_expansion_onnx_softmax_ns)
+        .def_readonly("loop_turns", &SelfPlayTiming::loop_turns)
+        .def_readonly("batch_calls", &SelfPlayTiming::batch_calls)
+        .def_readonly("batch_rows", &SelfPlayTiming::batch_rows)
+        .def_readonly("unit_network_calls", &SelfPlayTiming::unit_network_calls)
+        .def_readonly("unit_network_rows", &SelfPlayTiming::unit_network_rows)
+        .def_readonly("max_batch_rows", &SelfPlayTiming::max_batch_rows)
+        .def_readonly("batch_size_changes", &SelfPlayTiming::batch_size_changes)
+        .def_readonly("deferred_turns", &SelfPlayTiming::deferred_turns)
+        .def_readonly("deferred_wall_ns", &SelfPlayTiming::deferred_wall_ns)
+        .def_readonly("max_pending_age_ns", &SelfPlayTiming::max_pending_age_ns)
+        .def_readonly("root_expansions", &SelfPlayTiming::root_expansions)
+        .def_readonly("leaf_requests", &SelfPlayTiming::leaf_requests)
+        .def_readonly("completed_sims", &SelfPlayTiming::completed_sims)
+        .def_readonly("no_network_sims", &SelfPlayTiming::no_network_sims)
+        .def_readonly("terminal_sims", &SelfPlayTiming::terminal_sims)
+        .def_readonly("tt_hits", &SelfPlayTiming::tt_hits)
+        .def_readonly("tt_misses", &SelfPlayTiming::tt_misses)
+        .def_readonly("slow_examples_saved", &SelfPlayTiming::slow_examples_saved)
+        .def_readonly("batch_histogram", &SelfPlayTiming::batch_histogram)
+        .def_readonly("worker_count", &SelfPlayTiming::worker_count)
+        .def_readonly("worker_busy_sum_ns", &SelfPlayTiming::worker_busy_sum_ns)
+        .def_readonly("worker_busy_max_ns", &SelfPlayTiming::worker_busy_max_ns);
+
     // --- Fonction de génération globale ---
     m.def("generate_self_play_games", [](
         ONNXEvaluator* evaluator,
@@ -363,4 +402,36 @@ PYBIND11_MODULE(chess_engine, m) {
         py::arg("tt_size") = 2097143,
         py::arg("puzzles_path") = "../training_data/puzzles_train.txt",
         "Genere des parties de self-play et renvoie aussi les compteurs.");
+
+    // Variante de diagnostic de debit. Le mode 0 desactive l'instrumentation,
+    // le mode 1 chronometre les phases de premier niveau, le mode 2 ajoute le
+    // travail mural par worker de la collecte. Le chemin de production garde
+    // ses fonctions intactes.
+    m.def("generate_self_play_games_with_diagnostics", [](
+        ONNXEvaluator* evaluator,
+        int concurrent_games,
+        int slow_sims, int fast_sims,
+        int total_games, float slow_ratio,
+        size_t tt_size = 2097143,
+        const std::string& puzzles_path = "../training_data/puzzles_train.txt",
+        int diagnostics_mode = 1) {
+            SelfPlayManager manager(
+                evaluator, concurrent_games, slow_sims, fast_sims, slow_ratio,
+                tt_size, puzzles_path);
+            manager.set_diagnostics_mode(diagnostics_mode);
+            auto parties = manager.generate_games(total_games);
+            return std::make_tuple(std::move(parties), manager.get_stats(),
+                                   manager.get_timing());
+        },
+        py::call_guard<py::gil_scoped_release>(),
+        py::arg("evaluator"),
+        py::arg("concurrent_games"),
+        py::arg("slow_sims"),
+        py::arg("fast_sims"),
+        py::arg("total_games"),
+        py::arg("slow_ratio") = 0.25f,
+        py::arg("tt_size") = 2097143,
+        py::arg("puzzles_path") = "../training_data/puzzles_train.txt",
+        py::arg("diagnostics_mode") = 1,
+        "Genere des parties de self-play et renvoie compteurs et phases.");
 }
