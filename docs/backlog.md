@@ -118,6 +118,13 @@ d'entraînement, pas sur celle-ci.
 - [ ] Seulement ensuite, et un paramètre à la fois : ratio d'échantillonnage (14 vers 4 à 8)
       ou taille du buffer, puis décroissance du learning rate, constant à 4e-5 depuis avril.
 
+## Réparer le tournoi WHR
+
+- [ ] `tournament_elo.py` : migrer vers l'interface `whr.Base` de whr 2.2 ou revenir à la
+      bibliothèque d'avril, rendre le chemin Stockfish configurable, et vérifier si
+      `tournament_data/tournament_state.whr` (avril) est relisible. Les matchs à deux
+      modèles passent par `match_modeles.py` en attendant.
+
 ## Banc de puzzles batché sur GPU (inspiration self-play)
 
 Le banc actuel tourne sur 16 processus CPU, chaque puzzle cherche seul avec un lot de 8,
