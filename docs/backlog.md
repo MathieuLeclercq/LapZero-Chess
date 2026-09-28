@@ -100,7 +100,11 @@ d'entraînement, pas sur celle-ci.
       (Stockfish 19, code actuel), au moins 128 parties.
 - [ ] Match direct iter436 contre iter504 avec `tournament_elo.py`, au moins 200 parties :
       même moteur de chaque côté, aucune ancre externe à calibrer.
-- [ ] Banc de puzzles sur iter504, comparaison appariée avec la référence iter436.
+- [x] Banc de puzzles sur le dernier checkpoint disponible (iter643, 500 puzzles),
+      comparaison appariée avec la référence iter436 : 397 contre 372, discordants
+      36 contre 11, McNemar p = 3e-4. Les écarts contre iter506 (391) et iter519
+      (394) ne sont pas significatifs sur 500 puzzles. Archive :
+      `bench_puzzles_results/iter643/`.
 - [ ] Évaluation en cours d'entraînement : 64 parties toutes les 16 itérations au lieu de
       16 toutes les 4, même coût, intervalle deux fois plus étroit par point.
 - [ ] Loss de validation sur un lot fixe de parties jamais entraînées, pour distinguer
@@ -496,6 +500,13 @@ médian **-0,089** ; value -0,216 contre +0,930, écart **-1,064** ; résolution
 p = 3e-13. Le raccourci est donc bien présent et coûte cher en mesure. Le chiffre
 à suivre doit converger vers zéro après réentraînement sur les données corrigées.
 Campagne complète : `bench_puzzles_results/iter436/hist-2500.md`.
+
+**Suivi sur 500 puzzles (protocole de référence).** Écart médian du prior
+avec/sans historique : -0,082 (iter436), -0,031 (iter506), -0,039 (iter519),
+-0,021 (iter643) ; écart de value : -1,04, -0,86, -0,84, -0,60. La résolution en
+recherche progresse de 372 à 397 sur 500, l'essentiel du gain étant acquis entre
+436 et 506. Le raccourci se réduit mais n'est pas désappris, ce qui reste à
+confirmer sur 2500 puzzles.
 
 Le banc doit rester disjoint de l'entraînement, c'est le cas aujourd'hui
 (0 recouvrement entre les 5 000 puzzles du banc et les 100 000 de

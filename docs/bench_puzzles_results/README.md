@@ -18,6 +18,8 @@ fichiers gardent les noms produits par le banc :
 |---|---|---|
 | `iter436` | `2026_04_30_09h53_iter436_unsupervised.onnx` | 500 et 2500 puzzles |
 | `iter506` | `2026_09_22_17h14_iter506_unsupervised.onnx` | 500 puzzles |
+| `iter519` | `2026_09_24_15h18_iter519_unsupervised.onnx` | 500 puzzles |
+| `iter643` | `2026_09_24_15h18_iter643_unsupervised.onnx` | 500 puzzles |
 
 ## Protocole de référence
 
