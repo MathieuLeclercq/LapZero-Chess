@@ -233,7 +233,7 @@ def main():
     parser.add_argument("--simulations-ouverture", type=int, default=32)
     parser.add_argument("--plafond-plies", type=int, default=300)
     parser.add_argument("--graine", type=int, default=2026)
-    parser.add_argument("--sortie", type=Path, default=REPERTOIRE / "match_results")
+    parser.add_argument("--sortie", type=Path, default=REPERTOIRE.parent / "out" / "matchs")
     args = parser.parse_args()
 
     for chemin in (args.modele_a, args.modele_b):
