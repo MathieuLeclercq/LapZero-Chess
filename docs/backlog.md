@@ -105,6 +105,10 @@ d'entraînement, pas sur celle-ci.
       16 toutes les 4, même coût, intervalle deux fois plus étroit par point.
 - [ ] Loss de validation sur un lot fixe de parties jamais entraînées, pour distinguer
       apprentissage et surapprentissage du buffer.
+- [ ] Dérive de vitesse du self-play (-7,5 % sur le run iqhbi2n5) : relancer le processus depuis le
+      dernier checkpoint et comparer les premières générations ; puis A/B/B/A iter516 contre
+      iter643 avec `dev_tools/selfplay_diagnostics.py` pour séparer l'effet du réseau de celui de
+      la machine.
 - [ ] Seulement ensuite, et un paramètre à la fois : ratio d'échantillonnage (14 vers 4 à 8)
       ou taille du buffer, puis décroissance du learning rate, constant à 4e-5 depuis avril.
 
