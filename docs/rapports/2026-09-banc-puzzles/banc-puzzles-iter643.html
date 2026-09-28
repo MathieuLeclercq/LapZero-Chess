@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Banc de puzzles LapZero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
+<style>
+:root {
+  --bg: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-3: #85847d;
+  --rule: #e2e1dc;
+  --grid: #ecebe7;
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --gain: #2a78d6;
+  --loss: #e34948;
+  --band-s1: rgba(42, 120, 214, 0.13);
+  --band-s2: rgba(235, 104, 52, 0.13);
+  --ring: #fcfcfb;
+  --tip-bg: #0b0b0b;
+  --tip-ink: #ffffff;
+  --serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --ink-3: #8e8d85;
+    --rule: #34342f;
+    --grid: #292926;
+    --s1: #3987e5;
+    --s2: #d95926;
+    --gain: #3987e5;
+    --loss: #e66767;
+    --band-s1: rgba(57, 135, 229, 0.2);
+    --band-s2: rgba(217, 89, 38, 0.2);
+    --ring: #1a1a19;
+    --tip-bg: #f2f1ec;
+    --tip-ink: #0b0b0b;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1a1a19;
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --ink-3: #8e8d85;
+  --rule: #34342f;
+  --grid: #292926;
+  --s1: #3987e5;
+  --s2: #d95926;
+  --gain: #3987e5;
+  --loss: #e66767;
+  --band-s1: rgba(57, 135, 229, 0.2);
+  --band-s2: rgba(217, 89, 38, 0.2);
+  --ring: #1a1a19;
+  --tip-bg: #f2f1ec;
+  --tip-ink: #0b0b0b;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+}
+.page {
+  max-width: 880px;
+  margin: 0 auto;
+  padding-inline: 20px;
+  padding-block: 40px 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 56px;
+}
+h1, h2 {
+  font-family: var(--serif);
+  font-weight: 600;
+  text-wrap: balance;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: clamp(2rem, 5vw, 2.9rem); line-height: 1.1; }
+h2 { font-size: 1.5rem; line-height: 1.25; }
+p { margin: 0; max-width: 66ch; }
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+header { display: flex; flex-direction: column; gap: 18px; }
+.lede { font-size: 1.12rem; color: var(--ink-2); }
+section { display: flex; flex-direction: column; gap: 18px; }
+.note { font-size: 0.9rem; color: var(--ink-2); }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* Chiffres cles */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  border-top: 1px solid var(--rule);
+  padding-top: 22px;
+}
+.kpi { display: flex; flex-direction: column; gap: 6px; }
+.kpi-label {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.kpi-value {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 2.5rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-detail { font-size: 0.9rem; color: var(--ink-2); }
+.swatch {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: 0;
+}
+
+/* Legende */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  font-size: 0.88rem;
+  color: var(--ink-2);
+}
+.legend span { display: inline-flex; align-items: center; }
+.legend .dot-hollow {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--ink-3);
+  margin-right: 6px;
+  box-sizing: border-box;
+}
+
+.chart { width: 100%; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { fill: var(--ink-2); font-family: var(--mono); font-size: 12px; }
+.chart .t-strong { fill: var(--ink); font-weight: 500; }
+.chart .t-label { fill: var(--ink); font-family: var(--sans); font-size: 13px; }
+.chart .grid { stroke: var(--grid); stroke-width: 1; }
+.chart .zero { stroke: var(--ink-3); stroke-width: 1; }
+.hit { fill: transparent; cursor: default; outline: none; }
+.hit:focus-visible { stroke: var(--ink); stroke-width: 2; }
+
+/* Gagnes et perdus */
+.panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 32px;
+}
+.panel { display: flex; flex-direction: column; gap: 10px; }
+.panel h3 {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.div-row {
+  display: grid;
+  grid-template-columns: 7.2em minmax(0, 1fr) minmax(0, 1fr) 6.4em;
+  align-items: center;
+  column-gap: 0;
+  font-size: 0.86rem;
+  padding-block: 5px;
+  outline: none;
+}
+.div-row:focus-visible { box-shadow: 0 0 0 2px var(--ink); border-radius: 3px; }
+.div-row.total { border-top: 1px solid var(--rule); padding-top: 10px; margin-top: 4px; }
+.div-row .lab { font-family: var(--mono); font-size: 0.8rem; color: var(--ink-2); }
+.div-row.total .lab { color: var(--ink); font-weight: 500; }
+.half { display: flex; align-items: center; height: 18px; gap: 6px; }
+.half.left { justify-content: flex-end; border-right: 1px solid var(--ink-3); padding-right: 2px; }
+.half.right { justify-content: flex-start; padding-left: 2px; }
+.bar { height: 14px; }
+.bar.loss { background: var(--loss); border-radius: 4px 0 0 4px; }
+.bar.gain { background: var(--gain); border-radius: 0 4px 4px 0; }
+.half .v { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.div-row .res { text-align: right; font-family: var(--mono); font-size: 0.78rem; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.div-row .res b { font-weight: 500; color: var(--ink); display: block; }
+.div-row .res span { color: var(--ink-2); }
+.div-head {
+  display: grid;
+  grid-template-columns: 7.2em minmax(0, 1fr) minmax(0, 1fr) 6.4em;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.div-head .l { text-align: right; padding-right: 8px; }
+.div-head .r { padding-left: 8px; }
+.div-head .e { text-align: right; }
+
+/* Petits multiples */
+.multiples {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 28px;
+}
+.multiple { display: flex; flex-direction: column; gap: 6px; }
+.multiple h3 { margin: 0; font-size: 0.92rem; font-weight: 600; line-height: 1.35; }
+.multiple p { font-size: 0.84rem; color: var(--ink-2); }
+
+/* Lecture */
+.reading { display: flex; flex-direction: column; gap: 14px; margin: 0; padding: 0; list-style: none; }
+.reading li {
+  display: grid;
+  grid-template-columns: 1.6em minmax(0, 1fr);
+  max-width: 70ch;
+}
+.reading li::before {
+  content: "";
+  width: 8px; height: 8px;
+  margin-top: 0.62em;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+.reading strong { font-weight: 600; }
+
+/* Methode */
+details {
+  border-top: 1px solid var(--rule);
+  padding-top: 16px;
+}
+summary {
+  cursor: pointer;
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: 1.25rem;
+}
+summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.method { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; font-size: 0.86rem; min-width: 520px; }
+th, td { padding: 6px 12px 6px 0; text-align: right; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+th:first-child, td:first-child { text-align: left; }
+th { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-2); font-weight: 500; }
+td { font-family: var(--mono); }
+td:first-child { font-family: var(--sans); }
+code { font-family: var(--mono); font-size: 0.86em; }
+
+/* Infobulle */
+#tip {
+  position: fixed;
+  z-index: 10;
+  pointer-events: none;
+  max-width: 280px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--tip-bg);
+  color: var(--tip-ink);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre-line;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+
+@media (max-width: 720px) {
+  .kpis { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .panels { grid-template-columns: minmax(0, 1fr); }
+  .multiples { grid-template-columns: minmax(0, 1fr); }
+  .page { gap: 44px; padding-block: 28px 56px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+<main class="page">
+  <header>
+    <p class="eyebrow">Banc tactique · 500 puzzles Lichess · 700 simulations</p>
+    <h1>Le réseau progresse, la recherche plafonne</h1>
+    <p class="lede">Quatre checkpoints ont joué les mêmes 500 puzzles dans des conditions identiques. iter643, dernier checkpoint du run du week-end, en résout 79,4 % avec la recherche, soit 25 de plus qu'iter436, le checkpoint d'avril. Mais presque tout ce gain était déjà acquis à iter506. Depuis, c'est surtout le réseau seul, sans recherche, qui continue de s'améliorer.</p>
+  </header>
+
+  <section class="kpis" aria-label="Chiffres clés d'iter643">
+    <div class="kpi">
+      <span class="kpi-label"><span class="swatch" style="background: var(--s1)"></span>Avec recherche</span>
+      <span class="kpi-value">79,4 %</span>
+      <span class="kpi-detail">+5,0 points depuis iter436 (p = 0,0003), mais +1,2 depuis iter506, dans le bruit.</span>
+    </div>
+    <div class="kpi">
+      <span class="kpi-label"><span class="swatch" style="background: var(--s2)"></span>Réseau seul</span>
+      <span class="kpi-value">53,4 %</span>
+      <span class="kpi-detail">+6,2 points depuis iter436 (p = 0,0001), dont +4,2 depuis iter506 (p = 0,0015).</span>
+    </div>
+    <div class="kpi">
+      <span class="kpi-label">Raccourci de l'historique</span>
+      <span class="kpi-value">3,4 pts</span>
+      <span class="kpi-detail">d'avantage sans historique, contre 7,2 pour iter436. L'écart n'est plus significatif (p = 0,09).</span>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-taux">
+    <h2 id="h-taux">Taux de résolution, checkpoint par checkpoint</h2>
+    <p>Un puzzle est réussi si le premier coup joué est celui de la solution. « Avec recherche » : le coup le plus visité après 700 simulations de MCTS. « Réseau seul » : le coup de plus forte probabilité dans la policy, sans aucune recherche. Les bandes montrent l'intervalle de confiance à 95 %.</p>
+    <div class="legend" aria-hidden="true">
+      <span><span class="swatch" style="background: var(--s1)"></span>Avec recherche, 700 simulations</span>
+      <span><span class="swatch" style="background: var(--s2)"></span>Réseau seul</span>
+    </div>
+    <div class="chart" id="chart-taux" role="img" aria-label="Taux de résolution. Avec recherche : 74,4, 78,2, 78,8 et 79,4 pour cent. Réseau seul : 47,2, 49,2, 50,4 et 53,4 pour cent."></div>
+    <p class="note">Les checkpoints sont espacés régulièrement ; l'écart en itérations est indiqué sous l'axe. iter436 date du 30 avril, les trois autres de septembre.</p>
+  </section>
+
+  <section aria-labelledby="h-paires">
+    <h2 id="h-paires">Puzzles gagnés et perdus</h2>
+    <p>Comme chaque modèle joue exactement les mêmes puzzles, on peut compter, d'un checkpoint à l'autre, ceux qui passent de raté à réussi et l'inverse. C'est une mesure bien plus sensible que la simple différence des taux : le test de McNemar ne regarde que ces puzzles qui changent de camp.</p>
+    <div class="panels">
+      <div class="panel">
+        <h3><span class="swatch" style="background: var(--s1)"></span>Avec recherche</h3>
+        <div class="div-head" aria-hidden="true"><span></span><span class="l">perdus</span><span class="r">gagnés</span><span class="e">solde</span></div>
+        <div id="div-recherche"></div>
+      </div>
+      <div class="panel">
+        <h3><span class="swatch" style="background: var(--s2)"></span>Réseau seul</h3>
+        <div class="div-head" aria-hidden="true"><span></span><span class="l">perdus</span><span class="r">gagnés</span><span class="e">solde</span></div>
+        <div id="div-reseau"></div>
+      </div>
+    </div>
+    <p class="note">Avec recherche, un seul pas est significatif : iter436 vers iter506. Pour le réseau seul, le dernier pas, iter519 vers iter643, l'est aussi (p = 0,02).</p>
+  </section>
+
+  <section aria-labelledby="h-histo">
+    <h2 id="h-histo">Le raccourci de l'historique se referme</h2>
+    <p>Chaque puzzle est aussi joué une seconde fois avec l'historique effacé, comme une position isolée. En avril, le réseau réussissait nettement mieux sans historique : il avait appris à reconnaître une position de puzzle à l'absence de passé, et à y chercher une tactique. Les données corrigées de septembre devaient défaire ce raccourci. Les trois mesures ci-dessous valent zéro quand il a disparu.</p>
+    <div class="multiples">
+      <div class="multiple">
+        <h3>Avantage de résolution sans historique</h3>
+        <p>En points, avec recherche. Barres : IC95.</p>
+        <div class="chart" id="m-gap" role="img" aria-label="Avantage sans historique : 7,2, 1,8, 1,6 et 3,4 points."></div>
+      </div>
+      <div class="multiple">
+        <h3>Écart de probabilité du coup solution</h3>
+        <p>Médiane de (avec − sans) historique.</p>
+        <div class="chart" id="m-prior" role="img" aria-label="Écart médian de prior : moins 0,082, moins 0,031, moins 0,039, moins 0,021."></div>
+      </div>
+      <div class="multiple">
+        <h3>Écart d'évaluation de la position</h3>
+        <p>Médiane de (avec − sans) de la value, sur une échelle de −1 à +1.</p>
+        <div class="chart" id="m-value" role="img" aria-label="Écart médian de value : moins 1,04, moins 0,86, moins 0,84, moins 0,60."></div>
+      </div>
+    </div>
+    <p class="note">L'écart de probabilité a presque disparu. L'écart d'évaluation reste le plus gros résidu : avec son historique réel, iter643 juge encore la position du puzzle nettement moins bonne que sans. La remontée de l'avantage à iter643 vient du bras sans historique, passé de 80,4 à 82,8 %, pas d'une baisse du bras avec historique.</p>
+  </section>
+
+  <section aria-labelledby="h-types">
+    <h2 id="h-types">Par type de puzzle</h2>
+    <p>Résolution avec recherche, d'iter436 à iter643. Les difficultés sont les tiers du classement Lichess des 500 puzzles ; les thèmes viennent des étiquettes Lichess et se recouvrent, un puzzle pouvant être à la fois un mat et une finale.</p>
+    <div class="legend" aria-hidden="true">
+      <span><span class="dot-hollow"></span>iter436, avril</span>
+      <span><span class="swatch" style="background: var(--s1); border-radius: 50%"></span>iter643, septembre</span>
+    </div>
+    <div class="chart" id="chart-types" role="img" aria-label="Résolution par type de puzzle, iter436 puis iter643. Voir le tableau dans la section méthode."></div>
+    <p class="note">Les finales sont la seule famille qui ne progresse pas : 76,7 % puis 77,7 % (p = 0,77). Les mats ont fait leur bond d'un coup, entre iter436 et iter506, puis n'ont plus bougé. Le milieu de partie progresse de façon continue.</p>
+  </section>
+
+  <section aria-labelledby="h-lecture">
+    <h2 id="h-lecture">Ce qu'on peut en conclure</h2>
+    <ul class="reading">
+      <li><span><strong>Le réseau apprend encore.</strong> Le réseau seul gagne 21 puzzles nets entre iter506 et iter643, et la probabilité médiane qu'il donne au coup solution passe de 0,33 à 0,38. L'entraînement du week-end n'a pas été perdu.</span></li>
+      <li><span><strong>À 700 simulations, la recherche masque ce progrès.</strong> Une bonne partie des puzzles que le réseau apprend à voir d'emblée, la recherche les trouvait déjà. C'est cohérent avec la courbe contre Stockfish, plate depuis le 22 septembre.</span></li>
+      <li><span><strong>Le grand saut date du renouvellement du buffer.</strong> Entre iter436 et iter506, le buffer d'avril a été entièrement remplacé par des données corrigées (parties longues conservées, puzzles avec leur historique). C'est là que le score avec recherche et le raccourci de l'historique ont le plus bougé.</span></li>
+      <li><span><strong>Les finales stagnent.</strong> C'est le seul thème sans progrès, et c'est cohérent avec la hausse des nulles par la règle des 50 coups et par le plafond de coups dans le self-play. À surveiller en priorité.</span></li>
+      <li><span><strong>Limite de mesure.</strong> Sur 500 puzzles, l'intervalle de confiance d'un taux est d'environ ±3,6 points. Les écarts entre checkpoints consécutifs, avec recherche, sont sous ce seuil. Un passage sur les 2500 puzzles d'iter643, apparié à celui d'iter436 qui existe déjà, ramènerait la précision vers ±1,6 point et dirait si le plateau est réel.</span></li>
+    </ul>
+  </section>
+
+  <details>
+    <summary>Méthode et données</summary>
+    <div class="method">
+      <p>Les quatre passages utilisent le même fichier de banc (<code>data/puzzles_bench.txt</code>, empreinte <code>a60b584a…</code>), les mêmes 500 lignes, et les mêmes réglages : 700 simulations, c_puct 1,4, lots de 8, table de transposition h0, 16 processus sur CPU. Chaque puzzle part d'une table de transposition neuve. Seul le premier coup de la solution est évalué. Taux : intervalle de Wilson. Comparaisons : McNemar exact sur les puzzles discordants, et intervalle de la différence appariée par approximation normale. Données brutes : <code>docs/bench_puzzles_results/</code>.</p>
+      <div class="table-wrap"><table id="t-taux"></table></div>
+      <div class="table-wrap"><table id="t-paires"></table></div>
+      <div class="table-wrap"><table id="t-histo"></table></div>
+      <div class="table-wrap"><table id="t-types"></table></div>
+    </div>
+  </details>
+</main>
+<div id="tip" role="tooltip" hidden></div>
+
+<script>
+(function () {
+  const N = 500;
+  const CHECKPOINTS = [
+    { id: "436", date: "30 avril" },
+    { id: "506", date: "24 septembre" },
+    { id: "519", date: "24 septembre" },
+    { id: "643", date: "28 septembre" },
+  ];
+  const ECARTS_ITER = ["+70 it.", "+13 it.", "+124 it."];
+  const REUSSIS = {
+    recherche: [372, 391, 394, 397],
+    reseau: [236, 246, 252, 267],
+    recherche_sans: [408, 400, 402, 414],
+  };
+  const PAIRES = {
+    recherche: [["436", "506", 8, 27], ["506", "519", 7, 10], ["519", "643", 12, 15], ["436", "643", 11, 36]],
+    reseau: [["436", "506", 10, 20], ["506", "519", 3, 9], ["519", "643", 11, 26], ["436", "643", 16, 47]],
+  };
+  // [seul avec historique, seul sans historique, ecart median de prior, ecart median de value]
+  const HISTO = [[36, 72, -0.0818, -1.0358], [52, 61, -0.0313, -0.8576], [52, 60, -0.0390, -0.8386], [36, 53, -0.0213, -0.5973]];
+  const TYPES = [
+    { groupe: "Difficulté, classement Lichess" },
+    { nom: "Facile", detail: "1004 à 1593", n: 167, k: [147, 156, 156, 153], p: 0.146 },
+    { nom: "Moyen", detail: "1593 à 2148", n: 166, k: [129, 133, 132, 137], p: 0.0386 },
+    { nom: "Difficile", detail: "2148 à 2797", n: 167, k: [96, 102, 106, 107], p: 0.0347 },
+    { groupe: "Thèmes, non exclusifs" },
+    { nom: "Mat", detail: "mateIn…", n: 144, k: [122, 132, 132, 132], p: 0.00195 },
+    { nom: "Milieu de partie", detail: "middlegame", n: 272, k: [195, 211, 211, 218], p: 0.000117 },
+    { nom: "Longs", detail: "long, veryLong", n: 268, k: [178, 188, 190, 194], p: 0.00522 },
+    { nom: "Finale", detail: "endgame", n: 202, k: [155, 158, 161, 157], p: 0.774 },
+  ];
+
+  const fmt = (x, d = 1) => x.toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const signe = (x, d = 1) => (x > 0 ? "+" : x < 0 ? "−" : "") + fmt(Math.abs(x), d);
+  const fmtP = (p) => (p < 0.001 ? "p < 0,001" : "p = " + fmt(p, p < 0.01 ? 4 : 2));
+  function wilson(k, n) {
+    const z = 1.96, p = k / n, d = 1 + z * z / n;
+    const c = (p + z * z / (2 * n)) / d;
+    const e = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d;
+    return [100 * (c - e), 100 * (c + e)];
+  }
+  function mcnemar(b, c) {
+    const n = b + c;
+    if (n === 0) return 1;
+    const k = Math.min(b, c);
+    let coef = 1, somme = 0;
+    for (let i = 0; i <= k; i++) {
+      somme += coef * Math.pow(0.5, n);
+      coef = coef * (n - i) / (i + 1);
+    }
+    return Math.min(1, 2 * somme);
+  }
+  function diffAppariee(b, c, n) {
+    const d = (c - b) / n;
+    const se = Math.sqrt(Math.max(b + c - (c - b) * (c - b) / n, 0)) / n;
+    return [100 * d, 100 * (d - 1.96 * se), 100 * (d + 1.96 * se)];
+  }
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+
+  // Infobulle partagee : souris et clavier.
+  const tip = document.getElementById("tip");
+  function montrer(texte, x, y) {
+    tip.textContent = texte;
+    tip.hidden = false;
+    const r = tip.getBoundingClientRect();
+    let left = x + 14, top = y + 14;
+    if (left + r.width > window.innerWidth - 8) left = x - r.width - 14;
+    if (top + r.height > window.innerHeight - 8) top = y - r.height - 14;
+    tip.style.left = Math.max(8, left) + "px";
+    tip.style.top = Math.max(8, top) + "px";
+  }
+  document.addEventListener("pointermove", (ev) => {
+    const cible = ev.target.closest && ev.target.closest("[data-tip]");
+    if (cible) montrer(cible.getAttribute("data-tip"), ev.clientX, ev.clientY);
+    else tip.hidden = true;
+  });
+  document.addEventListener("focusin", (ev) => {
+    const cible = ev.target.closest && ev.target.closest("[data-tip]");
+    if (!cible) { tip.hidden = true; return; }
+    const r = cible.getBoundingClientRect();
+    montrer(cible.getAttribute("data-tip"), r.right, r.top);
+  });
+  document.addEventListener("focusout", () => { tip.hidden = true; });
+  window.addEventListener("scroll", () => { tip.hidden = true; }, { passive: true });
+
+  function surRedimension(el, dessiner) {
+    let dernier = 0;
+    const ro = new ResizeObserver((entrees) => {
+      const w = Math.round(entrees[0].contentRect.width);
+      if (w > 0 && w !== dernier) { dernier = w; el.innerHTML = dessiner(w); }
+    });
+    ro.observe(el);
+  }
+
+  // 1. Courbe des taux de resolution
+  const SERIES = [
+    { cle: "recherche", nom: "Avec recherche", couleur: "var(--s1)", bande: "var(--band-s1)" },
+    { cle: "reseau", nom: "Réseau seul", couleur: "var(--s2)", bande: "var(--band-s2)" },
+  ];
+  surRedimension(document.getElementById("chart-taux"), (W) => {
+    const etroit = W < 560;
+    const H = etroit ? 300 : 340;
+    const m = { l: 40, r: etroit ? 18 : 138, t: 14, b: 58 };
+    const pw = W - m.l - m.r, ph = H - m.t - m.b;
+    const x = (i) => m.l + pw * (0.06 + 0.88 * i / 3);
+    const y = (v) => m.t + ph * (1 - (v - 40) / 50);
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
+    for (let v = 40; v <= 90; v += 10) {
+      s += `<line class="grid" x1="${m.l}" x2="${m.l + pw}" y1="${y(v)}" y2="${y(v)}"/>`;
+      s += `<text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${v} %</text>`;
+    }
+    CHECKPOINTS.forEach((c, i) => {
+      s += `<text x="${x(i)}" y="${m.t + ph + 20}" text-anchor="middle" class="t-strong">iter${c.id}</text>`;
+      if (i < 3) s += `<text x="${(x(i) + x(i + 1)) / 2}" y="${m.t + ph + 42}" text-anchor="middle">${ECARTS_ITER[i]}</text>`;
+    });
+    for (const se of SERIES) {
+      const k = REUSSIS[se.cle];
+      const taux = k.map((v) => 100 * v / N);
+      const ic = k.map((v) => wilson(v, N));
+      const haut = ic.map((b, i) => `${x(i)},${y(b[1])}`);
+      const bas = ic.map((b, i) => `${x(i)},${y(b[0])}`).reverse();
+      s += `<polygon points="${haut.concat(bas).join(" ")}" fill="${se.bande}"/>`;
+      s += `<polyline points="${taux.map((t, i) => `${x(i)},${y(t)}`).join(" ")}" fill="none" stroke="${se.couleur}" stroke-width="2" stroke-linejoin="round"/>`;
+      taux.forEach((t, i) => {
+        s += `<circle cx="${x(i)}" cy="${y(t)}" r="5" fill="${se.couleur}" stroke="var(--ring)" stroke-width="2"/>`;
+        const texte = `iter${CHECKPOINTS[i].id}, ${CHECKPOINTS[i].date}\n${se.nom} : ${fmt(t)} %\n${k[i]} puzzles sur ${N}\nIC95 ${fmt(ic[i][0])} à ${fmt(ic[i][1])} %`;
+        s += `<circle class="hit" cx="${x(i)}" cy="${y(t)}" r="16" tabindex="0" data-tip="${esc(texte)}"><title>${esc(texte)}</title></circle>`;
+      });
+      if (!etroit) {
+        const t = taux[3];
+        s += `<text x="${x(3) + 14}" y="${y(t) - 3}" class="t-label">${se.nom}</text>`;
+        s += `<text x="${x(3) + 14}" y="${y(t) + 13}" class="t-strong">${fmt(t)} %</text>`;
+      }
+    }
+    return s + "</svg>";
+  });
+
+  // 2. Puzzles gagnes et perdus
+  function lignesDivergentes(cle) {
+    const max = 47;
+    return PAIRES[cle].map(([a, b, perdus, gagnes], i) => {
+      const [d, lo, hi] = diffAppariee(perdus, gagnes, N);
+      const p = mcnemar(perdus, gagnes);
+      const total = i === 3;
+      const texte = `iter${a} vers iter${b}, ${cle === "recherche" ? "avec recherche" : "réseau seul"}\n${gagnes} puzzles gagnés, ${perdus} perdus\nSolde ${signe(gagnes - perdus, 0)}, soit ${signe(d)} points\nIC95 ${signe(lo)} à ${signe(hi)} points\n${fmtP(p)}`;
+      return `<div class="div-row${total ? " total" : ""}" tabindex="0" data-tip="${esc(texte)}">
+        <span class="lab">${a} → ${b}</span>
+        <span class="half left"><span class="v">${perdus}</span><span class="bar loss" style="width:${(100 * perdus / max).toFixed(1)}%"></span></span>
+        <span class="half right"><span class="bar gain" style="width:${(100 * gagnes / max).toFixed(1)}%"></span><span class="v">${gagnes}</span></span>
+        <span class="res"><b>${signe(gagnes - perdus, 0)}</b><span>${fmtP(p).replace("p = ", "p ").replace("p < ", "p &lt; ")}</span></span>
+      </div>`;
+    }).join("");
+  }
+  document.getElementById("div-recherche").innerHTML = lignesDivergentes("recherche");
+  document.getElementById("div-reseau").innerHTML = lignesDivergentes("reseau");
+
+  // 3. Petits multiples du raccourci de l'historique
+  function multiple(el, opts) {
+    surRedimension(el, (W) => {
+      const H = 200;
+      const m = { l: 46, r: 10, t: 12, b: 26 };
+      const pw = W - m.l - m.r, ph = H - m.t - m.b;
+      const [y0, y1] = opts.domaine;
+      const x = (i) => m.l + pw * (0.12 + 0.76 * i / 3);
+      const y = (v) => m.t + ph * (1 - (v - y0) / (y1 - y0));
+      let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
+      for (const v of opts.graduations) {
+        s += `<line class="${v === 0 ? "zero" : "grid"}" x1="${m.l}" x2="${m.l + pw}" y1="${y(v)}" y2="${y(v)}"/>`;
+        s += `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end">${signe(v, opts.decimales)}</text>`;
+      }
+      CHECKPOINTS.forEach((c, i) => {
+        s += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${c.id}</text>`;
+      });
+      opts.points.forEach((pt, i) => {
+        if (pt.ic) {
+          s += `<line x1="${x(i)}" x2="${x(i)}" y1="${y(pt.ic[0])}" y2="${y(pt.ic[1])}" stroke="var(--s1)" stroke-width="2" opacity="0.45"/>`;
+          for (const b of pt.ic) s += `<line x1="${x(i) - 5}" x2="${x(i) + 5}" y1="${y(b)}" y2="${y(b)}" stroke="var(--s1)" stroke-width="2" opacity="0.45"/>`;
+        } else {
+          s += `<line x1="${x(i)}" x2="${x(i)}" y1="${y(0)}" y2="${y(pt.v)}" stroke="var(--s1)" stroke-width="2" opacity="0.45"/>`;
+        }
+        s += `<circle cx="${x(i)}" cy="${y(pt.v)}" r="5" fill="var(--s1)" stroke="var(--ring)" stroke-width="2"/>`;
+        s += `<circle class="hit" cx="${x(i)}" cy="${y(pt.v)}" r="15" tabindex="0" data-tip="${esc(pt.tip)}"><title>${esc(pt.tip)}</title></circle>`;
+      });
+      return s + "</svg>";
+    });
+  }
+  multiple(document.getElementById("m-gap"), {
+    domaine: [-4, 12], graduations: [-4, 0, 4, 8, 12], decimales: 0,
+    points: HISTO.map(([b, c], i) => {
+      const [d, lo, hi] = diffAppariee(b, c, N);
+      return { v: d, ic: [lo, hi], tip: `iter${CHECKPOINTS[i].id}\nAvec historique : ${fmt(100 * REUSSIS.recherche[i] / N)} %\nSans historique : ${fmt(100 * REUSSIS.recherche_sans[i] / N)} %\nAvantage sans : ${signe(d)} points (IC95 ${signe(lo)} à ${signe(hi)})\n${fmtP(mcnemar(b, c))}` };
+    }),
+  });
+  multiple(document.getElementById("m-prior"), {
+    domaine: [-0.1, 0.02], graduations: [-0.1, -0.08, -0.06, -0.04, -0.02, 0], decimales: 2,
+    points: HISTO.map((h, i) => ({ v: h[2], tip: `iter${CHECKPOINTS[i].id}\nÉcart médian de probabilité du coup solution : ${signe(h[2], 3)}` })),
+  });
+  multiple(document.getElementById("m-value"), {
+    domaine: [-1.2, 0.1], graduations: [-1.2, -0.9, -0.6, -0.3, 0], decimales: 1,
+    points: HISTO.map((h, i) => ({ v: h[3], tip: `iter${CHECKPOINTS[i].id}\nÉcart médian d'évaluation : ${signe(h[3], 2)}\n(sur une échelle de −1 à +1)` })),
+  });
+
+  // 4. Haltere par type de puzzle
+  surRedimension(document.getElementById("chart-types"), (W) => {
+    const etroit = W < 560;
+    const hLigne = 38, hGroupe = 30;
+    const m = { l: etroit ? 118 : 178, r: etroit ? 64 : 110, t: 22 };
+    const pw = W - m.l - m.r;
+    const x = (v) => m.l + pw * (v - 50) / 50;
+    let H = m.t + 8;
+    for (const t of TYPES) H += t.groupe ? hGroupe : hLigne;
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
+    for (let v = 50; v <= 100; v += 10) {
+      s += `<line class="grid" x1="${x(v)}" x2="${x(v)}" y1="${m.t - 4}" y2="${H - 4}"/>`;
+      s += `<text x="${x(v)}" y="${m.t - 10}" text-anchor="middle">${v} %</text>`;
+    }
+    let yc = m.t;
+    for (const t of TYPES) {
+      if (t.groupe) {
+        yc += hGroupe;
+        s += `<text x="0" y="${yc - 9}" class="t-strong" style="font-size:11px;letter-spacing:.05em">${t.groupe.toUpperCase()}</text>`;
+        continue;
+      }
+      const y = yc + hLigne / 2;
+      const a = 100 * t.k[0] / t.n, b = 100 * t.k[3] / t.n;
+      s += `<text x="0" y="${y - 2}" class="t-label">${t.nom}</text>`;
+      s += `<text x="0" y="${y + 13}" style="font-size:11px">${t.detail} · n = ${t.n}</text>`;
+      s += `<line x1="${x(a)}" x2="${x(b)}" y1="${y}" y2="${y}" stroke="var(--ink-3)" stroke-width="2"/>`;
+      s += `<circle cx="${x(a)}" cy="${y}" r="5" fill="var(--bg)" stroke="var(--ink-3)" stroke-width="2"/>`;
+      s += `<circle cx="${x(b)}" cy="${y}" r="5" fill="var(--s1)" stroke="var(--ring)" stroke-width="2"/>`;
+      s += `<text x="${x(Math.min(a, b)) - 10}" y="${y + 4}" text-anchor="end">${fmt(a)}</text>`;
+      s += `<text x="${x(Math.max(a, b)) + 10}" y="${y + 4}" class="t-strong">${fmt(b)}</text>`;
+      s += `<text x="${W}" y="${y + 4}" text-anchor="end">${etroit ? "" : fmtP(t.p)}</text>`;
+      const texte = `${t.nom} (${t.detail}), ${t.n} puzzles\n` + CHECKPOINTS.map((c, i) => `iter${c.id} : ${fmt(100 * t.k[i] / t.n)} %`).join("\n") + `\niter436 vers iter643 : ${fmtP(t.p)}`;
+      s += `<rect class="hit" x="0" y="${yc}" width="${W}" height="${hLigne}" tabindex="0" data-tip="${esc(texte)}"><title>${esc(texte)}</title></rect>`;
+      yc += hLigne;
+    }
+    return s + "</svg>";
+  });
+
+  // Tableaux de la section methode
+  const ligne = (cells, tag = "td") => "<tr>" + cells.map((c) => `<${tag}>${c}</${tag}>`).join("") + "</tr>";
+  document.getElementById("t-taux").innerHTML =
+    "<caption class='note' style='text-align:left;padding-bottom:6px'>Taux de résolution, 500 puzzles</caption>" +
+    ligne(["Checkpoint", "Avec recherche", "IC95", "Réseau seul", "IC95", "Sans historique"], "th") +
+    CHECKPOINTS.map((c, i) => {
+      const r = REUSSIS.recherche[i], n = REUSSIS.reseau[i], sh = REUSSIS.recherche_sans[i];
+      const a = wilson(r, N), b = wilson(n, N);
+      return ligne([`iter${c.id}, ${c.date}`, `${fmt(100 * r / N)} %`, `${fmt(a[0])} à ${fmt(a[1])}`, `${fmt(100 * n / N)} %`, `${fmt(b[0])} à ${fmt(b[1])}`, `${fmt(100 * sh / N)} %`]);
+    }).join("");
+  document.getElementById("t-paires").innerHTML =
+    "<caption class='note' style='text-align:left;padding-bottom:6px'>Comparaisons appariées</caption>" +
+    ligne(["Pas", "Mesure", "Perdus", "Gagnés", "Écart (pts)", "IC95", "p"], "th") +
+    ["recherche", "reseau"].flatMap((cle) => PAIRES[cle].map(([a, b, pe, ga]) => {
+      const [d, lo, hi] = diffAppariee(pe, ga, N);
+      return ligne([`iter${a} → iter${b}`, cle === "recherche" ? "avec recherche" : "réseau seul", pe, ga, signe(d), `${signe(lo)} à ${signe(hi)}`, fmtP(mcnemar(pe, ga)).replace("p = ", "").replace("p < ", "< ")]);
+    })).join("");
+  document.getElementById("t-histo").innerHTML =
+    "<caption class='note' style='text-align:left;padding-bottom:6px'>Avec et sans historique</caption>" +
+    ligne(["Checkpoint", "Avec", "Sans", "Avantage sans", "IC95", "p", "Écart prior", "Écart value"], "th") +
+    HISTO.map(([b, c, pr, va], i) => {
+      const [d, lo, hi] = diffAppariee(b, c, N);
+      return ligne([`iter${CHECKPOINTS[i].id}`, `${fmt(100 * REUSSIS.recherche[i] / N)} %`, `${fmt(100 * REUSSIS.recherche_sans[i] / N)} %`, signe(d), `${signe(lo)} à ${signe(hi)}`, fmtP(mcnemar(b, c)).replace("p = ", "").replace("p < ", "< "), signe(pr, 3), signe(va, 2)]);
+    }).join("");
+  document.getElementById("t-types").innerHTML =
+    "<caption class='note' style='text-align:left;padding-bottom:6px'>Résolution avec recherche par type de puzzle</caption>" +
+    ligne(["Type", "n", "iter436", "iter506", "iter519", "iter643", "p (436 → 643)"], "th") +
+    TYPES.filter((t) => !t.groupe).map((t) => ligne([`${t.nom} <span style="color:var(--ink-2)">(${t.detail})</span>`, t.n, ...t.k.map((k) => `${fmt(100 * k / t.n)} %`), fmtP(t.p).replace("p = ", "").replace("p < ", "< ")])).join("");
+})();
+</script>
+</body>
+</html>
