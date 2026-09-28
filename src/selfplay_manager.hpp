@@ -75,7 +75,9 @@ private:
     static constexpr float NORMAL_EPSILON = 0.12f;
     static constexpr float TACTICAL_EPSILON = 0.30f;
     static constexpr int TACTICAL_FIRST_MOVE_SIMS = 4000;
-    static constexpr int MAX_PLIES_BEFORE_FORCED_DRAW = 300;
+    // Longueur maximale d'une partie avant la nulle forcee, en demi-coups
+    // joues en self-play : l'historique rejoue d'un puzzle n'y compte pas.
+    static constexpr int MAX_SELFPLAY_PLIES = 400;
 
     int m_num_concurrent_games;
     int m_slow_sims;
@@ -140,6 +142,16 @@ private:
     // quoi la partie redevient une partie normale, budget de recherche comme
     // bruit de Dirichlet.
     std::vector<char> m_tactical_boost;
+
+    // Demi-coups rejoues au depart d'une partie de puzzle, 0 sinon. Exclus du
+    // plafond de longueur, mais comptes dans total_real_moves : la longueur
+    // enregistree reste celle de la partie d'echecs complete.
+    std::vector<int> m_replayed_plies;
+
+    // Longueur de partie comptee pour le plafond, et test du plafond.
+    int selfplay_plies(int game_idx) const;
+    bool longueur_max_atteinte(int game_idx) const;
+
     struct TacticalPuzzle {
         std::string start_fen;
         std::vector<std::string> moves; // UCI, jusqu'à la position du puzzle incluse

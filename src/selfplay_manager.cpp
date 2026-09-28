@@ -71,6 +71,7 @@ SelfPlayManager::SelfPlayManager(
     m_shared_mcts = std::make_unique<MCTS>(m_evaluator, tt_size);
 
     m_tactical_boost.resize(num_concurrent_games, false);
+    m_replayed_plies.resize(num_concurrent_games, 0);
     load_tactical_puzzles(puzzles_path);
 }
 
@@ -127,9 +128,19 @@ void SelfPlayManager::expand_root(int game_idx) {
     }
 }
 
+int SelfPlayManager::selfplay_plies(int game_idx) const {
+    return static_cast<int>(m_boards[game_idx].getMoveHistory().size())
+        - m_replayed_plies[game_idx];
+}
+
+bool SelfPlayManager::longueur_max_atteinte(int game_idx) const {
+    return selfplay_plies(game_idx) >= MAX_SELFPLAY_PLIES;
+}
+
 void SelfPlayManager::reset_game(int game_idx) {
     m_boards[game_idx].clear();
     m_boards[game_idx].setAmnesiaMode(false);
+    m_replayed_plies[game_idx] = 0;
 
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
 
@@ -155,6 +166,8 @@ void SelfPlayManager::reset_game(int game_idx) {
 
         if (replay_ok) {
             m_tactical_boost[game_idx] = true;
+            m_replayed_plies[game_idx] = static_cast<int>(
+                m_boards[game_idx].getMoveHistory().size());
         }
         else {
             // Rejeu impossible : on retombe sur une partie normale plutôt que
@@ -543,7 +556,7 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
                 if (m_sims_completed[i] >= m_sims_target[i] && m_sims_target[i] > 0) {
                     play_best_move(i);
 
-                    if (m_roots[i] != nullptr && m_boards[i].getMoveHistory().size() >= MAX_PLIES_BEFORE_FORCED_DRAW) {
+                    if (m_roots[i] != nullptr && longueur_max_atteinte(i)) {
                         m_roots[i].reset();
                         m_sims_target[i] = 0;
                         m_sims_completed[i] = 0;
@@ -568,9 +581,7 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
                         m_game_policies[i].clear();
 
                         const GameConclusion conclusion = conclure_partie(
-                            m_boards[i],
-                            m_boards[i].getMoveHistory().size()
-                                >= MAX_PLIES_BEFORE_FORCED_DRAW);
+                            m_boards[i], longueur_max_atteinte(i));
                         res.final_outcome = conclusion.final_outcome;
                         res.end_reason = conclusion.end_reason;
 

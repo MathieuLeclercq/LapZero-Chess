@@ -62,6 +62,31 @@ public:
             != 0;
     }
 
+    static int plafond_plies() {
+        return SelfPlayManager::MAX_SELFPLAY_PLIES;
+    }
+
+    static bool longueur_max_atteinte(const SelfPlayManager& manager,
+                                      int game_idx) {
+        return manager.longueur_max_atteinte(game_idx);
+    }
+
+    static int historique(const SelfPlayManager& manager, int game_idx) {
+        return static_cast<int>(
+            manager.m_boards[static_cast<std::size_t>(game_idx)]
+                .getMoveHistory().size());
+    }
+
+    static void jouer_uci(SelfPlayManager& manager, int game_idx,
+                          const std::string& uci) {
+        if (!manager.m_boards[static_cast<std::size_t>(game_idx)]
+                 .movePieceUCI(uci)) {
+            throw std::runtime_error(
+                "jouer_uci : coup refuse " + uci + " dans " +
+                manager.m_boards[static_cast<std::size_t>(game_idx)].toFEN());
+        }
+    }
+
     static MCTS& mcts(SelfPlayManager& manager) {
         return *manager.m_shared_mcts;
     }
@@ -219,8 +244,11 @@ void test_selfplay_manager_with_controlled_evaluator() {
     require_test(games.size() == 2, "self-play returned the wrong game count");
     for (const GameResult& game : games) {
         require_test(game.move_count >= 0, "negative training move count");
+        // Sans puzzle, aucun historique rejoue : la longueur ne peut pas
+        // depasser le plafond de demi-coups joues.
         require_test(game.total_real_moves > 0
-                         && game.total_real_moves <= 300,
+                         && game.total_real_moves
+                                <= SelfPlayTestAccess::plafond_plies(),
                      "self-play game length is outside its bounds");
         require_test(game.flat_states.size()
                          == static_cast<std::size_t>(game.move_count)
@@ -483,6 +511,53 @@ bool chercher_graine_injectee(SelfPlayManager& manager) {
         }
     }
     return false;
+}
+
+// Allers-retours de cavaliers, legaux depuis le depart comme apres 1.e4 e5 :
+// ils allongent une partie sans la terminer, puisque movePieceUCI ne teste pas
+// la fin de partie.
+// debut est le rang du premier demi-coup dans le cycle, pour reprendre la ou
+// un appel precedent s'est arrete.
+void jouer_allers_retours(SelfPlayManager& manager, int game_idx, int debut,
+                          int plies) {
+    static const char* const cycle[] = {"g1f3", "g8f6", "f3g1", "f6g8"};
+    for (int k = debut; k < debut + plies; ++k) {
+        SelfPlayTestAccess::jouer_uci(manager, game_idx, cycle[k % 4]);
+    }
+}
+
+void test_length_cap_is_four_hundred_plies_for_a_normal_game() {
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 1, 2, 1, 0.5f, 8192);
+    const int plafond = SelfPlayTestAccess::plafond_plies();
+    require_test(plafond == 400, "the self-play length cap is not 400 plies");
+
+    SelfPlayTestAccess::reset_game(manager, 0);
+    jouer_allers_retours(manager, 0, 0, plafond - 1);
+    require_test(!SelfPlayTestAccess::longueur_max_atteinte(manager, 0),
+                 "a normal game was capped before the limit");
+    jouer_allers_retours(manager, 0, plafond - 1, 1);
+    require_test(SelfPlayTestAccess::longueur_max_atteinte(manager, 0),
+                 "a normal game was not capped at the limit");
+}
+
+void test_puzzle_replay_does_not_count_toward_the_length_cap() {
+    const std::string fixture = ecrire_fixture_puzzle();  // rejoue e2e4 e7e5
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 1, 2, 1, 0.5f, 8192, fixture);
+    std::remove(fixture.c_str());
+    require_test(chercher_graine_injectee(manager),
+                 "no seed injected the puzzle");
+    const int plafond = SelfPlayTestAccess::plafond_plies();
+
+    jouer_allers_retours(manager, 0, 0, plafond - 1);
+    require_test(!SelfPlayTestAccess::longueur_max_atteinte(manager, 0),
+                 "the replayed puzzle history counted toward the cap");
+    jouer_allers_retours(manager, 0, plafond - 1, 1);
+    require_test(SelfPlayTestAccess::longueur_max_atteinte(manager, 0),
+                 "a puzzle game was not capped after the limit of played plies");
+    require_test(SelfPlayTestAccess::historique(manager, 0) == plafond + 2,
+                 "the board history no longer holds the replayed plies");
 }
 
 void test_puzzle_first_move_boost_then_normal_move() {
@@ -863,6 +938,8 @@ int main() {
         test_imposed_ends_start_and_collect_each_game_once();
         test_puzzle_first_move_boost_then_normal_move();
         test_puzzle_first_move_served_by_the_table_keeps_the_boost();
+        test_length_cap_is_four_hundred_plies_for_a_normal_game();
+        test_puzzle_replay_does_not_count_toward_the_length_cap();
         test_reused_root_has_children_and_consumes_its_noise();
         test_slow_puzzle_game_is_not_lost_behind_a_fast_one();
         test_game_conclusion_signs_and_reasons();
