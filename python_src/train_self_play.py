@@ -325,12 +325,21 @@ def pipeline(
     export_model_to_onnx(model, current_onnx_path, gpu_device)
     print(f"Modèle ONNX initial prêt pour le self-play : {current_onnx_path}")
 
+    # Frequence effective et charge du CPU pendant chaque generation : sans
+    # elles, un bridage du CPU ne se distingue pas d'un autre ralentissement.
+    moniteur_cpu = None
+    if selfplay_diagnostics > 0:
+        from moniteur_cpu import creer_echantillonneur
+        moniteur_cpu = creer_echantillonneur()
+
     for iteration in range(start_iteration, start_iteration + num_iterations):
         print(f"\n{'=' * 50}")
         print(f"  ITERATION {iteration + 1}/{start_iteration + num_iterations}")
         print(f"{'=' * 50}")
 
         # ── 1. Self-Play (C++ / GPU batched) ──
+        if moniteur_cpu is not None:
+            moniteur_cpu.reinitialiser()
         start_time = time.time()
         new_data, avg_length, stats, diagnostic = generate_games(
             current_onnx_path, games_per_iter,
@@ -339,6 +348,8 @@ def pipeline(
             diagnostics=selfplay_diagnostics
         )
         generation_time = time.time() - start_time
+        metriques_cpu = (moniteur_cpu.metriques("selfplay/cpu")
+                         if moniteur_cpu is not None else {})
         games_per_sec = games_per_iter / generation_time
         saved_pos_per_sec = len(new_data) / generation_time
 
@@ -380,6 +391,7 @@ def pipeline(
         if diagnostic is not None:
             from selfplay_diag import metriques_wandb
             journal.update(metriques_wandb(diagnostic))
+        journal.update(metriques_cpu)
         wandb.log(journal, step=global_step)
 
         # ── 4. Sauvegarde checkpoint .pt ET .onnx ──
