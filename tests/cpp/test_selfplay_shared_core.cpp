@@ -967,6 +967,35 @@ void test_diagnostics_are_reset_between_generations() {
                  "turning the diagnostic off left a stale report");
 }
 
+void test_diagnostics_measure_the_final_drain() {
+    // Deux places pour six parties : la vidange commence au sixieme depart et
+    // ne couvre qu'une partie de la generation.
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 2, 2, 1, 0.5f, 8192);
+    SelfPlayTestAccess::seed_rng(manager, 7);
+    manager.set_diagnostics_mode(1);
+    manager.generate_games(6);
+    const SelfPlayTiming partielle = manager.get_timing();
+    require_test(partielle.drain_wall_ns > 0
+                     && partielle.drain_wall_ns < partielle.generation_wall_ns,
+                 "the drain does not cover only the end of the generation");
+    require_test(partielle.drain_batch_calls <= partielle.batch_calls
+                     && partielle.drain_batch_rows <= partielle.batch_rows,
+                 "the drain counted more batches than the generation");
+
+    // Autant de places que de parties : tout est vidange des le depart.
+    manager.generate_games(2);
+    const SelfPlayTiming totale = manager.get_timing();
+    require_test(totale.drain_batch_calls == totale.batch_calls
+                     && totale.drain_batch_rows == totale.batch_rows,
+                 "a generation without refill is not entirely a drain");
+
+    manager.set_diagnostics_mode(0);
+    manager.generate_games(2);
+    require_test(manager.get_timing().drain_wall_ns == 0,
+                 "a disabled diagnostic measured a drain");
+}
+
 }  // namespace
 
 int main() {
@@ -993,6 +1022,7 @@ int main() {
         test_diagnostics_are_inert_and_match_the_evaluator();
         test_diagnostics_mode_two_reports_worker_times();
         test_diagnostics_are_reset_between_generations();
+        test_diagnostics_measure_the_final_drain();
         return 0;
     }
     catch (const std::exception& error) {

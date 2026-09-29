@@ -348,6 +348,9 @@ PYBIND11_MODULE(chess_engine, m) {
         .def_readonly("tt_misses", &SelfPlayTiming::tt_misses)
         .def_readonly("slow_examples_saved", &SelfPlayTiming::slow_examples_saved)
         .def_readonly("batch_histogram", &SelfPlayTiming::batch_histogram)
+        .def_readonly("drain_wall_ns", &SelfPlayTiming::drain_wall_ns)
+        .def_readonly("drain_batch_calls", &SelfPlayTiming::drain_batch_calls)
+        .def_readonly("drain_batch_rows", &SelfPlayTiming::drain_batch_rows)
         .def_readonly("worker_count", &SelfPlayTiming::worker_count)
         .def_readonly("worker_busy_sum_ns", &SelfPlayTiming::worker_busy_sum_ns)
         .def_readonly("worker_busy_max_ns", &SelfPlayTiming::worker_busy_max_ns);

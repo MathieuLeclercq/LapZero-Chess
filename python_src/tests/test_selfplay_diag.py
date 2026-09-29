@@ -16,6 +16,7 @@ sys.path.insert(0, str(RACINE / "python_src"))
 from selfplay_diag import (
     formater_bilan,
     formater_diagnostic,
+    metriques_wandb,
     part,
     resumer_passage,
 )
@@ -55,6 +56,9 @@ def timing_factice(**remplacements):
         worker_count=8,
         worker_busy_sum_ns=900_000_000,
         worker_busy_max_ns=4_000_000,
+        drain_wall_ns=100_000_000,
+        drain_batch_calls=10,
+        drain_batch_rows=500,
     )
     base.update(remplacements)
     return SimpleNamespace(**base)
@@ -161,3 +165,34 @@ def test_formater_bilan_liste_chaque_passage():
     assert "passage 1" in bilan
     assert "passage 2" in bilan
     assert formater_bilan([]) == "[diag] aucun passage"
+
+
+def test_la_vidange_est_resumee_et_affichee():
+    resume = resumer_passage(timing_factice(), {}, {})
+
+    assert resume["vidange"]["part_generation_pct"] == pytest.approx(10.0)
+    assert resume["vidange"]["lignes_moyennes"] == pytest.approx(50.0)
+    assert "vidange finale" in formater_diagnostic(resume)
+
+
+def test_les_metriques_wandb_separent_cout_d_appel_et_remplissage():
+    metriques = metriques_wandb(resumer_passage(timing_factice(), {}, {}))
+
+    assert metriques["selfplay/reseau/lignes_par_appel"] == pytest.approx(200.0)
+    assert metriques["selfplay/reseau/ms_par_appel"] == pytest.approx(6.25)
+    assert metriques["selfplay/moteur/us_par_simulation"] == pytest.approx(1e6 / 9000)
+    assert metriques["selfplay/moteur/sans_reseau_pct"] == pytest.approx(100 * 1000 / 9000)
+    # Seaux 1, 2, 4 et 8 : 0 + 0 + 0 + 2 appels sur 40.
+    assert metriques["selfplay/reseau/petits_lots_pct"] == pytest.approx(5.0)
+    assert metriques["selfplay/vidange/duree_s"] == pytest.approx(0.1)
+    assert all(cle.startswith("selfplay/") for cle in metriques)
+
+
+def test_les_metriques_wandb_supportent_une_generation_vide():
+    vide = timing_factice(batch_calls=0, batch_rows=0, completed_sims=0,
+                          drain_batch_calls=0, drain_batch_rows=0,
+                          batch_histogram=(0,) * 10)
+    metriques = metriques_wandb(resumer_passage(vide, {}, {}))
+
+    assert metriques["selfplay/reseau/ms_par_appel"] == 0.0
+    assert metriques["selfplay/moteur/us_par_simulation"] == 0.0

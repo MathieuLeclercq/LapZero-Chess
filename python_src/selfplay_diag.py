@@ -126,6 +126,15 @@ def resumer_passage(timing, zones_python_s: dict, debit: dict,
             "requetes_feuilles": int(timing.leaf_requests),
             "histogramme": histogramme,
         },
+        "vidange": {
+            "duree_ns": int(timing.drain_wall_ns),
+            "part_generation_pct": part(timing.drain_wall_ns, wall),
+            "appels": int(timing.drain_batch_calls),
+            "lignes": int(timing.drain_batch_rows),
+            "lignes_moyennes": (
+                timing.drain_batch_rows / timing.drain_batch_calls
+                if timing.drain_batch_calls else 0.0),
+        },
         "attente": {
             "tours": int(timing.loop_turns),
             "tours_lot_pret_non_envoye": int(timing.deferred_turns),
@@ -201,6 +210,11 @@ def formater_diagnostic(resume: dict) -> str:
         "[diag]   histogramme : " + ", ".join(
             f"{element['borne']}:{element['appels']}"
             for element in reseau["histogramme"] if element["appels"]))
+    vidange = resume["vidange"]
+    lignes.append(
+        f"[diag] vidange finale : {ms(vidange['duree_ns']):.1f} ms, "
+        f"{vidange['part_generation_pct']:.1f} % de la generation, "
+        f"{vidange['appels']} appels, moyenne {vidange['lignes_moyennes']:.1f} lignes")
     lignes.append(
         f"[diag] attente : {attente['tours']} tours, "
         f"{attente['tours_lot_pret_non_envoye']} avec lot pret non envoye "
@@ -225,6 +239,43 @@ def formater_diagnostic(resume: dict) -> str:
                 lignes.append(
                     f"[diag] python {lendemain:<32} {zones[zone]:>8.2f} s")
     return "\n".join(lignes)
+
+
+def metriques_wandb(resume: dict) -> dict:
+    """Metriques d'une generation pour W&B, prefixees selfplay/.
+
+    Le cout d'un appel au reseau et le remplissage des lots suffisent a
+    separer les deux causes possibles d'un ralentissement : un appel plus cher
+    (machine, runtime) ou des lots moins remplis (ordonnancement, vidange).
+    """
+    temps, reseau, vidange, fin = (resume["temps"], resume["reseau"],
+                                   resume["vidange"], resume["fin"])
+    wall = temps["generation_wall_ns"]
+    appels = reseau["appels_batch"]
+    simulations = fin["simulations_terminees"]
+    # Seaux 1, 2, 4 et 8 de l'histogramme : les appels d'au plus 8 lignes.
+    petits = sum(element["appels"] for element in reseau["histogramme"][:4])
+    metriques = {
+        f"selfplay/phases/{phase['nom']}_pct": phase["part_generation_pct"]
+        for phase in temps["phases"]
+    }
+    metriques.update({
+        "selfplay/phases/residu_pct": part(temps["residu_ns"], wall),
+        "selfplay/reseau/lignes_par_appel": reseau["lignes_moyennes"],
+        "selfplay/reseau/ms_par_appel": (
+            temps["sous_onnx"]["run_ns"] / 1e6 / appels if appels else 0.0),
+        "selfplay/reseau/appels": appels,
+        "selfplay/reseau/changements_taille": reseau["changements_taille"],
+        "selfplay/reseau/petits_lots_pct": 100.0 * petits / appels if appels else 0.0,
+        "selfplay/moteur/us_par_simulation": (
+            wall / 1e3 / simulations if simulations else 0.0),
+        "selfplay/moteur/sans_reseau_pct": (
+            100.0 * fin["sans_reseau"] / simulations if simulations else 0.0),
+        "selfplay/vidange/duree_s": vidange["duree_ns"] / 1e9,
+        "selfplay/vidange/part_pct": vidange["part_generation_pct"],
+        "selfplay/vidange/lignes_par_appel": vidange["lignes_moyennes"],
+    })
+    return metriques
 
 
 def formater_bilan(resumes: list[dict]) -> str:

@@ -378,13 +378,8 @@ def pipeline(
             "selfplay/iteration": iteration + 1,
         }
         if diagnostic is not None:
-            for phase in diagnostic["temps"]["phases"]:
-                journal[f"selfplay/phases/{phase['nom']}_pct"] = (
-                    phase["part_generation_pct"])
-            journal["selfplay/phases/residu_pct"] = (
-                100.0 * diagnostic["temps"]["residu_ns"]
-                / diagnostic["temps"]["generation_wall_ns"]
-                if diagnostic["temps"]["generation_wall_ns"] else 0.0)
+            from selfplay_diag import metriques_wandb
+            journal.update(metriques_wandb(diagnostic))
         wandb.log(journal, step=global_step)
 
         # ── 4. Sauvegarde checkpoint .pt ET .onnx ──

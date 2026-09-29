@@ -515,6 +515,24 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
     const SelfPlayTiming::Clock::time_point generation_start =
         SelfPlayTiming::Clock::now();
 
+    // Debut de la vidange : note une seule fois, au depart de la derniere
+    // partie du quota, avec les compteurs de lots a cet instant.
+    bool vidange_notee = false;
+    std::uint64_t debut_vidange_ns = 0;
+    std::uint64_t appels_avant_vidange = 0;
+    std::uint64_t lignes_avant_vidange = 0;
+    auto noter_debut_vidange = [&]() {
+        if (timing == nullptr || vidange_notee
+            || m_stats.games_started
+                   < static_cast<std::uint64_t>(total_games_to_play)) {
+            return;
+        }
+        vidange_notee = true;
+        debut_vidange_ns = elapsed_ns_since(generation_start);
+        appels_avant_vidange = timing->batch_calls;
+        lignes_avant_vidange = timing->batch_rows;
+    };
+
     // Le quota est connu ici : au plus min(places, quota) parties demarrent.
     const int a_demarrer = std::min(m_num_concurrent_games,
                                     total_games_to_play);
@@ -524,6 +542,7 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
             demarrer_slot(i);
         }
     }
+    noter_debut_vidange();
 
     int games_completed = 0;
     auto start_time = std::chrono::steady_clock::now();
@@ -614,6 +633,7 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
                                 < static_cast<std::uint64_t>(
                                       total_games_to_play)) {
                             demarrer_slot(i);
+                            noter_debut_vidange();
                         }
                         else {
                             // Plus aucun depart a effectuer : la place reste
@@ -792,6 +812,11 @@ std::vector<GameResult> SelfPlayManager::generate_games(int total_games_to_play)
 
     if (timing != nullptr) {
         timing->generation_wall_ns = elapsed_ns_since(generation_start);
+        if (vidange_notee) {
+            timing->drain_wall_ns = timing->generation_wall_ns - debut_vidange_ns;
+            timing->drain_batch_calls = timing->batch_calls - appels_avant_vidange;
+            timing->drain_batch_rows = timing->batch_rows - lignes_avant_vidange;
+        }
         std::uint64_t phases_ns = 0;
         for (const std::uint64_t phase_ns : timing->phase_wall_ns) {
             phases_ns += phase_ns;

@@ -82,6 +82,12 @@ struct SelfPlayTiming {
     std::uint64_t slow_examples_saved = 0;
     std::array<std::uint64_t, SELFPLAY_BATCH_BUCKETS> batch_histogram{};
 
+    // Vidange : du depart de la derniere partie du quota a la fin de la
+    // generation. Plus aucune place ne se remplit, les lots retrecissent.
+    std::uint64_t drain_wall_ns = 0;
+    std::uint64_t drain_batch_calls = 0;
+    std::uint64_t drain_batch_rows = 0;
+
     // Mode 2 : travail mural par iteration de collecte, somme et maximum sur
     // les workers. Ce n'est pas une duree murale de la phase.
     std::uint64_t worker_count = 0;
