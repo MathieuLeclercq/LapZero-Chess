@@ -68,7 +68,8 @@ def mesurer_passage(args, mode, puzzles):
     parties, stats, timing = (
         chess_engine.generate_self_play_games_with_diagnostics(
             evaluateur, args.concurrent, args.slow_sims, args.fast_sims,
-            args.games, args.ratio, args.tt, puzzles, mode))
+            args.games, args.ratio, args.tt, puzzles, mode,
+            args.start_positions))
     zones["appel_cpp"] = time.perf_counter() - debut
 
     debut = time.perf_counter()
@@ -118,6 +119,9 @@ def main():
     parser.add_argument("--ratio", type=float, default=0.25)
     parser.add_argument("--tt", type=int, default=4_000_000)
     parser.add_argument("--puzzles", default=PUZZLES_DEFAUT)
+    parser.add_argument("--start-positions", default="",
+                        help="fichier de FEN, une par ligne : chaque partie part "
+                             "d'une position tiree au hasard, sans puzzle")
     parser.add_argument("--mode", type=int, default=1, choices=(0, 1, 2),
                         help="0 instrumentation eteinte (cout du profilage), "
                              "1 phases, 2 phases et detail par worker")
@@ -150,6 +154,7 @@ def main():
         passes=args.passes,
         racine=racine)
     configuration["date"] = dt.datetime.now().isoformat(timespec="seconds")
+    configuration["positions_depart"] = args.start_positions
 
     os.makedirs(args.output, exist_ok=True)
     horodatage = dt.datetime.now().strftime("%Y%m%d_%H%M%S")

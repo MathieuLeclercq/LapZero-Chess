@@ -552,7 +552,7 @@ def generate_self_play_games(evaluator: ONNXEvaluator, concurrent_games: typing.
     """
     Génère un dataset de parties en self-play en utilisant un batching GPU massif.
     """
-def generate_self_play_games_with_diagnostics(evaluator: ONNXEvaluator, concurrent_games: typing.SupportsInt | typing.SupportsIndex, slow_sims: typing.SupportsInt | typing.SupportsIndex, fast_sims: typing.SupportsInt | typing.SupportsIndex, total_games: typing.SupportsInt | typing.SupportsIndex, slow_ratio: typing.SupportsFloat | typing.SupportsIndex = 0.25, tt_size: typing.SupportsInt | typing.SupportsIndex = 2097143, puzzles_path: str = '../training_data/puzzles_train.txt', diagnostics_mode: typing.SupportsInt | typing.SupportsIndex = 1) -> tuple[list[GameResult], SelfPlayStats, SelfPlayTiming]:
+def generate_self_play_games_with_diagnostics(evaluator: ONNXEvaluator, concurrent_games: typing.SupportsInt | typing.SupportsIndex, slow_sims: typing.SupportsInt | typing.SupportsIndex, fast_sims: typing.SupportsInt | typing.SupportsIndex, total_games: typing.SupportsInt | typing.SupportsIndex, slow_ratio: typing.SupportsFloat | typing.SupportsIndex = 0.25, tt_size: typing.SupportsInt | typing.SupportsIndex = 2097143, puzzles_path: str = '../training_data/puzzles_train.txt', diagnostics_mode: typing.SupportsInt | typing.SupportsIndex = 1, start_positions_path: str = '') -> tuple[list[GameResult], SelfPlayStats, SelfPlayTiming]:
     """
     Genere des parties de self-play et renvoie compteurs et phases.
     """

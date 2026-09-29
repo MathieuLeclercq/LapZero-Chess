@@ -560,6 +560,50 @@ void test_puzzle_replay_does_not_count_toward_the_length_cap() {
                  "the board history no longer holds the replayed plies");
 }
 
+std::string ecrire_fixture_depart() {
+    const std::string chemin = "positions_depart_fixture.txt";
+    std::ofstream fichier(chemin);
+    fichier << "# finale de pions\n"
+               "8/5pk1/6p1/3pP3/3P1P2/6K1/8/8 w - - 0 40\n\n";
+    return chemin;
+}
+
+void test_start_positions_replace_the_initial_position_and_puzzles() {
+    const std::string depart = ecrire_fixture_depart();
+    const std::string puzzles = ecrire_fixture_puzzle();
+    ControlledEvaluator evaluator;
+    SelfPlayManager manager(&evaluator, 1, 2, 1, 0.5f, 8192, puzzles, depart);
+    std::remove(depart.c_str());
+    std::remove(puzzles.c_str());
+
+    // Aucune graine ne doit injecter de puzzle : les positions de depart
+    // remplacent la position initiale comme les puzzles.
+    for (std::uint32_t graine = 1; graine <= 200; ++graine) {
+        SelfPlayTestAccess::seed_rng(manager, graine);
+        SelfPlayTestAccess::reset_game(manager, 0);
+        require_test(!SelfPlayTestAccess::tactical_boost(manager, 0),
+                     "a start position game received the puzzle boost");
+        const std::string fen = SelfPlayTestAccess::fen(manager, 0);
+        require_test(fen.rfind("8/5pk1/6p1/3pP3/3P1P2/6K1/8/8 w", 0) == 0,
+                     "a game did not start from the start position file");
+    }
+    require_test(SelfPlayTestAccess::historique(manager, 0) == 0,
+                 "a start position game has a replayed history");
+}
+
+void test_an_unreadable_start_position_file_fails_loudly() {
+    ControlledEvaluator evaluator;
+    bool leve = false;
+    try {
+        SelfPlayManager manager(&evaluator, 1, 2, 1, 0.5f, 8192,
+                                "absent.txt", "positions_absentes.txt");
+    }
+    catch (const std::runtime_error&) {
+        leve = true;
+    }
+    require_test(leve, "a missing start position file was silently ignored");
+}
+
 void test_puzzle_first_move_boost_then_normal_move() {
     const std::string fixture = ecrire_fixture_puzzle();
     ControlledEvaluator evaluator;
@@ -940,6 +984,8 @@ int main() {
         test_puzzle_first_move_served_by_the_table_keeps_the_boost();
         test_length_cap_is_four_hundred_plies_for_a_normal_game();
         test_puzzle_replay_does_not_count_toward_the_length_cap();
+        test_start_positions_replace_the_initial_position_and_puzzles();
+        test_an_unreadable_start_position_file_fails_loudly();
         test_reused_root_has_children_and_consumes_its_noise();
         test_slow_puzzle_game_is_not_lost_behind_a_fast_one();
         test_game_conclusion_signs_and_reasons();

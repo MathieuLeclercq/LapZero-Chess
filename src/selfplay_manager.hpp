@@ -158,12 +158,19 @@ private:
     };
     std::vector<TacticalPuzzle> m_tactical_puzzles;
 
+    // Positions de depart imposees, une FEN par ligne, pour les bancs de
+    // diagnostic. Non vide, elle remplace la position initiale et les
+    // puzzles : chaque partie part d'une position tiree au hasard, sans
+    // renfort tactique. Vide en production.
+    std::vector<std::string> m_start_fens;
+
 
 public:
     SelfPlayManager(Evaluator* evaluator, int num_concurrent_games,
                     int slow_sims, int fast_sims, float slow_ratio,
                     size_t tt_size = 2097143,
-                    const std::string& puzzles_path = "../training_data/puzzles_train.txt");
+                    const std::string& puzzles_path = "../training_data/puzzles_train.txt",
+                    const std::string& start_positions_path = "");
     std::vector<GameResult> generate_games(int total_games_to_play);
     SelfPlayStats get_stats() const;
 
@@ -180,6 +187,7 @@ private:
     void execute_gpu_batch();
     void apply_pending_noise(int game_idx);
     void load_tactical_puzzles(const std::string& filepath);
+    void load_start_positions(const std::string& filepath);
     // Enveloppe les expansions de racine du gestionnaire pour y accrocher les
     // compteurs et les sous-durees ONNX quand le diagnostic est actif.
     void expand_root(int game_idx);

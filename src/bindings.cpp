@@ -414,10 +414,11 @@ PYBIND11_MODULE(chess_engine, m) {
         int total_games, float slow_ratio,
         size_t tt_size = 2097143,
         const std::string& puzzles_path = "../training_data/puzzles_train.txt",
-        int diagnostics_mode = 1) {
+        int diagnostics_mode = 1,
+        const std::string& start_positions_path = "") {
             SelfPlayManager manager(
                 evaluator, concurrent_games, slow_sims, fast_sims, slow_ratio,
-                tt_size, puzzles_path);
+                tt_size, puzzles_path, start_positions_path);
             manager.set_diagnostics_mode(diagnostics_mode);
             auto parties = manager.generate_games(total_games);
             return std::make_tuple(std::move(parties), manager.get_stats(),
@@ -433,5 +434,6 @@ PYBIND11_MODULE(chess_engine, m) {
         py::arg("tt_size") = 2097143,
         py::arg("puzzles_path") = "../training_data/puzzles_train.txt",
         py::arg("diagnostics_mode") = 1,
+        py::arg("start_positions_path") = "",
         "Genere des parties de self-play et renvoie compteurs et phases.");
 }

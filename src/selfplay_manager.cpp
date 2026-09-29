@@ -36,7 +36,8 @@ SelfPlayManager::SelfPlayManager(
     int num_concurrent_games,
     int slow_sims, int fast_sims, float slow_ratio,
     size_t tt_size,
-    const std::string& puzzles_path)
+    const std::string& puzzles_path,
+    const std::string& start_positions_path)
     : m_evaluator(evaluator),
     m_num_concurrent_games(num_concurrent_games),
     m_slow_sims(slow_sims),
@@ -73,6 +74,9 @@ SelfPlayManager::SelfPlayManager(
     m_tactical_boost.resize(num_concurrent_games, false);
     m_replayed_plies.resize(num_concurrent_games, 0);
     load_tactical_puzzles(puzzles_path);
+    if (!start_positions_path.empty()) {
+        load_start_positions(start_positions_path);
+    }
 }
 
 void SelfPlayManager::demarrer_slot(int game_idx) {
@@ -144,8 +148,14 @@ void SelfPlayManager::reset_game(int game_idx) {
 
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
 
+    // --- POSITIONS DE DEPART IMPOSEES (bancs de diagnostic) ---
+    if (!m_start_fens.empty()) {
+        std::uniform_int_distribution<size_t> idx_dis(0, m_start_fens.size() - 1);
+        m_boards[game_idx].loadFEN(m_start_fens[idx_dis(m_rng)]);
+        m_tactical_boost[game_idx] = false;
+    }
     // --- INJECTION DE PUZZLE (20% du temps) ---
-    if (!m_tactical_puzzles.empty() && dis(m_rng) < 0.2f) {
+    else if (!m_tactical_puzzles.empty() && dis(m_rng) < 0.2f) {
         std::uniform_int_distribution<size_t> idx_dis(0, m_tactical_puzzles.size() - 1);
         const TacticalPuzzle& puzzle = m_tactical_puzzles[idx_dis(m_rng)];
 
@@ -848,4 +858,32 @@ void SelfPlayManager::load_tactical_puzzles(const std::string& filepath) {
         std::cout << "  " << malformed << " ligne(s) mal formee(s) ignoree(s)."
                   << std::endl;
     }
+}
+
+void SelfPlayManager::load_start_positions(const std::string& filepath) {
+    // Un banc qui retomberait en silence sur la position initiale mesurerait
+    // autre chose que ce qu'il annonce : un fichier illisible ou vide leve.
+    std::ifstream file(filepath);
+    if (!file.is_open()) {
+        throw std::runtime_error(
+            "positions de depart illisibles : " + filepath);
+    }
+
+    std::string line;
+    int ecartees = 0;
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        Chessboard essai;
+        essai.loadFEN(line);
+        if (!essai.hasAnyLegalMove()) { ecartees++; continue; }
+        m_start_fens.push_back(line);
+    }
+
+    if (m_start_fens.empty()) {
+        throw std::runtime_error(
+            "aucune position de depart jouable dans " + filepath);
+    }
+    std::cout << "Charge " << m_start_fens.size() << " positions de depart";
+    if (ecartees > 0) std::cout << " (" << ecartees << " sans coup legal ecartees)";
+    std::cout << "." << std::endl;
 }
