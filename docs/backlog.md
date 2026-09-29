@@ -114,7 +114,8 @@ d'entraînement, pas sur celle-ci.
       (générations répétées dans un même processus, petit pool, peu de simulations), lire la
       phase InitialSlots avec `--selfplay-diagnostics 1`, puis isoler la cause : recréation de
       l'évaluateur CUDA, réallocation de la table de 2,1 Go, fragmentation du tas, étape
-      d'entraînement. En attendant, relancer le processus toutes les 30 itérations environ.
+      d'entraînement. Attention : la relance du 28/09 n'a pas rendu la vitesse d'origine
+      (2039 s dès la première génération), le vieillissement n'explique qu'une partie.
 - [ ] Seulement ensuite, et un paramètre à la fois : ratio d'échantillonnage (14 vers 4 à 8)
       ou taille du buffer, puis décroissance du learning rate, constant à 4e-5 depuis avril.
 
