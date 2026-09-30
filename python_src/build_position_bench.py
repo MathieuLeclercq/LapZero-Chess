@@ -31,6 +31,7 @@ import json
 import os
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -648,9 +649,23 @@ def _cmd_annotate(args) -> None:
           f"({deja} du cache, {len(positions) - deja} annotees maintenant)")
 
 
-def _barre_suivi(nom: str, *, reprises: int = 0, fichier=None):
-    """Etat de progression en continu, sur stderr et dans un fichier de suivi."""
+def _barre_suivi(nom: str, *, reprises: int = 0, fichier=None,
+                 intervalle_s: float = 2.0):
+    """Etat de progression en continu, sur stderr et dans un fichier de suivi.
+
+    L'affichage est limite a une mise a jour toutes les `intervalle_s` : sur
+    une campagne de criblage de 100 000 positions, ecrire le fichier a chaque
+    position ferait scanner autant de petits fichiers par l'antivirus Windows.
+    La derniere position est toujours ecrite.
+    """
+    dernier = [0.0]
+
     def suivi(etat: dict) -> None:
+        maintenant = time.monotonic()
+        derniere_position = etat["faites"] == etat["total"]
+        if maintenant - dernier[0] < intervalle_s and not derniere_position:
+            return
+        dernier[0] = maintenant
         complement = (f" ({reprises} reprises du cache)" if reprises else "")
         ligne = (f"{nom} : {etat['faites']}/{etat['total']} positions"
                  f"{complement}")
