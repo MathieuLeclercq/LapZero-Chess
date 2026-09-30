@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import pairwise
 from typing import TypedDict
@@ -172,13 +173,13 @@ class EvalConfig:
 #              VALIDATION DE SCHEMA
 # ============================================================
 
-def _champ(record: dict, cle: str, description: str):
+def _champ(record: Mapping[str, object], cle: str, description: str):
     if cle not in record:
         raise ContratInvalide(f"{description} : champ obligatoire manquant {cle!r}")
     return record[cle]
 
 
-def _chaine(record: dict, cle: str, description: str) -> str:
+def _chaine(record: Mapping[str, object], cle: str, description: str) -> str:
     valeur = _champ(record, cle, description)
     if not isinstance(valeur, str) or not valeur:
         raise ContratInvalide(
@@ -186,7 +187,7 @@ def _chaine(record: dict, cle: str, description: str) -> str:
     return valeur
 
 
-def _entier(record: dict, cle: str, description: str, *,
+def _entier(record: Mapping[str, object], cle: str, description: str, *,
             minimum: int | None = None,
             maximum: int | None = None) -> int:
     valeur = _champ(record, cle, description)
@@ -201,14 +202,14 @@ def _entier(record: dict, cle: str, description: str, *,
     return valeur
 
 
-def _liste(record: dict, cle: str, description: str) -> list:
+def _liste(record: Mapping[str, object], cle: str, description: str) -> list:
     valeur = _champ(record, cle, description)
     if not isinstance(valeur, list):
         raise ContratInvalide(f"{description} : {cle!r} doit etre une liste")
     return valeur
 
 
-def _flottant(record: dict, cle: str, description: str) -> float:
+def _flottant(record: Mapping[str, object], cle: str, description: str) -> float:
     valeur = _champ(record, cle, description)
     if isinstance(valeur, bool) or not isinstance(valeur, (int, float)):
         raise ContratInvalide(f"{description} : {cle!r} doit etre un nombre")
@@ -263,8 +264,8 @@ def validate_move_label(label: dict, description: str = "etiquette") -> None:
     _entier(label, "nodes", description, minimum=0)
 
 
-def _valider_annotations(record: dict, legal_indices: list[int],
-                         description: str) -> None:
+def _valider_annotations(record: Mapping[str, object],
+                         legal_indices: list[int], description: str) -> None:
     labels = _liste(record, "labels", description)
     if not labels:
         raise ContratInvalide(f"{description} : aucune etiquette")
@@ -298,7 +299,7 @@ def _valider_annotations(record: dict, legal_indices: list[int],
             f"s_best {s_best}")
 
 
-def validate_position(record: dict) -> None:
+def validate_position(record: Mapping[str, object]) -> None:
     """Verifie une position, annotee ou non, contre le contrat du banc.
 
     Une position avec plus de 128 coups legaux est valide : la limite
@@ -358,7 +359,7 @@ def validate_position(record: dict) -> None:
         _valider_annotations(record, legal_indices, description)
 
 
-def _valider_source(source: dict, description: str) -> None:
+def _valider_source(source: Mapping[str, object], description: str) -> None:
     if not isinstance(source, dict):
         raise ContratInvalide(f"{description} : un objet JSON est attendu")
     for cle in ("source_id", "url", "month", "license", "attribution"):
@@ -369,7 +370,7 @@ def _valider_source(source: dict, description: str) -> None:
             f"{description} : archive_sha256 doit etre un SHA-256")
 
 
-def validate_manifest(manifest: dict) -> None:
+def validate_manifest(manifest: Mapping[str, object]) -> None:
     """Verifie le manifeste d'une version publiee du banc."""
     if not isinstance(manifest, dict):
         raise ContratInvalide("manifeste : un objet JSON est attendu")
@@ -400,7 +401,10 @@ def validate_manifest(manifest: dict) -> None:
         if not isinstance(valeur, dict):
             raise ContratInvalide(f"manifeste : {cle!r} doit etre un objet")
 
-    for cle, valeur in manifest["counts"].items():
+    counts = manifest["counts"]
+    if not isinstance(counts, dict):
+        raise ContratInvalide("manifeste : counts doit etre un objet")
+    for cle, valeur in counts.items():
         if isinstance(valeur, bool) or not isinstance(valeur, int) or valeur < 0:
             raise ContratInvalide(
                 f"manifeste : counts[{cle!r}] doit etre un entier positif")
