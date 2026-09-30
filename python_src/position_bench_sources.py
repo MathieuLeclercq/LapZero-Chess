@@ -275,7 +275,11 @@ def dedupliquer_candidats(candidats: list[Position]) -> list[Position]:
         connu = uniques.get(candidat["position_id"])
         if connu is None or cle < connu[0]:
             uniques[candidat["position_id"]] = (cle, candidat)
-    return [candidat for _, candidat in sorted(uniques.values())]
+    # Le position_id departage les cles canoniques egales, cas reel des
+    # parties qui partagent l'identifiant de leur diffusion.
+    return [candidat for _, candidat in sorted(
+        uniques.values(),
+        key=lambda item: (*item[0], item[1]["position_id"]))]
 
 
 def _extraire_partie(partie, source: SourceInfo, compteur: dict,

@@ -10,6 +10,7 @@ import random
 import re
 import sys
 from pathlib import Path
+from typing import cast
 
 import chess
 import numpy as np
@@ -20,10 +21,11 @@ sys.path.insert(0, str(RACINE / "python_src"))
 os.add_dll_directory(str(RACINE / "python_src"))
 
 import chess_engine
-from position_bench_metrics import SourceInfo, validate_position
+from position_bench_metrics import Position, SourceInfo, validate_position
 from position_bench_sources import (
     DonneesInvalides,
     barre_progression,
+    dedupliquer_candidats,
     download_archive,
     extract_candidates,
     formater_progression,
@@ -258,6 +260,23 @@ def test_download_refuse_un_hash_incorrect_sans_rien_publier(tmp_path):
 
     assert not chemin.exists()
     assert not chemin.with_name(chemin.name + ".part").exists()
+
+
+def test_dedup_departage_les_cles_canoniques_egales():
+    """Des parties qui partagent l'identifiant de diffusion donnent la meme
+    cle canonique ; le position_id doit departager sans comparer les dicts."""
+
+    def candidat(position_id, game_id, ply):
+        return {"position_id": position_id, "game_id": game_id, "ply": ply,
+                "source_id": "s"}
+
+    a = cast(Position, candidat("a" * 64, "meme-diffusion", 10))
+    b = cast(Position, candidat("b" * 64, "meme-diffusion", 10))
+
+    assert [c["position_id"] for c in dedupliquer_candidats([a, b])] == [
+        "a" * 64, "b" * 64]
+    assert [c["position_id"] for c in dedupliquer_candidats([b, a])] == [
+        "a" * 64, "b" * 64]
 
 
 def test_formater_progression_affiche_pourcentage_debit_et_eta():
