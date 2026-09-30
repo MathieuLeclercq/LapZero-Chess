@@ -15,6 +15,16 @@ private:
     EvaluatorTiming m_last_timing;
     EvaluatorTotals m_totals;
 
+    // Corps commun de l'inference : une seule execution de session, puis un
+    // softmax par ligne quand probabilities vaut true, une copie brute des
+    // logits sinon. Les sorties du modele sont controlees avant lecture.
+    void evaluate_impl(
+        const std::vector<float>& input_tensor,
+        std::vector<float>& policy,
+        std::vector<float>& values,
+        int batch_size,
+        bool probabilities);
+
 public:
 
     ONNXEvaluator(const std::string& model_path, bool use_gpu = false);
@@ -25,6 +35,15 @@ public:
         std::vector<float>& policies, 
         std::vector<float>& values, 
         int batch_size) override;
+
+    // Inference brute : logits et valeur, sans softmax. Appel synchrone ; la
+    // session ne supporte aucun appel concurrent, ni avec une recherche MCTS
+    // ni avec un autre appel direct.
+    void predict_batch(
+        const std::vector<float>& input_tensor,
+        std::vector<float>& logits,
+        std::vector<float>& values,
+        int batch_size);
 
     void set_timing_enabled(bool enabled) override {
         m_timing_enabled = enabled;

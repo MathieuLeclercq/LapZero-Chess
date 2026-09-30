@@ -9,6 +9,10 @@
 #include "selfplay_manager.hpp"
 #include <pybind11/numpy.h>
 
+#include <cmath>
+#include <cstring>
+#include <stdexcept>
+
 namespace py = pybind11;
 
 PYBIND11_MODULE(chess_engine, m) {
@@ -211,7 +215,68 @@ PYBIND11_MODULE(chess_engine, m) {
         });
 
     py::class_<ONNXEvaluator>(m, "ONNXEvaluator")
-        .def(py::init<const std::string&, bool>(), py::arg("model_path"), py::arg("use_gpu") = false);
+        .def(py::init<const std::string&, bool>(), py::arg("model_path"), py::arg("use_gpu") = false)
+        .def("predict_batch", [](ONNXEvaluator& evaluator, py::array states) {
+                if (states.dtype().normalized_num()
+                    != py::dtype::num_of<float>()) {
+                    throw py::type_error(
+                        "predict_batch : dtype float32 attendu");
+                }
+                if ((states.flags() & py::array::c_style) == 0) {
+                    throw std::invalid_argument(
+                        "predict_batch : tableau non contigu");
+                }
+                if (states.ndim() != 4
+                    || states.shape(1) != 119
+                    || states.shape(2) != 8
+                    || states.shape(3) != 8) {
+                    throw std::invalid_argument(
+                        "predict_batch : forme (N, 119, 8, 8) attendue");
+                }
+                const int batch_size = static_cast<int>(states.shape(0));
+                if (batch_size <= 0) {
+                    throw std::invalid_argument("predict_batch : lot vide");
+                }
+
+                std::vector<float> input(
+                    static_cast<std::size_t>(batch_size) * 119 * 8 * 8);
+                std::memcpy(input.data(), states.data(),
+                            input.size() * sizeof(float));
+
+                std::vector<float> logits;
+                std::vector<float> values;
+                {
+                    py::gil_scoped_release release;
+                    evaluator.predict_batch(input, logits, values, batch_size);
+                }
+
+                // Sorties controlees avant d'etre lues : un modele fautif ne
+                // doit pas produire de tableau Python partiel.
+                for (const float logit : logits) {
+                    if (!std::isfinite(logit)) {
+                        throw std::runtime_error(
+                            "predict_batch : logits non finis");
+                    }
+                }
+                for (const float value : values) {
+                    if (!std::isfinite(value)) {
+                        throw std::runtime_error(
+                            "predict_batch : valeur non finie");
+                    }
+                }
+
+                py::array_t<float> logits_out({batch_size, POLICY_SIZE});
+                std::memcpy(logits_out.mutable_data(), logits.data(),
+                            logits.size() * sizeof(float));
+                py::array_t<float> values_out(batch_size);
+                std::memcpy(values_out.mutable_data(), values.data(),
+                            values.size() * sizeof(float));
+                return py::make_tuple(logits_out, values_out);
+            },
+            py::arg("states"),
+            "Inference brute, synchrone : logits bruts (N, 4672) et valeurs "
+            "(N). Aucun appel concurrent sur la meme session, ni avec une "
+            "recherche MCTS.");
 
     py::class_<MCTS>(m, "MCTS")
         .def(py::init([](ONNXEvaluator* evaluator, size_t tt_size,

@@ -258,6 +258,10 @@ class MoveStats:
 class ONNXEvaluator:
     def __init__(self, model_path: str, use_gpu: bool = False) -> None:
         ...
+    def predict_batch(self, states: numpy.ndarray) -> tuple[numpy.typing.NDArray[numpy.float32], numpy.typing.NDArray[numpy.float32]]:
+        """
+        Inference brute, synchrone : logits bruts (N, 4672) et valeurs (N). Aucun appel concurrent sur la meme session, ni avec une recherche MCTS.
+        """
 class Piece:
     @typing.overload
     def __init__(self) -> None:
