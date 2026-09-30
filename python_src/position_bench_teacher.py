@@ -193,6 +193,36 @@ def _valider_info(info: Mapping, uci: str) -> None:
         raise RuntimeError("annotation sans profondeur ou sans noeuds")
 
 
+def _derniere_info_exacte(engine, board, limit, *,
+                          root_moves=None,
+                          uci_impose: str | None = None) -> Mapping:
+    """Derniere ligne exacte d'une analyse bornee par des noeuds.
+
+    Une recherche coupee a la limite de noeuds se termine par une ligne
+    bornee (upperbound/lowerbound) : l'iteration en cours n'est pas finie.
+    La derniere ligne exacte est celle de l'iteration complete precedente,
+    a une profondeur presque identique. On la conserve donc, et une analyse
+    sans aucune ligne exacte est refusee plutot que remplacee par une borne.
+    """
+    meilleure = None
+    with engine.analysis(board, limit, root_moves=root_moves,
+                         game=object()) as analyse:
+        for info in analyse:
+            if "score" not in info or "wdl" not in info:
+                continue
+            if info.get("lowerbound") or info.get("upperbound"):
+                continue
+            if uci_impose is not None:
+                pv = info.get("pv")
+                if not pv or pv[0] != chess.Move.from_uci(uci_impose):
+                    continue
+            meilleure = info
+    if meilleure is None:
+        raise RuntimeError(
+            "analyse sans ligne exacte : annotation refusee")
+    return meilleure
+
+
 def _annoter_coup(engine, position: Mapping[str, object], uci: str,
                   index: int, nodes: int) -> MoveLabel:
     board = _vers_plateau(position)
@@ -203,8 +233,9 @@ def _annoter_coup(engine, position: Mapping[str, object], uci: str,
     # Clear Hash avant chaque recherche, puis un objet de partie neuf : le
     # moteur repart d'un etat propre, quel que soit l'ordre des taches.
     engine.configure({"Clear Hash": None})
-    info = engine.analyse(board, chess.engine.Limit(nodes=nodes),
-                          root_moves=[coup], game=object())
+    info = _derniere_info_exacte(
+        engine, board, chess.engine.Limit(nodes=nodes),
+        root_moves=[coup], uci_impose=uci)
     _valider_info(info, uci)
 
     score = info["score"].pov(board.turn)
@@ -263,10 +294,8 @@ def screen_position(engine, position: Mapping[str, object], *,
     """Esperance de resultat du criblage, du point de vue du joueur au trait."""
     board = _vers_plateau(position)
     engine.configure({"Clear Hash": None})
-    info = engine.analyse(board, chess.engine.Limit(nodes=nodes),
-                          game=object())
-    if "wdl" not in info:
-        raise RuntimeError("criblage sans WDL")
+    info = _derniere_info_exacte(engine, board,
+                                 chess.engine.Limit(nodes=nodes))
     wdl = _valider_wdl(info["wdl"].pov(board.turn))
     return wdl_score(wdl)
 

@@ -82,25 +82,37 @@ class FauxMoteur:
             if nom not in self.options:
                 raise chess.engine.EngineError(f"option inconnue {nom}")
 
-    def analyse(self, board, limit, *, multipv=None, game=None, info=None,
-                root_moves=None, options=None):
+    def analysis(self, board, limit, *, multipv=None, game=None, info=None,
+                 root_moves=None, options=None):
+        """Comme Stockfish : une ligne exacte, puis une ligne bornee finale.
+
+        Une recherche coupee a la limite de noeuds finit sur une iteration
+        incomplete, donc bornee. Le faux moteur reproduit cette sequence pour
+        que l'annotateur conserve bien la derniere ligne exacte.
+        """
         coups = list(root_moves) if root_moves is not None else []
         premier = coups[0] if coups else next(iter(board.legal_moves))
-        enregistrement = {
+        self.analyses.append({
             "board": board.copy(),
             "nodes": getattr(limit, "nodes", None),
             "root_moves": None if root_moves is None else coups,
             "game": game,
-        }
-        self.analyses.append(enregistrement)
+        })
+        exacte = self._info(premier, board, limit)
+        if self.borne:
+            return _FausseAnalyse([dict(exacte, upperbound=True)])
+        bornee = dict(exacte)
+        bornee["depth"] = exacte["depth"] + 1
+        bornee["upperbound"] = True
+        return _FausseAnalyse([exacte, bornee])
 
+    def _info(self, premier, board, limit):
         if self.mate_blancs is not None:
             score = chess.engine.PovScore(
                 chess.engine.Mate(self.mate_blancs), chess.WHITE)
         else:
             score = chess.engine.PovScore(
                 chess.engine.Cp(self.cp_blancs), chess.WHITE)
-
         resultat = {
             "score": score,
             "pv": [premier],
@@ -114,14 +126,25 @@ class FauxMoteur:
             else:
                 resultat["wdl"] = chess.engine.PovWdl(
                     chess.engine.Wdl(*self.wdl_blancs), chess.WHITE)
-        if self.borne:
-            resultat["upperbound"] = True
         if self.pv_incoherente:
             resultat["pv"] = [next(iter(board.legal_moves))]
         return resultat
 
     def ping(self):
         return None
+
+
+class _FausseAnalyse:
+    """Contexte d'analyse factice, iterable comme celui de python-chess."""
+
+    def __init__(self, infos):
+        self._infos = infos
+
+    def __enter__(self):
+        return iter(self._infos)
+
+    def __exit__(self, *exception):
+        return False
 
 
 class FauxProtocole:
