@@ -31,8 +31,9 @@ Le remplacement respecte les contraintes suivantes :
 | Comparabilité | mêmes positions, mêmes budgets et mêmes paramètres à chaque passage |
 | Provenance principale | parties externes à LapZero et jamais utilisées pour l'entraînement |
 | Historique | historique réel rejoué depuis la position initiale |
-| Vérité cible | WDL Stockfish pré-calculée pour chaque coup légal |
-| Score principal | regret WDL attendu de la policy, plus faible est meilleur |
+| Référence | centipions, mat et WDL Stockfish pré-calculés pour chaque coup légal |
+| Score principal | regret d'espérance de résultat dérivé de la WDL, plus faible est meilleur |
+| Diagnostics | value scalaire, MCTS et précision en centipions, sans score composite |
 | Recherche | sous-banc fixe de 256 positions à 384 simulations |
 | Elo | hors périmètre |
 
@@ -181,6 +182,20 @@ vue du joueur au trait dans la position cible. Pour chaque coup, le fichier stoc
 - le score en centipions ou le mat annoncé ;
 - la profondeur atteinte et le nombre de noeuds effectivement visités.
 
+La WDL n'est ni une sortie supplémentaire demandée à LapZero, ni une évaluation
+indépendante de Stockfish. Elle est dérivée de l'évaluation Stockfish selon son
+[modèle WDL officiel](https://github.com/official-stockfish/WDL_model), qui tient
+notamment compte du matériel et normalise la valeur des centipions. À partir de
+l'espérance `S`, la cible compatible avec la tête value scalaire de LapZero est :
+
+`V_sf = 2 * S - 1 = (win - loss) / (win + draw + loss)`
+
+`V_sf` appartient donc à `[-1, 1]`, comme la sortie `tanh` du réseau. Pour une
+position et un ensemble de `root_moves` donnés, le classement des coups reste
+principalement celui de l'évaluation en centipions. La conversion WDL change
+surtout l'amplitude attribuée aux erreurs. Elle la borne et évite qu'une poignée
+de scores très élevés ou de mats domine la moyenne.
+
 Le meilleur score de la position est `S* = max S(coup)`. Le regret d'un coup est
 `S* - S(coup)`. Tous les coups légaux sont annotés, car un modèle futur peut choisir
 un coup absent d'un MultiPV court.
@@ -267,6 +282,9 @@ GPU unique. Pour chaque position :
 4. joindre chaque probabilité à la WDL Stockfish pré-calculée ;
 5. écrire les mesures brutes dans un résultat compressé.
 
+Le même passage batché calcule les métriques de policy et de value. Tester la
+value à chaque évaluation n'ajoute donc pas un second parcours du modèle.
+
 Ce passage n'exécute jamais Stockfish. Il doit être déterministe au bit près sur
 les coups choisis. Sur la même machine, le même ONNX et la même version d'ONNX
 Runtime, les probabilités individuelles doivent être reproductibles à `1e-7` et
@@ -303,7 +321,9 @@ le délai.
 
 ## 8. Métriques
 
-### 8.1 Score principal
+### 8.1 Policy, value, centipions et MCTS
+
+#### Policy
 
 Pour une policy légale normalisée `pi`, le regret attendu est :
 
@@ -317,16 +337,46 @@ Les métriques complémentaires sont :
 
 - regret du coup argmax de la policy ;
 - masse de policy sur les coups dont le regret est inférieur ou égal à 0,02 ;
-- masse catastrophique sur les coups dont le regret est supérieur ou égal à 0,20 ;
-- erreur absolue de la tête value, après conversion de `[-1, 1]` vers `[0, 1]`,
-  par rapport à `S*` ; cette dernière reste diagnostique, car la WDL Stockfish
-  n'est pas exactement la cible de self-play du réseau.
+- masse catastrophique sur les coups dont le regret est supérieur ou égal à 0,20.
+
+#### Value scalaire
+
+La cible de value est `V* = 2 * S* - 1`. À chaque évaluation, le rapport calcule :
+
+- `MAE = moyenne(abs(V_modèle - V*))` ;
+- `RMSE = racine(moyenne((V_modèle - V*)^2))` ;
+- le biais signé `moyenne(V_modèle - V*)` ;
+- la corrélation de Pearson entre `V_modèle` et `V*`.
+
+Ces courbes restent diagnostiques. La cible d'entraînement de LapZero est le
+résultat final de ses parties de self-play, alors que `V*` est une espérance de
+résultat estimée par Stockfish. La corrélation est journalisée comme absente si
+l'une des deux séries a une variance nulle.
+
+#### Centipions
+
+Les centipions restent visibles pour répondre à une question plus tactique : de
+combien l'évaluation brute chute-t-elle lorsque la policy choisit son coup argmax ?
+Le rapport publie :
+
+- le regret en centipions médian et son 90e percentile ;
+- la proportion de coups argmax à 20, 50 et 100 centipions ou moins du meilleur ;
+- la couverture de ces statistiques.
+
+Une position est exclue de ces seuls diagnostics si le meilleur coup ou le coup
+choisi est évalué comme un mat. Aucun plafond arbitraire ne convertit un mat en
+centipions. La couverture indique explicitement la fraction restante, tandis que
+les métriques WDL continuent d'inclure toutes les positions.
+
+#### MCTS
 
 Pour le sous-banc MCTS, les mêmes regrets sont calculés à partir de la distribution
-de visites et de son argmax.
+de visites et de son argmax. Ils sont publiés séparément de ceux de la policy
+directe.
 
 Chaque mesure est publiée globalement et par phase, catégorie WDL et type de
-joueur humain ou bot. Aucun composite opaque ne mélange ces tranches.
+joueur humain ou bot. Aucun score composite ne mélange policy, value, centipions
+et MCTS.
 
 ### 8.2 Décider objectivement si le modèle progresse
 
@@ -340,7 +390,8 @@ sur le score principal si la borne supérieure de l'intervalle de
 
 Le rapport donne également la fraction de positions améliorées, inchangées et
 dégradées. Une amélioration globale accompagnée d'une forte dégradation des finales
-reste ainsi visible.
+reste ainsi visible. Les variations de value et de MCTS sont présentées à côté,
+mais ne changent pas la décision portée par le score principal de policy.
 
 ### 8.3 Noms W&B
 
@@ -351,6 +402,15 @@ La boucle d'entraînement journalise au minimum :
 - `eval/position/near_best_mass` ;
 - `eval/position/catastrophic_mass` ;
 - `eval/position/value_mae` ;
+- `eval/position/value_rmse` ;
+- `eval/position/value_bias` ;
+- `eval/position/value_correlation` ;
+- `eval/position/policy_argmax_cp_regret_median` ;
+- `eval/position/policy_argmax_cp_regret_p90` ;
+- `eval/position/policy_within_20cp` ;
+- `eval/position/policy_within_50cp` ;
+- `eval/position/policy_within_100cp` ;
+- `eval/position/policy_cp_coverage` ;
 - `eval/position/search_expected_regret` ;
 - `eval/position/search_argmax_regret` ;
 - `eval/position/delta_policy_regret` et les deux bornes à 95 % ;
@@ -414,6 +474,8 @@ réseau.
 - Hash ou schéma du dataset invalide : évaluation refusée avant chargement du
   modèle.
 - Coup légal sans annotation : évaluation refusée, aucun regret approximé.
+- Mat dans un diagnostic en centipions : position exclue de ce diagnostic et
+  couverture réduite, sans affecter les métriques WDL.
 - Délai de 300 secondes dépassé : statut `timeout`, aucune métrique principale.
 - Résultat précédent issu d'un autre dataset ou budget : comparaison appariée
   refusée.
@@ -439,6 +501,10 @@ réseau.
 - regret nul si toute la masse porte sur un meilleur coup ;
 - regret attendu exact sur une distribution synthétique à trois coups ;
 - seuils de masse proche et catastrophique aux valeurs frontières ;
+- conversion exacte de `S` vers la cible scalaire `V_sf` ;
+- MAE, RMSE, biais et corrélation sur des valeurs synthétiques ;
+- médiane, 90e percentile et seuils en centipions, avec exclusion des mats et
+  calcul de couverture ;
 - agrégation par phase, WDL et type humain ou bot ;
 - bootstrap apparié déterministe avec la graine fixée ;
 - refus d'une comparaison entre deux versions de dataset.
@@ -462,13 +528,14 @@ L'implémentation est acceptée lorsque :
    viennent pas de LapZero ;
 2. le dataset contient exactement 10 000 positions et le sous-banc MCTS exactement
    256 identifiants ;
-3. chaque coup légal de chaque position possède une WDL Stockfish ;
+3. chaque coup légal de chaque position possède une WDL Stockfish et un score en
+   centipions ou en mat ;
 4. l'audit de stabilité de la section 4.3 passe ;
 5. deux passages policy sur le même modèle produisent les mêmes métriques ;
 6. trois évaluations complètes consécutives terminent chacune en moins de 300
    secondes sur la machine d'entraînement de référence ;
-7. W&B reçoit le score principal, les métriques de recherche, le statut, la durée
-   et la version du dataset ;
+7. W&B reçoit séparément les métriques de policy, value, centipions et MCTS, ainsi
+   que le statut, la durée et la version du dataset ;
 8. la boucle de self-play ne lance plus le match Stockfish par défaut ;
 9. le match Stockfish manuel reste utilisable ;
 10. la suite Python et la suite C++ existantes restent vertes.
@@ -477,6 +544,8 @@ L'implémentation est acceptée lorsque :
 
 - Il ne produit pas un Elo absolu.
 - Il ne remplace pas les parties réelles du bot Lichess.
+- La WDL Stockfish est une calibration issue de son évaluation, pas une probabilité
+  littérale que LapZero obtienne ce résultat contre un adversaire donné.
 - Il ne mesure pas directement la gestion du temps, l'adaptation à un adversaire ou
   la conversion complète d'une partie.
 - Il peut finir par subir un surapprentissage humain si les décisions de recherche
