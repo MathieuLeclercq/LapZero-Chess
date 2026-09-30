@@ -290,6 +290,17 @@ def dedupliquer_candidats(candidats: list[Position]) -> list[Position]:
         key=lambda item: (*item[0], item[1]["position_id"]))]
 
 
+def filtrer_candidats_non_terminaux(candidats: list[Position]) -> list[Position]:
+    """Retire les nulles de regle des anciens caches d'extraction.
+
+    Ces compteurs proviennent du rejeu C++ integral. Python-chess ne considere
+    pas la troisieme repetition ni les 50 coups comme automatiquement terminaux,
+    alors que le MCTS le fait. Les autres fins de partie etaient deja exclues.
+    """
+    return [c for c in candidats
+            if c["halfmove_clock"] < 100 and c["repetition_count"] < 3]
+
+
 def _extraire_partie(partie, source: SourceInfo, compteur: dict,
                      date_min: date, empreintes_vues: set) -> list[Position]:
     en_tete = partie.headers
@@ -346,6 +357,11 @@ def _extraire_partie(partie, source: SourceInfo, compteur: dict,
         plateau.push_uci(coup)
         if plateau.is_game_over():
             break
+        if plateau.halfmove_clock >= 100 or plateau.is_repetition(3):
+            # Ignorer cette racine, mais une vraie partie peut continuer apres
+            # une nulle reclamable : les positions suivantes restent candidates.
+            _compter(compteur, "position_terminale")
+            continue
         phase = _phase(ply, plateau)
         courant = meilleurs[phase]
         if (courant is None
@@ -403,6 +419,9 @@ def _construire_candidat(infos: dict, phase: str, ply: int,
         return None
 
     cle = board.get_evaluation_cache_key(0)
+    if board.half_move_clock >= 100 or int(cle.repetition_category) >= 2:
+        _compter(compteur, "position_terminale")
+        return None
     enregistrement: Position = {
         "position_id": position_identity(board),
         "game_id": infos["game_id"],

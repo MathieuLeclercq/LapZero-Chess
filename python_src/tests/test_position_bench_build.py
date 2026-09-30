@@ -8,6 +8,7 @@ import collections
 import hashlib
 import json
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,6 +33,7 @@ from build_position_bench import (
     write_dataset,
 )
 from position_bench_teacher import AnnotationStore
+from position_bench_sources import extract_candidates, read_games
 
 SEL_FINAL = "lapzero-position-bench-v1-final"
 
@@ -436,3 +438,118 @@ def test_main_echoue_proprement_sur_un_dossier_absent(tmp_path, capsys):
 
     assert code == 1
     assert "erreur" in capsys.readouterr().err
+
+
+def test_reprise_extraction_filtre_les_anciens_candidats_terminaux(tmp_path):
+    source = dict(SOURCE, url=build_position_bench.URL_BROADCASTS.format(
+        mois="2026-08"))
+    partie_path = RACINE / "tests/data/position_bench/broadcasts.pgn"
+    valide = extract_candidates(read_games(partie_path, source), source)[0]
+    repetition = dict(valide, position_id="a" * 64, repetition_count=3)
+    cinquante = dict(valide, position_id="b" * 64, halfmove_clock=100)
+    archives = tmp_path / "archives"
+    archives.mkdir()
+    (archives / "lichess_db_broadcast_2026-08.pgn.zst").write_bytes(b"archive")
+    cache = tmp_path / "candidates_2026-08.jsonl.zst"
+    build_position_bench.ecrire_jsonl_zst([valide, repetition, cinquante], cache)
+    args = SimpleNamespace(work_dir=str(tmp_path), months=["2026-08"],
+                           resume=True)
+
+    build_position_bench._cmd_extract(args)
+
+    for chemin in (cache, tmp_path / "candidates.jsonl.zst"):
+        assert [c["position_id"] for c in lire_jsonl_zst(chemin)] == [
+            valide["position_id"]]
+
+
+def test_erreur_worker_arrete_les_taches_non_commencees():
+    traites = []
+
+    def traitement(moteur, element):
+        traites.append(element)
+        if element == 0:
+            raise RuntimeError("moteur en panne")
+        return element
+
+    with pytest.raises(RuntimeError, match="moteur en panne"):
+        build_position_bench._en_parallele(
+            [object()], list(range(20)), traitement)
+
+    assert traites == [0]
+
+
+def test_erreur_worker_conserve_le_resultat_du_worker_encore_actif():
+    actif = threading.Event()
+    enregistrer = []
+
+    def traitement(moteur, element):
+        if element == 0:
+            assert actif.wait(2)
+            raise RuntimeError("moteur en panne")
+        if element == 1:
+            actif.set()
+        return element
+
+    with pytest.raises(RuntimeError, match="moteur en panne"):
+        build_position_bench._en_parallele(
+            [object(), object()], list(range(20)), traitement,
+            a_reception=lambda element, resultat: enregistrer.append(resultat))
+
+    assert 1 in enregistrer
+    assert len(enregistrer) < 19
+
+
+class MoteurReprise:
+    def __init__(self):
+        self.ferme = False
+
+    def quit(self):
+        self.ferme = True
+
+
+def test_erreur_worker_retente_sur_un_nouveau_moteur():
+    initial = MoteurReprise()
+    moteurs = [initial]
+    ouvertures = []
+
+    def rouvrir():
+        moteur = MoteurReprise()
+        ouvertures.append(moteur)
+        return moteur
+
+    def traitement(moteur, element):
+        if moteur is initial:
+            raise RuntimeError("annotation invalide")
+        return element * 2
+
+    resultats = build_position_bench._en_parallele(
+        moteurs, [1, 2], traitement, reouvrir_moteur=rouvrir)
+
+    assert resultats == [2, 4]
+    assert initial.ferme
+    assert len(ouvertures) == 1
+    assert moteurs[0] is ouvertures[0]
+
+
+def test_deuxieme_erreur_worker_est_fatale():
+    initial = MoteurReprise()
+    moteurs = [initial]
+    ouvertures = []
+    traites = []
+
+    def rouvrir():
+        moteur = MoteurReprise()
+        ouvertures.append(moteur)
+        return moteur
+
+    def traitement(moteur, element):
+        traites.append(element)
+        raise RuntimeError("annotation toujours invalide")
+
+    with pytest.raises(RuntimeError, match="annotation toujours invalide"):
+        build_position_bench._en_parallele(
+            moteurs, [1, 2, 3], traitement, reouvrir_moteur=rouvrir)
+
+    assert initial.ferme
+    assert len(ouvertures) == 1
+    assert traites == [1, 1]

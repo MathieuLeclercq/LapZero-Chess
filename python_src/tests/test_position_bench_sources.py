@@ -21,6 +21,7 @@ sys.path.insert(0, str(RACINE / "python_src"))
 os.add_dll_directory(str(RACINE / "python_src"))
 
 import chess_engine
+import position_bench_sources
 from position_bench_metrics import Position, SourceInfo, validate_position
 from position_bench_sources import (
     DonneesInvalides,
@@ -290,6 +291,30 @@ def test_dedup_departage_les_cles_canoniques_egales():
         "a" * 64, "b" * 64]
     assert [c["position_id"] for c in dedupliquer_candidats([b, a])] == [
         "a" * 64, "b" * 64]
+
+
+def test_extraction_exclut_la_troisieme_repetition(monkeypatch):
+    board = chess.Board()
+    coups = ["g1f3", "g8f6", "f3g1", "f6g8"] * 2 + [
+        "e2e4", "e7e5", "b1c3", "b8c6", "d2d4", "e5d4",
+        "f1c4", "f8c5",
+    ]
+    for coup in coups:
+        board.push_uci(coup)
+    partie = chess.pgn.Game.from_board(board)
+    partie.headers.update({"Event": "Repetition", "White": "A",
+                           "Black": "B", "WhiteElo": "2200",
+                           "BlackElo": "2200", "Date": "2026.08.01",
+                           "Result": "1/2-1/2"})
+    # La troisieme occurrence de la position initiale serait choisie au ply 8.
+    monkeypatch.setattr(position_bench_sources, "_hash_phase",
+                        lambda game_id, ply: "0" if ply == 8 else "1")
+
+    candidats = extract_candidates([partie], SOURCE)
+
+    assert candidats
+    assert all(c["ply"] != 8 for c in candidats)
+    assert all(c["repetition_count"] < 3 for c in candidats)
 
 
 def test_formater_progression_affiche_pourcentage_debit_et_eta():

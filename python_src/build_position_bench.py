@@ -30,9 +30,8 @@ import io
 import json
 import os
 import sys
-import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -52,6 +51,7 @@ from position_bench_sources import (
     dedupliquer_candidats,
     download_archive,
     extract_candidates,
+    filtrer_candidats_non_terminaux,
     read_games,
 )
 from position_bench_teacher import (
@@ -417,7 +417,7 @@ def main(argv=None) -> int:
             _cmd_finalize(args)
         else:
             _cmd_build(args)
-    except (ValueError, RuntimeError, OSError) as erreur:
+    except (ValueError, RuntimeError, OSError, chess.engine.EngineError) as erreur:
         print(f"erreur : {erreur}", file=sys.stderr)
         return 1
     return 0
@@ -459,6 +459,13 @@ def _cmd_extract(args) -> None:
         chemin_candidats = dossier / f"candidates_{mois}.jsonl.zst"
         if args.resume and chemin_candidats.is_file():
             extraits = lire_jsonl_zst(chemin_candidats)
+            non_terminaux = filtrer_candidats_non_terminaux(extraits)
+            if len(non_terminaux) != len(extraits):
+                print(f"  candidats {mois} : "
+                      f"{len(extraits) - len(non_terminaux)} racines "
+                      "terminales retirees du cache")
+                extraits = non_terminaux
+                ecrire_jsonl_zst(extraits, chemin_candidats)
             print(f"  candidats {mois} deja extraits : {len(extraits)}, "
                   "reutilises")
         else:
@@ -526,12 +533,29 @@ def _ouvrir_stockfish(args, identite=None):
     if not args.stockfish:
         raise ValueError("--stockfish est obligatoire pour cette commande")
     moteur = chess.engine.SimpleEngine.popen_uci(args.stockfish)
-    configurer_moteur(moteur)
-    if identite is None:
-        identite = identifier_stockfish(
-            moteur, args.stockfish,
-            dossier_export=Path(args.work_dir) / "nnue")
+    try:
+        configurer_moteur(moteur)
+        if identite is None:
+            identite = identifier_stockfish(
+                moteur, args.stockfish,
+                dossier_export=Path(args.work_dir) / "nnue")
+    except BaseException:
+        _fermer_moteur(moteur)
+        raise
     return moteur, identite
+
+
+def _fermer_moteur(moteur) -> None:
+    """Ferme aussi un moteur deja termine, sans masquer l'erreur initiale."""
+    try:
+        moteur.quit()
+    except (chess.engine.EngineError, OSError, TimeoutError) as erreur:
+        print(f"  fermeture Stockfish : {erreur}", file=sys.stderr)
+
+
+def _fermer_moteurs(moteurs) -> None:
+    for moteur in moteurs:
+        _fermer_moteur(moteur)
 
 
 def _ouvrir_moteurs(args):
@@ -543,44 +567,98 @@ def _ouvrir_moteurs(args):
     """
     moteurs = []
     identite = None
-    for _ in range(max(1, args.workers)):
-        moteur, identite = _ouvrir_stockfish(args, identite)
-        moteurs.append(moteur)
+    try:
+        for _ in range(max(1, args.workers)):
+            moteur, identite = _ouvrir_stockfish(args, identite)
+            moteurs.append(moteur)
+    except BaseException:
+        _fermer_moteurs(moteurs)
+        raise
     assert identite is not None
     return moteurs, identite
 
 
 def _en_parallele(moteurs, elements, traitement, *, a_reception=None,
-                  progress=None):
-    """Applique un traitement par tache, chaque moteur occupe une tache a la fois.
+                  progress=None, reouvrir_moteur=None):
+    """Une tache active par moteur ; arret de la soumission au premier echec.
 
-    Les moteurs sont des processus Stockfish independants : la tache d'ordre
-    `i` prend le moteur `i % len(moteurs)` sous son verrou. Le resultat est
-    rendu des qu'il arrive via `a_reception(element, resultat)`, puis
-    `progress({"faites", "total"})` est appele. L'ordre de soumission, et donc
-    la repartition, ne change pas les resultats : chaque tache est independante.
+    Une annotation invalide ou un crash est retente une fois sur un moteur neuf
+    si la fabrique est fournie. Un second echec est fatal. Seules les taches
+    deja actives sont attendues ; leurs resultats reussis restent dans le cache.
+    Le coordinateur conserve l'ordre des resultats et toutes les ecritures.
     """
     resultats = [None] * len(elements)
     if not elements:
         return resultats
-    verrous = [threading.Lock() for _ in moteurs]
+    if not moteurs:
+        raise ValueError("au moins un moteur est requis")
 
-    def tache(ordre, element):
-        index = ordre % len(moteurs)
-        with verrous[index]:
+    def tache(index, element):
+        try:
+            return traitement(moteurs[index], element)
+        except (RuntimeError, ValueError, chess.engine.EngineError) as erreur:
+            if reouvrir_moteur is None:
+                raise
+            print(f"  Stockfish worker {index + 1} : {erreur} ; "
+                  "une tentative sur un nouveau moteur", file=sys.stderr,
+                  flush=True)
+            _fermer_moteur(moteurs[index])
+            moteurs[index] = reouvrir_moteur()
             return traitement(moteurs[index], element)
 
-    with ThreadPoolExecutor(max_workers=len(moteurs)) as executeur:
-        futurs = {executeur.submit(tache, ordre, element): (ordre, element)
-                  for ordre, element in enumerate(elements)}
-        for faites, futur in enumerate(as_completed(futurs), start=1):
-            ordre, element = futurs[futur]
-            resultat = futur.result()
-            resultats[ordre] = resultat
-            if a_reception is not None:
-                a_reception(element, resultat)
-            if progress is not None:
-                progress({"faites": faites, "total": len(elements)})
+    futurs = {}
+    a_soumettre = iter(enumerate(elements))
+    faites = 0
+
+    def soumettre(executeur, index):
+        suivant = next(a_soumettre, None)
+        if suivant is not None:
+            ordre, element = suivant
+            futur = executeur.submit(tache, index, element)
+            futurs[futur] = (index, ordre, element)
+
+    def enregistrer(futur, *, suivre=True):
+        nonlocal faites
+        _, ordre, element = futurs[futur]
+        resultat = futur.result()
+        if a_reception is not None:
+            a_reception(element, resultat)
+        resultats[ordre] = resultat
+        faites += 1
+        if suivre and progress is not None:
+            progress({"faites": faites, "total": len(elements)})
+
+    try:
+        with ThreadPoolExecutor(max_workers=len(moteurs)) as executeur:
+            try:
+                for index in range(len(moteurs)):
+                    soumettre(executeur, index)
+                while futurs:
+                    termines, _ = wait(futurs, return_when=FIRST_COMPLETED)
+                    libres = []
+                    # Traiter tous les achevements avant de soumettre la suite :
+                    # une erreur deja disponible ne doit pas remplir la file.
+                    for futur in sorted(termines, key=lambda f: futurs[f][1]):
+                        enregistrer(futur)
+                        index, _, _ = futurs.pop(futur)
+                        libres.append(index)
+                    for index in libres:
+                        soumettre(executeur, index)
+            except BaseException:
+                for futur in futurs:
+                    futur.cancel()
+                raise
+    except BaseException:
+        # Le pool est ferme et les quelques taches actives ont termine. Garder
+        # leurs succes, sans perdre l'exception qui a arrete la campagne.
+        for futur in futurs:
+            if not futur.cancelled() and futur.exception() is None:
+                try:
+                    enregistrer(futur, suivre=False)
+                except Exception as erreur:
+                    print(f"  resultat non sauvegarde : {erreur}",
+                          file=sys.stderr)
+        raise
     return resultats
 
 
@@ -588,8 +666,9 @@ def _cmd_screen(args) -> None:
     dossier = Path(args.work_dir)
     candidats = lire_jsonl_zst(dossier / "candidates.jsonl.zst")
     moteurs, identite = _ouvrir_moteurs(args)
-    store = AnnotationStore(dossier, _config_store(identite))
+    store = None
     try:
+        store = AnnotationStore(dossier, _config_store(identite))
         a_cribler = [position for position in candidats
                      if store.get(cle_criblage(position)) is None]
         _en_parallele(
@@ -597,6 +676,7 @@ def _cmd_screen(args) -> None:
             lambda moteur, position: screen_position(moteur, position),
             a_reception=lambda position, note: store.put(
                 cle_criblage(position), note),
+            reouvrir_moteur=lambda: _ouvrir_stockfish(args, identite)[0],
             progress=_barre_suivi("criblage",
                                   fichier=dossier / "criblage.progress"))
         enrichis = [
@@ -605,9 +685,9 @@ def _cmd_screen(args) -> None:
             for candidat in candidats
         ]
     finally:
-        store.close()
-        for moteur in moteurs:
-            moteur.quit()
+        if store is not None:
+            store.close()
+        _fermer_moteurs(moteurs)
     ecrire_jsonl_zst(enrichis, dossier / "screened.jsonl.zst")
     print(f"\n{len(enrichis)} positions criblees")
 
@@ -629,8 +709,9 @@ def _cmd_annotate(args) -> None:
         positions = [par_id[i] for i in reserve["ids"]]
 
     moteurs, identite = _ouvrir_moteurs(args)
-    store = AnnotationStore(dossier, _config_store(identite))
+    store = None
     try:
+        store = AnnotationStore(dossier, _config_store(identite))
         deja = sum(
             1 for position in positions
             if store.get(cle_position(position, NODES_ANNOTATION)) is not None)
@@ -639,13 +720,14 @@ def _cmd_annotate(args) -> None:
         annoter_positions(
             moteurs, positions, NODES_ANNOTATION, store,
             dossier / "annotated.jsonl.zst",
+            reouvrir_moteur=lambda: _ouvrir_stockfish(args, identite)[0],
             progress=_barre_suivi(
                 "pilot" if args.pilot_count else "annotation",
                 fichier=dossier / "annotation.progress"))
     finally:
-        store.close()
-        for moteur in moteurs:
-            moteur.quit()
+        if store is not None:
+            store.close()
+        _fermer_moteurs(moteurs)
     print(f"\n{len(positions)} positions disponibles "
           f"({deja} du cache, {len(positions) - deja} annotees maintenant)")
 
@@ -678,7 +760,7 @@ def _barre_suivi(nom: str, *, reprises: int = 0, fichier=None,
 
 
 def annoter_positions(moteurs, positions, nodes: int, store, sortie, *,
-                      progress=None) -> list:
+                      progress=None, reouvrir_moteur=None) -> list:
     """Annote les positions en parallele et materialise le resultat.
 
     Chaque position est analysee seule, dans un moteur configure de facon
@@ -710,6 +792,7 @@ def annoter_positions(moteurs, positions, nodes: int, store, sortie, *,
         moteurs, a_faire,
         lambda moteur, rang: annotate_position(moteur, positions[rang], nodes),
         a_reception=reception,
+        reouvrir_moteur=reouvrir_moteur,
         progress=suivi if progress is not None else None)
     ecrire_jsonl_zst(resultats, sortie)
     return resultats
@@ -757,10 +840,11 @@ def _finalize_final(args, dossier: Path) -> None:
     ids_audit = select_audit_ids(selection)
     par_id = {position["position_id"]: position for position in annotes}
     moteurs, identite = _ouvrir_moteurs(args)
-    store = AnnotationStore(dossier, _config_store(identite))
+    store = None
     resultats: dict = {}
     a_faire = []
     try:
+        store = AnnotationStore(dossier, _config_store(identite))
         for position_id in ids_audit:
             enregistre = store.get(cle_position(par_id[position_id],
                                                 NODES_AUDIT))
@@ -779,13 +863,14 @@ def _finalize_final(args, dossier: Path) -> None:
             lambda moteur, position_id: annotate_position(
                 moteur, par_id[position_id], NODES_AUDIT),
             a_reception=reception,
+            reouvrir_moteur=lambda: _ouvrir_stockfish(args, identite)[0],
             progress=_barre_suivi(
                 "audit", reprises=len(ids_audit) - len(a_faire),
                 fichier=dossier / "audit.progress"))
     finally:
-        store.close()
-        for moteur in moteurs:
-            moteur.quit()
+        if store is not None:
+            store.close()
+        _fermer_moteurs(moteurs)
     profonds = [resultats[position_id] for position_id in ids_audit]
 
     search_ids, audit = finaliser(selection, profonds)
