@@ -225,6 +225,18 @@ def test_annotate_move_renverse_le_point_de_vue():
     assert {"Clear Hash": None} in moteur.configures
 
 
+def test_les_analyses_partagent_le_jeton_de_partie():
+    """Un jeton stable evite le ucinewgame redondant avec le Clear Hash."""
+    moteur = FauxMoteur()
+    position = _position(["e2e4"])
+    annotate_move(moteur, position, "e7e5", 1000)
+    annotate_move(moteur, position, "g8f6", 1000)
+
+    premier, second = moteur.analyses[0]["game"], moteur.analyses[1]["game"]
+    assert premier is not None
+    assert premier is second
+
+
 def test_annotate_move_transmet_un_mat():
     moteur = FauxMoteur(mate_blancs=3)
 

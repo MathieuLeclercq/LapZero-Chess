@@ -520,28 +520,30 @@ def _config_store(identite) -> dict:
     }
 
 
-def _ouvrir_stockfish(args):
+def _ouvrir_stockfish(args, identite=None):
+    """Ouvre un moteur ; l'identification du reseau n'a lieu qu'une fois."""
     if not args.stockfish:
         raise ValueError("--stockfish est obligatoire pour cette commande")
     moteur = chess.engine.SimpleEngine.popen_uci(args.stockfish)
     configurer_moteur(moteur)
-    identite = identifier_stockfish(
-        moteur, args.stockfish,
-        dossier_export=Path(args.work_dir) / "nnue")
+    if identite is None:
+        identite = identifier_stockfish(
+            moteur, args.stockfish,
+            dossier_export=Path(args.work_dir) / "nnue")
     return moteur, identite
 
 
 def _ouvrir_moteurs(args):
-    """Ouvre `--workers` moteurs identiques et rend leur identite commune."""
+    """Ouvre `--workers` moteurs du meme binaire et rend leur identite.
+
+    L'identification (hash du binaire et export du reseau embarque) est faite
+    une seule fois : tous les moteurs viennent du meme chemin, et reexporter
+    98 Mo par moteur ne sert a rien.
+    """
     moteurs = []
     identite = None
     for _ in range(max(1, args.workers)):
-        moteur, identite_moteur = _ouvrir_stockfish(args)
-        if identite is None:
-            identite = identite_moteur
-        elif identite_moteur != identite:
-            raise RuntimeError(
-                "les workers n'utilisent pas le meme Stockfish")
+        moteur, identite = _ouvrir_stockfish(args, identite)
         moteurs.append(moteur)
     return moteurs, identite
 

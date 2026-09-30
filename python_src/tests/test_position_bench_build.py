@@ -9,6 +9,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -405,6 +406,29 @@ def test_annoter_positions_est_independant_du_nombre_de_moteurs(
     attendu = [f"p{i}" for i in range(6)]
     assert sorties[0] == attendu
     assert sorties[1] == attendu
+
+
+def test_les_moteurs_ne_sont_identifies_qu_une_fois(monkeypatch):
+    appels = {"identifications": 0}
+
+    def fausse_identification(moteur, chemin, **options):
+        appels["identifications"] += 1
+        return {"name": "faux", "networks": []}
+
+    monkeypatch.setattr(build_position_bench, "identifier_stockfish",
+                        fausse_identification)
+    monkeypatch.setattr(build_position_bench, "configurer_moteur",
+                        lambda moteur: None)
+    monkeypatch.setattr(
+        build_position_bench.chess.engine.SimpleEngine, "popen_uci",
+        staticmethod(lambda chemin: object()))
+    args = SimpleNamespace(stockfish="x", workers=4, work_dir="travail")
+
+    moteurs, identite = build_position_bench._ouvrir_moteurs(args)
+
+    assert len(moteurs) == 4
+    assert appels["identifications"] == 1
+    assert identite == {"name": "faux", "networks": []}
 
 
 def test_main_echoue_proprement_sur_un_dossier_absent(tmp_path, capsys):
