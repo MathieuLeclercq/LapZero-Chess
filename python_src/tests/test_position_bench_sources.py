@@ -117,6 +117,19 @@ def test_extraction_compte_chaque_cause_de_rejet():
     assert len(candidats) == 4
 
 
+def test_extract_candidates_signale_la_progression():
+    appels = []
+
+    candidats = extract_candidates(_parties(), SOURCE, progress=appels.append,
+                                   progress_every=1)
+
+    assert len(appels) == 11
+    assert appels[-1]["parties_lues"] == 11
+    assert appels[-1]["rejets"] == (
+        sum(REJETS_ATTENDUS.values()) - REJETS_ATTENDUS["date_hors_mois"])
+    assert appels[-1]["candidats"] == len(candidats)
+
+
 def test_les_candidats_respectent_le_contrat_et_l_ordre_canonique():
     candidats = extract_candidates(_parties(), SOURCE)
 

@@ -438,7 +438,7 @@ def _cmd_extract(args) -> None:
     candidats = []
     for mois in args.months:
         url = URL_BROADCASTS.format(mois=mois)
-        destination = archives / f"lichess-broadcasts-{mois}.pgn.zst"
+        destination = archives / f"lichess_db_broadcast_{mois}.pgn.zst"
         if args.resume and destination.is_file():
             source = _source_reprise(destination, url, mois)
             print(f"  archive {mois} deja presente, telechargement ignore")
@@ -450,14 +450,44 @@ def _cmd_extract(args) -> None:
                   f"{destination.stat().st_size / 1e6:.1f} Mo, sha256 "
                   f"{source['archive_sha256'][:16]}...")
         sources.append(dict(source))
-        candidats.extend(
-            extract_candidates(read_games(destination, source), source))
+
+        # Un fichier de candidats par mois : une interruption ne perd que le
+        # mois en cours, et une reprise reutilise les mois deja extraits.
+        chemin_candidats = dossier / f"candidates_{mois}.jsonl.zst"
+        if args.resume and chemin_candidats.is_file():
+            extraits = lire_jsonl_zst(chemin_candidats)
+            print(f"  candidats {mois} deja extraits : {len(extraits)}, "
+                  "reutilises")
+        else:
+            compteurs: dict = {}
+            extraits = extract_candidates(
+                read_games(destination, source), source,
+                compteurs=compteurs,
+                progress=_barre_extraction(
+                    mois, dossier / f"{mois}.extraction.progress"))
+            ecrire_jsonl_zst(extraits, chemin_candidats)
+            print(f"\n  {mois} : {len(extraits)} candidats, rejets "
+                  f"{compteurs}")
+        candidats.extend(extraits)
+
     candidats = dedupliquer_candidats(candidats)
     ecrire_jsonl_zst(candidats, dossier / "candidates.jsonl.zst")
     _ecrire_atomique(
         dossier / "sources.json",
         json.dumps(sources, sort_keys=True, indent=2).encode("utf-8"))
     print(f"{len(candidats)} candidats extraits de {len(sources)} archives")
+
+
+def _barre_extraction(mois: str, fichier=None):
+    """Etat d'extraction en continu, sur stderr et dans un fichier de suivi."""
+    def suivi(etat: dict) -> None:
+        ligne = (f"{mois} : {etat['parties_lues']} parties lues, "
+                 f"{etat['candidats']} candidats, {etat['rejets']} rejets")
+        print(f"\r  {ligne}", end="", file=sys.stderr, flush=True)
+        if fichier is not None:
+            Path(fichier).write_text(ligne + "\n", encoding="utf-8")
+
+    return suivi
 
 
 def _source_reprise(destination: Path, url: str, mois: str) -> SourceInfo:

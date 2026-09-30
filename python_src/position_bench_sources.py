@@ -239,10 +239,13 @@ def _mois_depuis_url(url: str) -> str:
 # ============================================================
 
 def extract_candidates(games, source: SourceInfo, *, compteurs=None,
-                       date_min: date = DATE_MINIMUM) -> list[Position]:
+                       date_min: date = DATE_MINIMUM, progress=None,
+                       progress_every: int = 2500) -> list[Position]:
     """Extrait au plus une position par phase et par partie valide.
 
     `compteurs` recoit par cause le nombre de parties ou de candidats rejetes.
+    `progress` est appele tous les `progress_every` parties avec l'etat courant
+    (`parties_lues`, `candidats`, `rejets`), pour suivre une extraction longue.
     Le resultat est trie par ordre canonique `(game_id, ply, source_id)` et
     dedoublonne par identite reseau : deux candidats indiscernables pour le
     reseau ne sont presentes qu'une fois, quelle que soit l'ordre de lecture.
@@ -250,14 +253,19 @@ def extract_candidates(games, source: SourceInfo, *, compteurs=None,
     compteur = {} if compteurs is None else compteurs
     candidats: list[Position] = []
     empreintes_vues = set()
-    for partie in games:
+    for lues, partie in enumerate(games, start=1):
         try:
             candidats_partie = _extraire_partie(
                 partie, source, compteur, date_min, empreintes_vues)
         except DonneesInvalides as erreur:
             _compter(compteur, erreur.cause)
-            continue
-        candidats.extend(candidats_partie)
+        else:
+            candidats.extend(candidats_partie)
+        if progress is not None and lues % progress_every == 0:
+            rejets = sum(valeur for cause, valeur in compteur.items()
+                         if cause != "date_hors_mois")
+            progress({"parties_lues": lues, "candidats": len(candidats),
+                      "rejets": rejets})
 
     return dedupliquer_candidats(candidats)
 
