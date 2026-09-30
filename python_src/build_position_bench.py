@@ -30,6 +30,8 @@ import io
 import json
 import os
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -529,16 +531,70 @@ def _ouvrir_stockfish(args):
     return moteur, identite
 
 
+def _ouvrir_moteurs(args):
+    """Ouvre `--workers` moteurs identiques et rend leur identite commune."""
+    moteurs = []
+    identite = None
+    for _ in range(max(1, args.workers)):
+        moteur, identite_moteur = _ouvrir_stockfish(args)
+        if identite is None:
+            identite = identite_moteur
+        elif identite_moteur != identite:
+            raise RuntimeError(
+                "les workers n'utilisent pas le meme Stockfish")
+        moteurs.append(moteur)
+    return moteurs, identite
+
+
+def _en_parallele(moteurs, elements, traitement, *, a_reception=None,
+                  progress=None):
+    """Applique un traitement par tache, chaque moteur occupe une tache a la fois.
+
+    Les moteurs sont des processus Stockfish independants : la tache d'ordre
+    `i` prend le moteur `i % len(moteurs)` sous son verrou. Le resultat est
+    rendu des qu'il arrive via `a_reception(element, resultat)`, puis
+    `progress({"faites", "total"})` est appele. L'ordre de soumission, et donc
+    la repartition, ne change pas les resultats : chaque tache est independante.
+    """
+    resultats = [None] * len(elements)
+    if not elements:
+        return resultats
+    verrous = [threading.Lock() for _ in moteurs]
+
+    def tache(ordre, element):
+        index = ordre % len(moteurs)
+        with verrous[index]:
+            return traitement(moteurs[index], element)
+
+    with ThreadPoolExecutor(max_workers=len(moteurs)) as executeur:
+        futurs = {executeur.submit(tache, ordre, element): (ordre, element)
+                  for ordre, element in enumerate(elements)}
+        for faites, futur in enumerate(as_completed(futurs), start=1):
+            ordre, element = futurs[futur]
+            resultat = futur.result()
+            resultats[ordre] = resultat
+            if a_reception is not None:
+                a_reception(element, resultat)
+            if progress is not None:
+                progress({"faites": faites, "total": len(elements)})
+    return resultats
+
+
 def _cmd_screen(args) -> None:
     dossier = Path(args.work_dir)
     candidats = lire_jsonl_zst(dossier / "candidates.jsonl.zst")
-    moteur, identite = _ouvrir_stockfish(args)
+    moteurs, identite = _ouvrir_moteurs(args)
     store = AnnotationStore(dossier, _config_store(identite))
     try:
-        for position in candidats:
-            if store.get(cle_criblage(position)) is None:
-                store.put(cle_criblage(position),
-                          screen_position(moteur, position))
+        a_cribler = [position for position in candidats
+                     if store.get(cle_criblage(position)) is None]
+        _en_parallele(
+            moteurs, a_cribler,
+            lambda moteur, position: screen_position(moteur, position),
+            a_reception=lambda position, note: store.put(
+                cle_criblage(position), note),
+            progress=_barre_suivi("criblage",
+                                  fichier=dossier / "criblage.progress"))
         enrichis = [
             {**candidat,
              "screen_score": store.get(cle_criblage(candidat))}
@@ -546,9 +602,10 @@ def _cmd_screen(args) -> None:
         ]
     finally:
         store.close()
-        moteur.quit()
+        for moteur in moteurs:
+            moteur.quit()
     ecrire_jsonl_zst(enrichis, dossier / "screened.jsonl.zst")
-    print(f"{len(enrichis)} positions criblees")
+    print(f"\n{len(enrichis)} positions criblees")
 
 
 def _cmd_annotate(args) -> None:
@@ -567,24 +624,15 @@ def _cmd_annotate(args) -> None:
                   for c in lire_jsonl_zst(dossier / "screened.jsonl.zst")}
         positions = [par_id[i] for i in reserve["ids"]]
 
-    moteurs = []
-    identite = None
-    for _ in range(max(1, args.workers)):
-        moteur, identite_moteur = _ouvrir_stockfish(args)
-        if identite is None:
-            identite = identite_moteur
-        elif identite_moteur != identite:
-            raise RuntimeError(
-                "les workers n'utilisent pas le meme Stockfish")
-        moteurs.append(moteur)
+    moteurs, identite = _ouvrir_moteurs(args)
     store = AnnotationStore(dossier, _config_store(identite))
     try:
         annoter_positions(
             moteurs, positions, NODES_ANNOTATION, store,
             dossier / "annotated.jsonl.zst",
-            progress=_barre_annotation(
+            progress=_barre_suivi(
                 "pilot" if args.pilot_count else "annotation",
-                dossier / "annotation.progress"))
+                fichier=dossier / "annotation.progress"))
     finally:
         store.close()
         for moteur in moteurs:
@@ -592,11 +640,12 @@ def _cmd_annotate(args) -> None:
     print(f"\n{len(positions)} positions annotees")
 
 
-def _barre_annotation(nom: str, fichier=None):
-    """Etat d'annotation en continu, sur stderr et dans un fichier de suivi."""
+def _barre_suivi(nom: str, *, reprises: int = 0, fichier=None):
+    """Etat de progression en continu, sur stderr et dans un fichier de suivi."""
     def suivi(etat: dict) -> None:
-        ligne = (f"{nom} : {etat['faites']}/{etat['total']} positions "
-                 f"nouvelles ({etat['reprises']} reprises du cache)")
+        complement = (f" ({reprises} reprises du cache)" if reprises else "")
+        ligne = (f"{nom} : {etat['faites']}/{etat['total']} positions"
+                 f"{complement}")
         print(f"\r  {ligne}", end="", file=sys.stderr, flush=True)
         if fichier is not None:
             Path(fichier).write_text(ligne + "\n", encoding="utf-8")
@@ -606,11 +655,12 @@ def _barre_annotation(nom: str, fichier=None):
 
 def annoter_positions(moteurs, positions, nodes: int, store, sortie, *,
                       progress=None) -> list:
-    """Repartit les positions entre les moteurs et materialise le resultat.
+    """Annote les positions en parallele et materialise le resultat.
 
     Chaque position est analysee seule, dans un moteur configure de facon
-    identique : le resultat ne depend donc pas du nombre de moteurs ni de la
-    repartition. `progress` est appele apres chaque position nouvellement
+    identique : le resultat ne depend donc ni du nombre de moteurs ni de la
+    repartition. Le cache SQLite est ecrit par le coordinateur, jamais par les
+    travailleurs. `progress` est appele apres chaque position nouvellement
     annotee, pour suivre une campagne longue.
     """
     resultats: list = [None] * len(positions)
@@ -621,14 +671,22 @@ def annoter_positions(moteurs, positions, nodes: int, store, sortie, *,
     a_faire = [rang for rang, resultat in enumerate(resultats)
                if resultat is None]
     deja = len(positions) - len(a_faire)
-    for index, rang in enumerate(a_faire):
-        moteur = moteurs[index % len(moteurs)]
-        annotee = annotate_position(moteur, positions[rang], nodes)
+
+    def reception(rang: int, annotee) -> None:
         store.put(cle_position(positions[rang], nodes), annotee)
         resultats[rang] = annotee
-        if progress is not None:
-            progress({"faites": index + 1, "total": len(a_faire),
-                      "reprises": deja})
+
+    def suivi(etat: dict) -> None:
+        if progress is None:
+            return
+        progress({"faites": etat["faites"], "total": etat["total"],
+                  "reprises": deja})
+
+    _en_parallele(
+        moteurs, a_faire,
+        lambda moteur, rang: annotate_position(moteur, positions[rang], nodes),
+        a_reception=reception,
+        progress=suivi if progress is not None else None)
     ecrire_jsonl_zst(resultats, sortie)
     return resultats
 

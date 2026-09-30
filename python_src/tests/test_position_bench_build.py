@@ -366,8 +366,10 @@ def test_annoter_positions_repartit_et_reprend_sur_le_cache(tmp_path,
             p["position_id"] for p in positions]
         assert len(appels) == 5
         assert {moteur for moteur, _, _ in appels} == set(moteurs)
-        assert etats == [{"faites": rang + 1, "total": 5, "reprises": 0}
-                         for rang in range(5)]
+        # Les etats arrivent dans l'ordre d'achevement, pas de soumission.
+        assert sorted(etat["faites"] for etat in etats) == [1, 2, 3, 4, 5]
+        assert all(etat["total"] == 5 and etat["reprises"] == 0
+                   for etat in etats)
 
         # Reprise : tout est en cache, aucun appel ni progression.
         appels.clear()
@@ -378,6 +380,31 @@ def test_annoter_positions_repartit_et_reprend_sur_le_cache(tmp_path,
         assert etats == []
     finally:
         store.close()
+
+
+def test_annoter_positions_est_independant_du_nombre_de_moteurs(
+        tmp_path, monkeypatch):
+    def fausse_annotation(moteur, position, nodes):
+        return {"position_id": position["position_id"]}
+
+    monkeypatch.setattr(build_position_bench, "annotate_position",
+                        fausse_annotation)
+    positions = [{"position_id": f"p{i}"} for i in range(6)]
+    sorties = []
+    for nombre in (1, 4):
+        store = AnnotationStore(tmp_path / f"n{nombre}", {"schema": 1})
+        sortie = tmp_path / f"n{nombre}.jsonl.zst"
+        try:
+            resultat = annoter_positions(
+                [object() for _ in range(nombre)], positions, 200_000, store,
+                sortie)
+        finally:
+            store.close()
+        sorties.append([r["position_id"] for r in resultat])
+
+    attendu = [f"p{i}" for i in range(6)]
+    assert sorties[0] == attendu
+    assert sorties[1] == attendu
 
 
 def test_main_echoue_proprement_sur_un_dossier_absent(tmp_path, capsys):
