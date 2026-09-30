@@ -301,12 +301,22 @@ Le sous-banc utilise :
 - taille de batch MCTS égale à 8 et batch fixe activé ;
 - huit travailleurs de recherche dans un seul processus ;
 - virtual loss égal à 2, FPU égal à 0,30 et quatre tentatives de collision ;
-- un MCTS neuf et une table de transposition froide par position.
+- une recherche neuve et une table de transposition froide par position.
+
+Les 256 positions sont évaluées séquentiellement, dans l'ordre figé du sous-banc.
+Le batching et les huit travailleurs servent à collecter plusieurs feuilles d'un
+même arbre, pas à rechercher plusieurs positions en parallèle. Un unique objet
+`MCTS` et un unique évaluateur ONNX GPU sont réutilisés pendant tout le passage.
+`mcts_search()` crée et détruit sa racine locale à chaque appel. Entre deux
+positions, l'orchestrateur remet la table de transposition et les compteurs à zéro
+au repos, mais conserve le `SearchExecutor`, ses travailleurs et la session ONNX
+chauds.
 
 Cette configuration réutilise le chemin multicore batché existant. Elle ne lance
-aucun processus Stockfish et aucun pool de 16 moteurs. Le parallélisme de recherche
-peut introduire un très faible bruit d'ordonnancement, raison pour laquelle la
-policy brute reste le score principal.
+aucun processus Stockfish, aucun pool de 16 moteurs et aucune recherche concurrente
+sur le même évaluateur. Le parallélisme interne peut introduire un très faible
+bruit d'ordonnancement, raison pour laquelle la policy brute reste le score
+principal.
 
 ### 7.3 Délai
 
@@ -516,6 +526,8 @@ réseau.
 - mêmes coups policy et écarts numériques inférieurs aux tolérances de la
   section 7.1 sur deux exécutions du même ONNX ;
 - MCTS sans bruit de Dirichlet, avec exactement 384 simulations terminées ;
+- positions MCTS traitées sans chevauchement sur un objet réutilisé, avec racine
+  neuve, table froide et pool de travailleurs persistant ;
 - arrêt propre à l'échéance sans publication de résultat partiel ;
 - exécution de bout en bout sur un fixture de quelques positions avec un faux
   évaluateur, puis avec le vrai module C++ quand il est disponible.
