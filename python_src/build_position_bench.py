@@ -579,21 +579,39 @@ def _cmd_annotate(args) -> None:
         moteurs.append(moteur)
     store = AnnotationStore(dossier, _config_store(identite))
     try:
-        annoter_positions(moteurs, positions, NODES_ANNOTATION, store,
-                          dossier / "annotated.jsonl.zst")
+        annoter_positions(
+            moteurs, positions, NODES_ANNOTATION, store,
+            dossier / "annotated.jsonl.zst",
+            progress=_barre_annotation(
+                "pilot" if args.pilot_count else "annotation",
+                dossier / "annotation.progress"))
     finally:
         store.close()
         for moteur in moteurs:
             moteur.quit()
-    print(f"{len(positions)} positions annotees")
+    print(f"\n{len(positions)} positions annotees")
 
 
-def annoter_positions(moteurs, positions, nodes: int, store, sortie) -> list:
+def _barre_annotation(nom: str, fichier=None):
+    """Etat d'annotation en continu, sur stderr et dans un fichier de suivi."""
+    def suivi(etat: dict) -> None:
+        ligne = (f"{nom} : {etat['faites']}/{etat['total']} positions "
+                 f"nouvelles ({etat['reprises']} reprises du cache)")
+        print(f"\r  {ligne}", end="", file=sys.stderr, flush=True)
+        if fichier is not None:
+            Path(fichier).write_text(ligne + "\n", encoding="utf-8")
+
+    return suivi
+
+
+def annoter_positions(moteurs, positions, nodes: int, store, sortie, *,
+                      progress=None) -> list:
     """Repartit les positions entre les moteurs et materialise le resultat.
 
     Chaque position est analysee seule, dans un moteur configure de facon
     identique : le resultat ne depend donc pas du nombre de moteurs ni de la
-    repartition.
+    repartition. `progress` est appele apres chaque position nouvellement
+    annotee, pour suivre une campagne longue.
     """
     resultats: list = [None] * len(positions)
     for rang, position in enumerate(positions):
@@ -602,11 +620,15 @@ def annoter_positions(moteurs, positions, nodes: int, store, sortie) -> list:
             resultats[rang] = enregistre
     a_faire = [rang for rang, resultat in enumerate(resultats)
                if resultat is None]
+    deja = len(positions) - len(a_faire)
     for index, rang in enumerate(a_faire):
         moteur = moteurs[index % len(moteurs)]
         annotee = annotate_position(moteur, positions[rang], nodes)
         store.put(cle_position(positions[rang], nodes), annotee)
         resultats[rang] = annotee
+        if progress is not None:
+            progress({"faites": index + 1, "total": len(a_faire),
+                      "reprises": deja})
     ecrire_jsonl_zst(resultats, sortie)
     return resultats
 

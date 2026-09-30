@@ -357,19 +357,25 @@ def test_annoter_positions_repartit_et_reprend_sur_le_cache(tmp_path,
     moteurs = [object(), object()]
     store = AnnotationStore(tmp_path, {"schema": 1})
     sortie = tmp_path / "annotated.jsonl.zst"
+    etats = []
     try:
         resultat = annoter_positions(moteurs, positions, 200_000, store,
-                                     sortie)
+                                     sortie, progress=etats.append)
 
         assert [r["position_id"] for r in resultat] == [
             p["position_id"] for p in positions]
         assert len(appels) == 5
         assert {moteur for moteur, _, _ in appels} == set(moteurs)
+        assert etats == [{"faites": rang + 1, "total": 5, "reprises": 0}
+                         for rang in range(5)]
 
-        # Reprise : tout est en cache, aucun appel supplementaire.
+        # Reprise : tout est en cache, aucun appel ni progression.
         appels.clear()
-        annoter_positions([moteurs[0]], positions, 200_000, store, sortie)
+        etats.clear()
+        annoter_positions([moteurs[0]], positions, 200_000, store, sortie,
+                          progress=etats.append)
         assert appels == []
+        assert etats == []
     finally:
         store.close()
 
