@@ -118,10 +118,12 @@ class RawResult(TypedDict):
     legal_indices: np.ndarray
     policy_probs: np.ndarray
     values: np.ndarray
+    policy_regrets: np.ndarray
     search_ids: np.ndarray
     search_offsets: np.ndarray
     search_indices: np.ndarray
     search_probs: np.ndarray
+    search_regrets: np.ndarray
     search_counters: list[dict]
     timings: dict
 
@@ -140,6 +142,11 @@ class EvalReport(TypedDict):
     comparison: dict | None
     result_path: str
     error: str | None
+    target_s: NotRequired[float]
+    over_target: NotRequired[bool]
+    metrics_version: NotRequired[str]
+    iteration: NotRequired[int | None]
+    global_step: NotRequired[int | None]
 
 
 @dataclass(frozen=True)
