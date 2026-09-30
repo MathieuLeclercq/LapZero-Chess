@@ -73,6 +73,12 @@ python_src/              orchestration Python
   stockfish_player.py    ancrage Stockfish (adversaire de référence)
   tournament_elo.py      tournoi multi-modèles avec Whole History Rating
   puzzle_bench.py        banc de puzzles (instrument de qualité principal)
+  position_bench_metrics.py   contrats, regrets et agrégations du banc
+  position_bench_sources.py   archives Lichess, PGN, positions et identités
+  position_bench_teacher.py   annotation Stockfish et cache SQLite reprenable
+  build_position_bench.py     construction, sélection et publication du banc
+  position_bench.py           évaluation GPU : policy/value puis MCTS
+  position_bench_results.py   résultats NPZ/sidecar, comparaison, W&B
   search_bench.py bench_metrics.py multicore_comparison.py hot_tree_bench.py
   tt_policy_comparison.py  instruments de débit et de compteurs
   play_against_bot.py lib_gui.py   GUI Pygame
@@ -127,6 +133,20 @@ fait avancer la recherche par tranches de `BATCH_SIZE = 64` simulations, avec
 réel et comparaisons appariées (McNemar) ; `search_bench.py`,
 `multicore_comparison.py` et `hot_tree_bench.py` mesurent le débit et les
 compteurs ; `tournament_elo.py` donne l'Elo par WHR.
+
+### 5. Banc externe de positions
+
+`build_position_bench.py` telecharge les archives de broadcasts Lichess,
+extrait les candidats (un par phase et par partie, historique complet rejoue),
+les fait annoter hors ligne par Stockfish (WDL et centipions par coup legal,
+cache SQLite reprenable), selectionne 10 000 positions sous quotas et plafonds,
+puis publie un JSONL zstd immuable avec manifeste et README. Le lot de mesure
+`position_bench.py` rejoue chaque position, verifie FEN, identite reseau et
+couverture des etiquettes, calcule les logits bruts via `predict_batch`, puis
+derive un softmax masque aux coups legaux. Les 256 identifiants du sous-banc
+passent ensuite sur un MCTS unique et froid par position. `position_bench_results.py`
+sauve le NPZ et son sidecar, agrege les regrets et compare deux checkpoints en
+apparie. `train_self_play.py` appelle cette chaine tous les 4 tours par defaut.
 
 ## Design patterns
 
@@ -210,6 +230,13 @@ compteurs ; `tournament_elo.py` donne l'Elo par WHR.
   avec leur historique réel et une TT neuve par puzzle ; les comparaisons sont
   appariées. Toute modification de MCTS, de TT ou de réseau passe par lui avant
   toute décision.
+- **Instrument de suivi : le banc externe de positions.** 10 000 positions de
+  broadcasts, disjointes de l'entraînement et annotées par Stockfish, dont un
+  sous-banc de 256 à 384 simulations. Le score principal est le regret attendu
+  de la policy, comparé en apparié avec un bootstrap à graine fixe ; la cible
+  de cinq minutes est souple et un dépassement n'invalide rien. `position_id`
+  est l'identité réseau (tenseur, coups légaux, trait, demi-coups, répétitions)
+  et le protocole de mesure est haché séparément du modèle.
 - **Taille de table.** 4 000 000 d'entrées en UCI (environ 4.16 Go) ; le banc
   utilise volontairement une table minuscule. `TTEntry` réserve 128 coups
   (1040 octets) alors que 35 suffisent, dette identifiée au backlog §2.

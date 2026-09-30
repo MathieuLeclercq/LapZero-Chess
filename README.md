@@ -131,6 +131,38 @@ and rapid games of 3 to 10 minutes with at most 2 seconds of increment,
 prefers bot opponents, and saves its games as PGN in
 `python_src/lichess_bot/game_records/`.
 
+## Position bench
+
+The periodic assessment is a frozen set of external positions, not a match.
+The `v1` dataset holds 10,000 positions taken from Lichess broadcast archives
+(CC BY-SA 4.0), each with its real game history and every legal move annotated
+offline by Stockfish (WDL and centipawns). A fixed sub-bench of 256 positions
+runs a 384-simulation MCTS. The main metric is the expected policy regret over
+the Stockfish outcome expectation; the soft duration target is about five
+minutes per pass. Training calls the bench every 4 iterations by default
+(`--eval-every`, `0` disables it, `--position-bench` and `--eval-output-dir`
+override the default paths). The bench is forbidden as training data.
+
+Build the dataset once (offline, network and Stockfish required), then qualify
+it and evaluate checkpoints. Run these from the repository root:
+
+```bash
+uv run python python_src/build_position_bench.py build --months 2026-08 2026-07 2026-06 --stockfish <stockfish.exe> --workers 4 --work-dir data/position_bench_work --output data/position_bench/v1 --resume
+uv run python python_src/position_bench.py validate --bench data/position_bench/v1
+uv run python python_src/position_bench.py evaluate --model <model.onnx> --bench data/position_bench/v1 --output-dir position_bench_results/qualification-1 --iteration 680
+uv run python python_src/position_bench.py compare --current position_bench_results/qualification-1/<model>.npz --previous position_bench_results/<ref>/<model>.npz
+uv run python python_src/position_bench.py reaggregate --result <result.npz> --bench data/position_bench/v1 --output metrics.json
+uv run python python_src/position_bench.py profile --candidates data/position_bench_work/candidates.jsonl.zst --model <model.onnx> --search-count 32 --output-dir position_bench_results
+```
+
+Each result is a compressed NPZ plus a JSON sidecar holding the model, dataset,
+C++ module, ONNX Runtime and protocol hashes; comparisons are paired by
+position and refuse different datasets or protocols. A 340-second pass is a
+valid pass: `over_target` is logged, nothing is shortened. The bench measures
+agreement with Stockfish on external positions; it is not an Elo rating. The
+periodic Stockfish match is no longer started by the training loop;
+`stockfish_player.py` remains the manual anchor tool.
+
 ## Testing
 
 `chess_perft` validates the move generator against the six standard perft
