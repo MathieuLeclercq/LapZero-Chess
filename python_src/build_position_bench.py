@@ -45,6 +45,7 @@ from position_bench_metrics import (
 from position_bench_sources import (
     ATTRIBUTION_BROADCASTS,
     LICENCE_BROADCASTS,
+    barre_progression,
     dedupliquer_candidats,
     download_archive,
     extract_candidates,
@@ -96,8 +97,8 @@ SEL_RECHERCHE = "lapzero-position-bench-v1-search"
 SEL_AUDIT = "lapzero-position-bench-v1-audit"
 SEL_PILOTE = "lapzero-position-bench-v1-pilot"
 
-URL_BROADCASTS = ("https://database.lichess.org/broadcasts/"
-                  "lichess-broadcasts-{mois}.pgn.zst")
+URL_BROADCASTS = ("https://database.lichess.org/broadcast/"
+                  "lichess_db_broadcast_{mois}.pgn.zst")
 
 
 class SelectionIncomplete(RuntimeError):
@@ -440,8 +441,14 @@ def _cmd_extract(args) -> None:
         destination = archives / f"lichess-broadcasts-{mois}.pgn.zst"
         if args.resume and destination.is_file():
             source = _source_reprise(destination, url, mois)
+            print(f"  archive {mois} deja presente, telechargement ignore")
         else:
-            source = download_archive(url, destination, None)
+            source = download_archive(
+                url, destination, None,
+                progress=barre_progression(f"{mois}"))
+            print(f"\n  archive {mois} : "
+                  f"{destination.stat().st_size / 1e6:.1f} Mo, sha256 "
+                  f"{source['archive_sha256'][:16]}...")
         sources.append(dict(source))
         candidats.extend(
             extract_candidates(read_games(destination, source), source))

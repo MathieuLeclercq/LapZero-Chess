@@ -23,8 +23,10 @@ import chess_engine
 from position_bench_metrics import SourceInfo, validate_position
 from position_bench_sources import (
     DonneesInvalides,
+    barre_progression,
     download_archive,
     extract_candidates,
+    formater_progression,
     position_identity,
     read_games,
     replay_position,
@@ -256,6 +258,35 @@ def test_download_refuse_un_hash_incorrect_sans_rien_publier(tmp_path):
 
     assert not chemin.exists()
     assert not chemin.with_name(chemin.name + ".part").exists()
+
+
+def test_formater_progression_affiche_pourcentage_debit_et_eta():
+    ligne = formater_progression("aout", 15_500_000, 31_000_000,
+                                 30_000_000.0, 0.5)
+
+    assert "50.0 %" in ligne
+    assert "31.0 Mo" in ligne
+    assert "Mo/s" in ligne
+    assert "ETA 00:00" in ligne
+
+
+def test_formater_progression_sans_taille_totale():
+    ligne = formater_progression("aout", 1_500_000, None, 1_000_000.0, None)
+
+    assert "1.5 Mo" in ligne
+    assert "ETA" not in ligne
+
+
+def test_barre_progression_ecrit_le_fichier_de_suivi(tmp_path):
+    import io
+
+    fichier = tmp_path / "aout.progress"
+    suivi = barre_progression("aout", intervalle_s=0.0, flot=io.StringIO(),
+                              fichier=fichier)
+
+    suivi(5_000_000, 10_000_000, 2_500_000.0, 2.0)
+
+    assert "50.0 %" in fichier.read_text(encoding="utf-8")
 
 
 def test_download_interrompu_ne_publie_pas_de_fichier_partiel(tmp_path):

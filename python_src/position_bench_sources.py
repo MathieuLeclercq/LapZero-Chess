@@ -37,7 +37,9 @@ import json
 import os
 import re
 import struct
-from collections.abc import Mapping
+import sys
+import time
+from collections.abc import Callable, Mapping
 from datetime import date
 from pathlib import Path
 from typing import Any, cast
@@ -121,18 +123,22 @@ def _lire_parties(flux, source: SourceInfo):
 
 
 def download_archive(url: str, destination, expected_sha256: str | None,
-                     *, fetch=None) -> SourceInfo:
+                     *, fetch=None, progress=None) -> SourceInfo:
     """Telecharge une archive, verifie son hash et ne publie qu'apres controle.
 
     Le telechargement s'ecrit dans `<destination>.part` ; le fichier final
     n'apparait qu'apres verification du SHA-256 attendu. Toute interruption
     supprime le `.part` : un fichier partiel ne peut jamais etre pris pour une
-    archive valide. `fetch` est injectable pour les tests.
+    archive valide. `fetch` est injectable pour les tests ; `progress` recoit
+    `(recus, total, octets_par_s, eta_s)` a chaque bloc recu.
     """
     chemin = Path(destination)
     chemin.parent.mkdir(parents=True, exist_ok=True)
     partiel = chemin.with_name(chemin.name + ".part")
-    telecharger = fetch if fetch is not None else _telecharger_http
+    if fetch is not None:
+        telecharger = fetch
+    else:
+        telecharger = lambda url_source: _telecharger_http(url_source, progress)
 
     digest = hashlib.sha256()
     publie = False
@@ -163,12 +169,62 @@ def download_archive(url: str, destination, expected_sha256: str | None,
     )
 
 
-def _telecharger_http(url: str):
+def _telecharger_http(url: str, progress=None):
     with requests.get(url, stream=True, timeout=60) as reponse:
         reponse.raise_for_status()
+        entete = reponse.headers.get("content-length")
+        total = int(entete) if entete and entete.isdigit() else None
+        debut = time.monotonic()
+        recus = 0
         for bloc in reponse.iter_content(chunk_size=1024 * 1024):
-            if bloc:
-                yield bloc
+            if not bloc:
+                continue
+            recus += len(bloc)
+            if progress is not None:
+                ecoule = time.monotonic() - debut
+                debit = recus / ecoule if ecoule > 0 else 0.0
+                eta = ((total - recus) / debit
+                       if total is not None and debit > 0 else None)
+                progress(recus, total, debit, eta)
+            yield bloc
+
+
+def formater_progression(nom: str, recus: int, total: int | None,
+                         debit: float, eta: float | None) -> str:
+    """Ligne de progression : pourcentage, volume, debit et ETA."""
+    if total:
+        avancement = (f"{100.0 * recus / total:5.1f} % "
+                      f"({recus / 1e6:7.1f}/{total / 1e6:.1f} Mo)")
+    else:
+        avancement = f"{recus / 1e6:7.1f} Mo"
+    reste = (f" ETA {int(eta) // 60:02d}:{int(eta) % 60:02d}"
+             if eta is not None else "")
+    return f"{nom} : {avancement} {debit / 1e6:6.2f} Mo/s{reste}"
+
+
+def barre_progression(nom: str, *, intervalle_s: float = 0.5, flot=None,
+                      fichier=None) -> Callable:
+    """Fabrique un callback de progression, limite en frequence.
+
+    Ecrit la ligne sur `flot` (stderr par defaut) et, si `fichier` est fourni,
+    ecrase son contenu a chaque mise a jour : un suivi depuis un autre terminal
+    lit ainsi l'etat courant du telechargement.
+    """
+    dernier = [0.0]
+
+    def suivi(recus: int, total: int | None, debit: float,
+              eta: float | None) -> None:
+        maintenant = time.monotonic()
+        if maintenant - dernier[0] < intervalle_s:
+            return
+        dernier[0] = maintenant
+        ligne = formater_progression(nom, recus, total, debit, eta)
+        sortie = sys.stderr if flot is None else flot
+        print(f"\r{ligne}", end="", file=sortie, flush=True)
+        if fichier is not None:
+            Path(fichier).write_text(ligne + "\n", encoding="utf-8")
+
+    return suivi
 
 
 def _mois_depuis_url(url: str) -> str:
