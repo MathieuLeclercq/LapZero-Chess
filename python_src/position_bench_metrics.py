@@ -219,33 +219,38 @@ def _flottant(record: Mapping[str, object], cle: str, description: str) -> float
     return resultat
 
 
-def _valider_wdl(wdl) -> int:
-    """Verifie un triplet WDL et rend son total, strictement positif."""
+def _trois_wdl(wdl) -> tuple[int, int, int]:
+    """Verifie un triplet WDL et le rend type, effectif total strictement positif."""
     if not isinstance(wdl, (tuple, list)) or len(wdl) != 3:
         raise ContratInvalide("WDL : triplet (victoires, nulles, defaites) attendu")
     for valeur in wdl:
         if isinstance(valeur, bool) or not isinstance(valeur, int) or valeur < 0:
             raise ContratInvalide("WDL : chaque effectif doit etre un entier positif")
-    total = sum(wdl)
-    if total == 0:
+    if sum(wdl) == 0:
         raise ContratInvalide("WDL : effectif total nul")
-    return total
+    return (int(wdl[0]), int(wdl[1]), int(wdl[2]))
 
 
-def validate_move_label(label: dict, description: str = "etiquette") -> None:
+def _valider_wdl(wdl) -> int:
+    """Verifie un triplet WDL et rend son total, strictement positif."""
+    return sum(_trois_wdl(wdl))
+
+
+def validate_move_label(label: Mapping[str, object],
+                        description: str = "etiquette") -> None:
     """Verifie une etiquette de coup : WDL, score coherent, cp ou mat."""
-    if not isinstance(label, dict):
+    if not isinstance(label, Mapping):
         raise ContratInvalide(f"{description} : un objet JSON est attendu")
+
+    wdl = _trois_wdl(_champ(label, "wdl", description))
+    score = _flottant(label, "score", description)
+    attendu = (wdl[0] + 0.5 * wdl[1]) / sum(wdl)
+    if abs(score - attendu) > 1e-9:
+        raise ContratInvalide(
+            f"{description} : score {score} incoherent avec la WDL {wdl}")
 
     _chaine(label, "uci", description)
     _entier(label, "index", description, minimum=0, maximum=TAILLE_POLICY - 1)
-
-    total = _valider_wdl(_champ(label, "wdl", description))
-    score = _flottant(label, "score", description)
-    attendu = (label["wdl"][0] + 0.5 * label["wdl"][1]) / total
-    if abs(score - attendu) > 1e-9:
-        raise ContratInvalide(
-            f"{description} : score {score} incoherent avec la WDL {label['wdl']}")
 
     cp = _champ(label, "cp", description)
     mate = _champ(label, "mate", description)
