@@ -1,27 +1,29 @@
+import argparse
 import gc
 import logging
-import os.path
+import os
 import time
 import warnings
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
 
 warnings.filterwarnings("ignore", module="requests")
-from datetime import datetime
 
 import chess_engine
 import torch
 import torch.nn.functional as f
 from lib import (
     append_to_disk_buffer,
-    calculate_performance_rating,
     convert_game_results,
     export_model_to_onnx,
     run_with_interrupt,
 )
 from model import ChessNet
-from stockfish_player import evaluate_against_anchor
+from position_bench import evaluate_checkpoint, find_previous, protocol_id
+from position_bench_metrics import EvalConfig, SearchConfig
+from position_bench_results import load_dataset, wandb_metrics
 from torch.amp import GradScaler
 from torch.utils.data import DataLoader, Dataset, RandomSampler
 
@@ -31,8 +33,10 @@ import wandb
 # relatif dependrait du repertoire de lancement.
 PUZZLES_PATH = str(Path(__file__).resolve().parents[1]
                    / "training_data" / "puzzles_train.txt")
-STOCKFISH_PATH = str(Path(__file__).resolve().parent / "lichess_bot"
-                     / "stockfish" / "stockfish-windows-x86-64-universal.exe")
+
+RACINE = Path(__file__).resolve().parents[1]
+BANC_DEFAUT = RACINE / "data" / "position_bench" / "v1"
+RESULTATS_EVAL_DEFAUT = RACINE / "position_bench_results"
 
 
 # ============================================================
@@ -150,6 +154,7 @@ def generate_games(
     if diagnostics > 0:
         from selfplay_diag import formater_diagnostic, resumer_passage
 
+        assert stats_selfplay is not None and timing is not None
         total_python = sum(zones.values())
         debit = {
             "coups_nouveaux_par_s": (
@@ -264,6 +269,10 @@ def train_on_shards(model, optimizer, scaler, device, buffer_folder, learning_ra
     return global_step
 
 
+def _sauver_checkpoint(chemin, charge):
+    torch.save(charge, chemin)
+
+
 # ============================================================
 #                     PIPELINE
 # ============================================================
@@ -280,32 +289,113 @@ def pipeline(
         num_filters=128,
         max_buffer_size=100_000,
         target_sampling_ratio=14.0,
-        eval_stockfish_every=4,
+        eval_every=4,
+        position_bench_path=None,
+        eval_search_workers=8,
+        eval_target_s=300.0,
+        eval_output_dir=None,
         checkpoint_path=None,
-        stockfish_path=None,
-        stockfish_elo=2500,
-        stockfish_nodes=200_000,
-        num_sim_eval_sf=700,
         data_workers=0,
-        selfplay_diagnostics=0
+        selfplay_diagnostics=0,
+        wandb_mode=None,
+        dependances=None,
+        eval_stockfish_every=None,
+        stockfish_path=None,
+        stockfish_elo=None,
+        stockfish_nodes=None,
+        num_sim_eval_sf=None,
 ):
+    """Boucle self-play + entrainement, avec banc de positions integre.
+
+    La cadence du banc vaut `eval_every` iterations, 4 par defaut ; 0 la
+    desactive. `position_bench_path=None` resout le banc dans le depot, jamais
+    depuis le repertoire courant. Les anciens parametres Stockfish sont refuses
+    avec un message explicite : l'ancrage se lance manuellement, avec
+    stockfish_player.py.
+    """
     logging.getLogger("torch").setLevel(logging.ERROR)
-    hyperparams = locals().copy()
 
-    timestamp = datetime.now().strftime("%Y_%m_%d_%Hh%M")
-    assert torch.cuda.is_available()
+    if stockfish_path is not None or stockfish_elo is not None \
+            or stockfish_nodes is not None or num_sim_eval_sf is not None:
+        raise ValueError(
+            "l'ancrage Stockfish n'est plus lance par la boucle de self-play ; "
+            "utiliser stockfish_player.py manuellement")
+    if eval_stockfish_every is not None:
+        print("[avertissement] eval_stockfish_every est devenu eval_every")
+        eval_every = eval_stockfish_every
+    if eval_every < 0:
+        raise ValueError("eval_every doit etre positif ou nul")
+
+    def composant(cle, defaut):
+        if dependances and cle in dependances:
+            return dependances[cle]
+        return defaut
+
+    cuda_disponible = composant("cuda_disponible", torch.cuda.is_available)
+    if not cuda_disponible():
+        raise RuntimeError("un GPU CUDA est requis pour la boucle self-play")
     gpu_device = torch.device("cuda")
-    assert os.path.isfile(stockfish_path)
 
-    model = ChessNet(num_res_blocks=num_res_blocks, num_filters=num_filters).to(gpu_device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
-    scaler = GradScaler("cuda", enabled=True)
+    # Prevalidation du banc avant la premiere generation : sans dataset, on
+    # s'arrete ici avec un message, jamais par une substitution Stockfish.
+    if eval_every > 0:
+        if position_bench_path is None:
+            position_bench_path = BANC_DEFAUT
+        if eval_output_dir is None:
+            eval_output_dir = RESULTATS_EVAL_DEFAUT
+        charger_banc = composant("charger_banc", load_dataset)
+        manifeste, _ = charger_banc(position_bench_path)
+    else:
+        manifeste = None
+
+    hyperparams = {
+        "num_iterations": num_iterations,
+        "games_per_iter": games_per_iter,
+        "concurrent_games": concurrent_games,
+        "slow_sims": slow_sims,
+        "fast_sims": fast_sims,
+        "slow_ratio": slow_ratio,
+        "batch_size": batch_size,
+        "learning_rate": learning_rate,
+        "num_res_blocks": num_res_blocks,
+        "num_filters": num_filters,
+        "max_buffer_size": max_buffer_size,
+        "target_sampling_ratio": target_sampling_ratio,
+        "eval_every": eval_every,
+        "position_bench_path": (str(position_bench_path)
+                                if position_bench_path else None),
+        "eval_search_workers": eval_search_workers,
+        "eval_target_s": eval_target_s,
+        "eval_output_dir": (str(eval_output_dir)
+                            if eval_output_dir else None),
+        "data_workers": data_workers,
+        "selfplay_diagnostics": selfplay_diagnostics,
+    }
+
+    timestamp = datetime.now(UTC).strftime("%Y_%m_%d_%Hh%M")
+    creer_modele = composant(
+        "creer_modele",
+        lambda: ChessNet(num_res_blocks=num_res_blocks,
+                         num_filters=num_filters).to(gpu_device))
+    model = creer_modele()
+    creer_optimiseur = composant(
+        "creer_optimiseur",
+        lambda parametres: torch.optim.AdamW(parametres, lr=learning_rate,
+                                             weight_decay=1e-4))
+    optimizer = creer_optimiseur(model.parameters())
+    creer_scaler = composant("creer_scaler",
+                             lambda: GradScaler("cuda", enabled=True))
+    scaler = creer_scaler()
+    charger_checkpoint = composant(
+        "charger_checkpoint",
+        lambda chemin: torch.load(chemin, map_location=gpu_device,
+                                  weights_only=True))
 
     global_step = 0
     start_iteration = 0
 
     if checkpoint_path:
-        checkpoint = torch.load(checkpoint_path, map_location=gpu_device, weights_only=True)
+        checkpoint = charger_checkpoint(checkpoint_path)
         model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         for param_group in optimizer.param_groups:
@@ -315,14 +405,28 @@ def pipeline(
         global_step = checkpoint.get("global_step", 0)
         print(f"Checkpoint chargé : {checkpoint_path} (Reprise à l'itération {start_iteration})")
 
-    wandb.init(project="alphazero-chess", name=f"{timestamp}_self_play", config=hyperparams)
+    module_wandb = composant("wandb", wandb)
+    if wandb_mode:
+        os.environ["WANDB_MODE"] = wandb_mode
+    module_wandb.init(project="alphazero-chess",
+                      name=f"{timestamp}_self_play", config=hyperparams)
+
+    generer = composant("generer_parties", generate_games)
+    entrainer = composant("entrainer", train_on_shards)
+    exporter = composant("exporter", export_model_to_onnx)
+    sauver = composant("sauver_checkpoint", _sauver_checkpoint)
+    ecrire_buffer = composant("ecrire_buffer", append_to_disk_buffer)
+    evaluer = composant("evaluer", evaluate_checkpoint)
+    chercher_precedent = composant("chercher_precedent", find_previous)
+    calculer_protocole = composant("protocol_id", protocol_id)
+    horloge = composant("horloge", time.time)
 
     buffer_folder = "replay_buffer"
 
     # ── INITIALISATION AVANT LA BOUCLE (Génération de l'iter 0 ou reprise) ──
     current_onnx_name = f"{timestamp}_iter{start_iteration}_unsupervised"
     current_onnx_path = f"checkpoints/{current_onnx_name}.onnx"
-    export_model_to_onnx(model, current_onnx_path, gpu_device)
+    exporter(model, current_onnx_path, gpu_device)
     print(f"Modèle ONNX initial prêt pour le self-play : {current_onnx_path}")
 
     # Frequence effective et charge du CPU pendant chaque generation : sans
@@ -340,14 +444,14 @@ def pipeline(
         # ── 1. Self-Play (C++ / GPU batched) ──
         if moniteur_cpu is not None:
             moniteur_cpu.reinitialiser()
-        start_time = time.time()
-        new_data, avg_length, stats, diagnostic = generate_games(
+        start_time = horloge()
+        new_data, avg_length, stats, diagnostic = generer(
             current_onnx_path, games_per_iter,
             concurrent_games, slow_sims, fast_sims, slow_ratio,
             tt_size=4_000_000,
             diagnostics=selfplay_diagnostics
         )
-        generation_time = time.time() - start_time
+        generation_time = horloge() - start_time
         metriques_cpu = (moniteur_cpu.metriques("selfplay/cpu")
                          if moniteur_cpu is not None else {})
         games_per_sec = games_per_iter / generation_time
@@ -358,7 +462,7 @@ def pipeline(
             f"{saved_pos_per_sec:.0f} saved positions/s (Total: {generation_time:.1f}s)")
 
         # ── 2. Sauvegarde des nouvelles positions sur disque ──
-        buffer_size = append_to_disk_buffer(new_data, buffer_folder, max_buffer_size)
+        buffer_size = ecrire_buffer(new_data, buffer_folder, max_buffer_size)
         num_new_positions = len(new_data)
         del new_data
 
@@ -366,7 +470,7 @@ def pipeline(
         samples_per_epoch = round(target_sampling_ratio * num_new_positions)
         print(f"  Entraînement sur {samples_per_epoch} samples...")
 
-        global_step = train_on_shards(
+        global_step = entrainer(
             model, optimizer, scaler, gpu_device, buffer_folder, learning_rate,
             batch_size=batch_size, global_step=global_step,
             samples_per_epoch=samples_per_epoch, data_workers=data_workers
@@ -392,83 +496,125 @@ def pipeline(
             from selfplay_diag import metriques_wandb
             journal.update(metriques_wandb(diagnostic))
         journal.update(metriques_cpu)
-        wandb.log(journal, step=global_step)
 
         # ── 4. Sauvegarde checkpoint .pt ET .onnx ──
         ckpt_filename = f"{timestamp}_iter{iteration + 1}_unsupervised"
         save_pt_path = f"checkpoints/{ckpt_filename}.pt"
 
-        # Sauvegarde PyTorch
-        torch.save({
+        sauver(save_pt_path, {
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scaler_state_dict": scaler.state_dict(),
             "iteration": iteration + 1,
             "global_step": global_step,
-        }, save_pt_path)
+        })
 
         # Nouvel export ONNX qui servira pour l'itération suivante et l'évaluation
         current_onnx_path = f"checkpoints/{ckpt_filename}.onnx"
-        export_model_to_onnx(model, current_onnx_path, gpu_device)
+        exporter(model, current_onnx_path, gpu_device)
 
         print(f"  Checkpoints sauvegardés : {ckpt_filename} (.pt et .onnx)")
 
-        # ── 5. Évaluation Stockfish ──
-        if (iteration + 1) % eval_stockfish_every == 0:
-            eval_winrate, eval_wins, eval_draws, eval_losses = evaluate_against_anchor(
-                onnx_path=current_onnx_path,
-                stockfish_path=stockfish_path,
-                num_games=16,
-                mcts_sims=num_sim_eval_sf,
-                sf_elo=stockfish_elo,
-                sf_nodes=stockfish_nodes,
-                num_workers=8
-            )
-
-            estim_elo = calculate_performance_rating(
-                stockfish_elo, eval_wins, eval_draws, eval_losses
-            )
-
-            wandb.log({
-                "eval/winrate": eval_winrate,
-                "eval/elo_estim": estim_elo,
-                "eval/wins": eval_wins,
-                "eval/draws": eval_draws,
-                "eval/losses": eval_losses,
-                "eval/stockfish_elo": stockfish_elo,
-                "eval/iteration": iteration + 1,
-            }, step=global_step)
+        # ── 5. Évaluation du banc externe de positions ──
+        if eval_every > 0 and (iteration + 1) % eval_every == 0:
+            assert manifeste is not None
+            config = EvalConfig(
+                search=SearchConfig(workers=eval_search_workers),
+                target_s=eval_target_s)
+            precedent = chercher_precedent(
+                eval_output_dir, manifeste["dataset_sha256"],
+                calculer_protocole(config), iteration + 1)
+            if precedent is None:
+                print("  Aucun resultat precedent compatible : comparaison nulle.")
+            rapport = evaluer(
+                Path(current_onnx_path), position_bench_path,
+                eval_output_dir, config,
+                iteration=iteration + 1, global_step=global_step,
+                previous=precedent)
+            journal.update(wandb_metrics(rapport))
         else:
-            print("  Évaluation ignorée.")
-        wandb.log({}, commit=True)
+            print("  Évaluation du banc ignorée.")
 
-    wandb.finish()
+        module_wandb.log(journal, step=global_step)
+        module_wandb.log({}, commit=True)
+
+    module_wandb.finish()
 
 
-if __name__ == "__main__":
+# ============================================================
+#                         CLI
+# ============================================================
+
+def analyser_arguments(argv=None):
+    parser = argparse.ArgumentParser(description="Boucle self-play LapZero")
+    parser.add_argument("--iterations", type=int, default=150)
+    parser.add_argument("--games", type=int, default=512,
+                        help="parties par iteration")
+    parser.add_argument("--concurrent", type=int, default=256,
+                        help="places du pool self-play")
+    parser.add_argument("--batch-size", type=int, default=4096)
+    parser.add_argument("--learning-rate", type=float, default=4e-5)
+    parser.add_argument("--buffer", type=int, default=750_000)
+    parser.add_argument("--sampling-ratio", type=float, default=14.0)
+    parser.add_argument("--dataloader-workers", type=int, default=0)
+    parser.add_argument("--selfplay-diagnostics", type=int, default=0,
+                        choices=(0, 1, 2))
+    parser.add_argument("--eval-every", type=int, default=4,
+                        help="banc de positions tous les N tours ; 0 desactive")
+    parser.add_argument("--position-bench", default=None,
+                        help="dossier du banc ; par defaut data/position_bench/v1")
+    parser.add_argument("--eval-search-workers", type=int, default=8)
+    parser.add_argument("--eval-target-seconds", type=float, default=300.0)
+    parser.add_argument("--eval-output-dir", default=None)
+    parser.add_argument("--checkpoint", default=None,
+                        help="checkpoint .pt de reprise")
+    parser.add_argument("--wandb-mode",
+                        choices=["offline", "disabled", "online"],
+                        default=None)
+    # Migration : ces drapeaux n'ont plus d'effet dans la boucle.
+    parser.add_argument("--stockfish", default=None,
+                        help="OBSOLETE : l'ancrage se lance manuellement")
+    parser.add_argument("--stockfish-elo", type=int, default=None,
+                        help="OBSOLETE : l'ancrage se lance manuellement")
+    return parser.parse_args(argv)
+
+
+def principal(argv=None):
+    args = analyser_arguments(argv)
+    if args.stockfish is not None or args.stockfish_elo is not None:
+        raise SystemExit(
+            "l'ancrage Stockfish n'est plus lance par la boucle de self-play ; "
+            "utiliser stockfish_player.py manuellement, ou retirer --stockfish "
+            "et --stockfish-elo")
     try:
-        # import os
-        # os.environ["WANDB_MODE"] = "disabled"
-
         pipeline(
-            num_iterations=150,
-            games_per_iter=512,
-            concurrent_games=256,
+            num_iterations=args.iterations,
+            games_per_iter=args.games,
+            concurrent_games=args.concurrent,
             slow_sims=700,
             fast_sims=100,
             slow_ratio=0.25,
-            batch_size=4096,
-            learning_rate=4e-5,
-            max_buffer_size=750_000,
-            target_sampling_ratio=14.0,
-            eval_stockfish_every=8,
-            checkpoint_path="checkpoints/2026_04_30_09h53_iter436_unsupervised.pt",
-            stockfish_path=STOCKFISH_PATH,
-            stockfish_elo=2600,
-            stockfish_nodes=200_000
+            batch_size=args.batch_size,
+            learning_rate=args.learning_rate,
+            max_buffer_size=args.buffer,
+            target_sampling_ratio=args.sampling_ratio,
+            eval_every=args.eval_every,
+            position_bench_path=args.position_bench,
+            eval_search_workers=args.eval_search_workers,
+            eval_target_s=args.eval_target_seconds,
+            eval_output_dir=args.eval_output_dir,
+            checkpoint_path=(args.checkpoint
+                             or "checkpoints/2026_04_30_09h53_iter436_unsupervised.pt"),
+            data_workers=args.dataloader_workers,
+            selfplay_diagnostics=args.selfplay_diagnostics,
+            wandb_mode=args.wandb_mode,
         )
     except KeyboardInterrupt:
         print("\n[Interruption] Entraînement stoppé manuellement.")
         print("Synchronisation des dernières métriques avec WandB en cours...")
         wandb.finish()
         print("Arrêt propre terminé.")
+
+
+if __name__ == "__main__":
+    principal()

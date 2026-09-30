@@ -7,9 +7,9 @@ reprennent la production locale (512 parties, 256 places, 700/100 simulations).
 A lancer depuis le dossier python_src, pour que les chemins relatifs
 `checkpoints/` et `replay_buffer/` tombent a cote des scripts.
 
-La garde `if __name__ == "__main__"` est obligatoire : l'evaluation Stockfish
-utilise multiprocessing en mode spawn, et chaque processus enfant reimporte ce
-script. Sans la garde, chaque worker relance une campagne complete.
+L'evaluation periodique est le banc externe de positions, toutes les 4
+iterations par defaut (`--eval-every 0` le desactive). L'ancrage Stockfish
+n'est plus lance par la boucle ; `stockfish_player.py` reste l'outil manuel.
 
 Exemple :
 
@@ -57,13 +57,15 @@ def analyser_arguments():
     parser.add_argument("--dataloader-workers", type=int, default=0,
                         help="processus de chargement des donnees ; sur Windows "
                              "chaque worker relance Python, donc 0 par defaut")
-    parser.add_argument("--eval-every", type=int, default=8,
-                        help="evaluer contre Stockfish tous les N tours")
+    parser.add_argument("--eval-every", type=int, default=4,
+                        help="banc de positions tous les N tours ; 0 desactive")
+    parser.add_argument("--position-bench", default=None,
+                        help="dossier du banc ; par defaut data/position_bench/v1")
+    parser.add_argument("--eval-search-workers", type=int, default=8)
+    parser.add_argument("--eval-target-seconds", type=float, default=300.0)
+    parser.add_argument("--eval-output-dir", default=None)
     parser.add_argument("--checkpoint", default=None,
                         help="checkpoint .pt de reprise ; par defaut iter436")
-    parser.add_argument("--stockfish", default=None,
-                        help="chemin de l'executable Stockfish de l'ancre")
-    parser.add_argument("--stockfish-elo", type=int, default=2600)
     parser.add_argument("--wandb-mode", choices=["offline", "disabled", "online"],
                         default="offline",
                         help="offline ecrit les metriques en local sans reseau, "
@@ -89,7 +91,7 @@ def main():
     else:
         print(f"[Buffer] vide (plafond {args.buffer})")
 
-    from train_self_play import STOCKFISH_PATH, pipeline
+    from train_self_play import pipeline
 
     pipeline(
         num_iterations=args.iterations,
@@ -102,12 +104,13 @@ def main():
         learning_rate=args.learning_rate,
         max_buffer_size=args.buffer,
         target_sampling_ratio=args.sampling_ratio,
-        eval_stockfish_every=args.eval_every,
+        eval_every=args.eval_every,
+        position_bench_path=args.position_bench,
+        eval_search_workers=args.eval_search_workers,
+        eval_target_s=args.eval_target_seconds,
+        eval_output_dir=args.eval_output_dir,
         checkpoint_path=(args.checkpoint
                          or "checkpoints/2026_04_30_09h53_iter436_unsupervised.pt"),
-        stockfish_path=args.stockfish or STOCKFISH_PATH,
-        stockfish_elo=args.stockfish_elo,
-        stockfish_nodes=200_000,
         data_workers=args.dataloader_workers,
         selfplay_diagnostics=args.selfplay_diagnostics,
     )
