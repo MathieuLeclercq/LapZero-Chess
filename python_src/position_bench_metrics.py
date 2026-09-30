@@ -15,7 +15,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import pairwise
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 import numpy as np
 
@@ -109,6 +109,7 @@ class Manifest(TypedDict):
     search_ids: list[str]
     protocol_defaults: dict
     builder_revision: str
+    created: NotRequired[str]
 
 
 class RawResult(TypedDict):

@@ -203,6 +203,16 @@ def extract_candidates(games, source: SourceInfo, *, compteurs=None,
             continue
         candidats.extend(candidats_partie)
 
+    return dedupliquer_candidats(candidats)
+
+
+def dedupliquer_candidats(candidats: list[Position]) -> list[Position]:
+    """Ne garde qu'une occurrence par identite reseau, en ordre canonique.
+
+    L'occurrence retenue est celle de plus petite cle `(game_id, ply,
+    source_id)`, ce qui rend le resultat independant de l'ordre de lecture et
+    du mois d'archive. La sortie est triee par cette meme cle.
+    """
     uniques: dict[str, tuple[tuple[str, int, str], Position]] = {}
     for candidat in candidats:
         cle = (candidat["game_id"], candidat["ply"], candidat["source_id"])
