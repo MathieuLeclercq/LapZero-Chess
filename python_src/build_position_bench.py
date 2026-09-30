@@ -629,6 +629,11 @@ def _cmd_annotate(args) -> None:
     moteurs, identite = _ouvrir_moteurs(args)
     store = AnnotationStore(dossier, _config_store(identite))
     try:
+        deja = sum(
+            1 for position in positions
+            if store.get(cle_position(position, NODES_ANNOTATION)) is not None)
+        print(f"  {deja} positions deja en cache, "
+              f"{len(positions) - deja} a annoter")
         annoter_positions(
             moteurs, positions, NODES_ANNOTATION, store,
             dossier / "annotated.jsonl.zst",
@@ -639,7 +644,8 @@ def _cmd_annotate(args) -> None:
         store.close()
         for moteur in moteurs:
             moteur.quit()
-    print(f"\n{len(positions)} positions annotees")
+    print(f"\n{len(positions)} positions disponibles "
+          f"({deja} du cache, {len(positions) - deja} annotees maintenant)")
 
 
 def _barre_suivi(nom: str, *, reprises: int = 0, fichier=None):
