@@ -1,12 +1,13 @@
 # Banc externe de positions Stockfish : conception
 
 Date : 2026-09-29
+Révision : 2026-09-30, cinq minutes comme cible souple, sans arrêt automatique.
 Statut : spec validée, prête pour le plan d'implémentation
 
 Remplacer l'évaluation automatique par 16 parties contre un Stockfish bridé par
 un banc fixe de positions externes, annotées une fois par Stockfish à pleine
 puissance. Le banc doit produire un signal apparié, stable et interprétable en
-moins de cinq minutes. Il ne cherche pas à produire un Elo absolu.
+environ cinq minutes. Il ne cherche pas à produire un Elo absolu.
 
 ## 1. Motivation et contraintes
 
@@ -26,7 +27,7 @@ Le remplacement respecte les contraintes suivantes :
 
 | Contrainte | Décision |
 |---|---|
-| Durée récurrente | moins de 300 secondes, chargement et agrégation compris |
+| Durée récurrente | cible d'environ 300 secondes, chargement et agrégation compris, sans limite dure |
 | Cadence | toutes les 4 itérations par défaut, réglable par `--eval-every` |
 | Comparabilité | mêmes positions, mêmes budgets et mêmes paramètres à chaque passage |
 | Provenance principale | parties externes à LapZero et jamais utilisées pour l'entraînement |
@@ -143,7 +144,7 @@ position courante ne remplace pas cette clé.
 
 ## 4. Annotation Stockfish hors ligne
 
-La fabrication du banc peut durer bien plus de cinq minutes. La limite de cinq
+La fabrication du banc peut durer bien plus de cinq minutes. La cible de cinq
 minutes ne concerne que l'évaluation récurrente d'un checkpoint, une fois les
 annotations figées.
 
@@ -207,10 +208,13 @@ noeuds par coup légal. Les étiquettes à 200 000 noeuds sont acceptées si :
 
 - dans au moins 95 % des positions auditées, le meilleur coup à 200 000 noeuds a
   un regret inférieur ou égal à 0,02 selon l'analyse à 400 000 noeuds ;
-- la variation moyenne de `S*` est inférieure ou égale à 0,01.
+- la moyenne des variations absolues de `S*` est inférieure ou égale à 0,01.
 
 Si une condition échoue, toute la seconde passe est reconstruite à 400 000 noeuds
-par coup. Le budget retenu et le résultat de l'audit figurent dans le manifeste.
+par coup, la sélection est recalculée et un nouvel audit est effectué à 800 000
+noeuds avec les mêmes critères. Si ce deuxième audit échoue, la publication est
+arrêtée pour examiner les annotations. Le budget retenu et les résultats des
+audits figurent dans le manifeste.
 
 ## 5. Composition du banc figé
 
@@ -300,7 +304,7 @@ Le sous-banc utilise :
 - aucun échantillonnage par température ;
 - taille de batch MCTS égale à 8 et batch fixe activé ;
 - huit travailleurs de recherche dans un seul processus ;
-- virtual loss égal à 2, FPU égal à 0,30 et quatre tentatives de collision ;
+- virtual loss égal à 2, FPU égal à 0,30 et facteur de tentatives de collision égal à 4 ;
 - une recherche neuve et une table de transposition froide par position.
 
 Les 256 positions sont évaluées séquentiellement, dans l'ordre figé du sous-banc.
@@ -318,16 +322,21 @@ sur le même évaluateur. Le parallélisme interne peut introduire un très faib
 bruit d'ordonnancement, raison pour laquelle la policy brute reste le score
 principal.
 
-### 7.3 Délai
+### 7.3 Cible de durée
 
-L'évaluateur reçoit une échéance monotone de 300 secondes. Il refuse de commencer
-une nouvelle position MCTS lorsque le temps restant ne permet plus de respecter
-l'échéance, ferme ses travailleurs et renvoie le statut `timeout`.
+La cible est d'environ 300 secondes pour un passage complet, chargement,
+agrégation et écriture des résultats compris. C'est un ordre de grandeur, pas une
+échéance : un dépassement ponctuel n'interrompt pas l'évaluation et n'invalide pas
+son score. Le temps réel et sa décomposition sont journalisés à chaque passage.
 
-Une évaluation partielle ne publie aucun score principal. Elle journalise seulement
-le statut, la durée et le nombre de positions terminées. Le nombre de positions ou
-de simulations n'est jamais réduit automatiquement pour fabriquer un résultat dans
-le délai.
+Une durée qui tend régulièrement vers huit ou neuf minutes déclenche une analyse
+du coût avant de retenir la configuration. Le nombre de positions et le budget
+de simulations restent fixes pendant les évaluations ; aucune réduction
+automatique n'est utilisée pour atteindre artificiellement la cible.
+
+Une évaluation interrompue par une erreur ou par l'utilisateur ne publie aucun
+score agrégé partiel. Elle conserve seulement son statut, sa durée et le nombre
+de positions terminées. Aucun watchdog ni arrêt forcé à cinq minutes n'est requis.
 
 ## 8. Métriques
 
@@ -458,8 +467,8 @@ puzzles existant.
 
 Le bloc `evaluate_against_anchor` est remplacé par l'appel au banc de positions.
 `--eval-every` vaut 4 par défaut dans les deux points d'entrée. Le chemin du banc,
-le nombre de travailleurs de recherche et le délai sont configurables, mais leur
-valeur effective est écrite dans W&B.
+le nombre de travailleurs de recherche et la cible de durée sont configurables,
+mais leur valeur effective est écrite dans W&B.
 
 Le chemin Stockfish n'est plus une dépendance obligatoire de la boucle de
 self-play. `stockfish_player.py` et le match d'ancrage restent disponibles comme
@@ -486,7 +495,9 @@ réseau.
 - Coup légal sans annotation : évaluation refusée, aucun regret approximé.
 - Mat dans un diagnostic en centipions : position exclue de ce diagnostic et
   couverture réduite, sans affecter les métriques WDL.
-- Délai de 300 secondes dépassé : statut `timeout`, aucune métrique principale.
+- Cible de 300 secondes dépassée : évaluation poursuivie jusqu'au bout et durée
+  réelle publiée ; un passage complet reste valide.
+- Erreur ou interruption : statut explicite, aucun score agrégé partiel publié.
 - Résultat précédent issu d'un autre dataset ou budget : comparaison appariée
   refusée.
 
@@ -528,7 +539,8 @@ réseau.
 - MCTS sans bruit de Dirichlet, avec exactement 384 simulations terminées ;
 - positions MCTS traitées sans chevauchement sur un objet réutilisé, avec racine
   neuve, table froide et pool de travailleurs persistant ;
-- arrêt propre à l'échéance sans publication de résultat partiel ;
+- passage complet publié même au-delà de la cible de durée ; interruption ou
+  erreur sans publication de score partiel ;
 - exécution de bout en bout sur un fixture de quelques positions avec un faux
   évaluateur, puis avec le vrai module C++ quand il est disponible.
 
@@ -544,8 +556,10 @@ L'implémentation est acceptée lorsque :
    centipions ou en mat ;
 4. l'audit de stabilité de la section 4.3 passe ;
 5. deux passages policy sur le même modèle produisent les mêmes métriques ;
-6. trois évaluations complètes consécutives terminent chacune en moins de 300
-   secondes sur la machine d'entraînement de référence ;
+6. trois évaluations complètes consécutives sont chronométrées sur la machine
+   d'entraînement de référence ; leur durée vise environ cinq minutes, avec les
+   dépassements ponctuels acceptés et une investigation si elle tend vers huit
+   ou neuf minutes ;
 7. W&B reçoit séparément les métriques de policy, value, centipions et MCTS, ainsi
    que le statut, la durée et la version du dataset ;
 8. la boucle de self-play ne lance plus le match Stockfish par défaut ;
