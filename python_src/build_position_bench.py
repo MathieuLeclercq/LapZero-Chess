@@ -33,7 +33,7 @@ import sys
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import chess.engine
@@ -46,6 +46,7 @@ from position_bench_metrics import (
 )
 from position_bench_sources import (
     ATTRIBUTION_BROADCASTS,
+    DATE_MINIMUM,
     LICENCE_BROADCASTS,
     barre_progression,
     dedupliquer_candidats,
@@ -395,7 +396,9 @@ def _parseur() -> argparse.ArgumentParser:
     parser.add_argument("--output", default="data/position_bench/v1")
     parser.add_argument("--version", default="v1")
     parser.add_argument("--months", nargs="+",
-                        default=["2026-08", "2026-07", "2026-06"])
+                        default=["2026-08", "2026-07", "2026-06"],
+                        help="mois initiaux ; build ajoute les mois precedents "
+                             "si les quotas sont incomplets (depuis 2026-03)")
     parser.add_argument("--stockfish")
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--resume", action="store_true")
@@ -424,13 +427,72 @@ def main(argv=None) -> int:
 
 
 def _cmd_build(args) -> None:
-    _cmd_extract(args)
-    _cmd_screen(args)
-    args.stage = "reserve"
-    _cmd_finalize(args)
-    _cmd_annotate(args)
-    args.stage = "final"
-    _cmd_finalize(args)
+    """Etend le vivier sans relacher les quotas ni perdre les analyses.
+
+    Les mois effectifs sont memorises avant chaque extraction pour reprendre
+    aussi une interruption au milieu d'un mois ajoute automatiquement.
+    Les commandes individuelles gardent leur comportement explicite.
+    """
+    demandes = sorted(set(args.months), reverse=True)
+    _valider_mois(demandes)
+    etat = Path(args.work_dir) / "build_months.json"
+    args.months = list(demandes)
+    if args.resume and etat.is_file():
+        sauvegarde = json.loads(etat.read_text(encoding="utf-8"))
+        if not isinstance(sauvegarde, dict):
+            raise ValueError(f"etat des mois invalide : {etat}")
+        if sauvegarde.get("requested_months") == demandes:
+            effectifs = sauvegarde.get("months")
+            _valider_mois(effectifs)
+            if not set(demandes).issubset(effectifs):
+                raise ValueError(f"mois initiaux absents de l'etat : {etat}")
+            args.months = sorted(set(effectifs), reverse=True)
+
+    while True:
+        _ecrire_atomique(etat, json.dumps({
+            "requested_months": demandes, "months": args.months,
+        }, sort_keys=True, indent=2).encode("utf-8"))
+        _cmd_extract(args)
+        _cmd_screen(args)
+        try:
+            args.stage = "reserve"
+            _cmd_finalize(args)
+            _cmd_annotate(args)
+            args.stage = "final"
+            _cmd_finalize(args)
+            return
+        except SelectionIncomplete as erreur:
+            plus_ancien = datetime.strptime(min(args.months), "%Y-%m").date()
+            precedent = (plus_ancien - timedelta(days=1)).strftime("%Y-%m")
+            if precedent < DATE_MINIMUM.strftime("%Y-%m"):
+                raise SelectionIncomplete(
+                    f"{erreur} ; tous les mois admissibles jusqu'a "
+                    f"{min(args.months)} sont utilises. Aucun mois anterieur "
+                    "ne sera ajoute pour exclure le corpus de preentrainement. "
+                    "Le cache est conserve.") from erreur
+            print(f"\n  {erreur}\n  ajout automatique de {precedent} ; "
+                  "archives, candidats et analyses precedents conserves",
+                  flush=True)
+            args.months.append(precedent)
+            # Meme sans --resume initial, une extension doit reutiliser le
+            # travail fait au tour precedent, et non retelecharger le corpus.
+            args.resume = True
+
+
+def _valider_mois(mois) -> None:
+    """Refuse les noms d'archives invalides et le corpus de preentrainement."""
+    if not isinstance(mois, list) or not mois:
+        raise ValueError("une liste non vide de mois YYYY-MM est requise")
+    minimum = DATE_MINIMUM.strftime("%Y-%m")
+    for valeur in mois:
+        if not isinstance(valeur, str):
+            raise ValueError("les mois doivent etre des chaines YYYY-MM")
+        date_mois = datetime.strptime(valeur, "%Y-%m")
+        if date_mois.strftime("%Y-%m") != valeur:
+            raise ValueError(f"mois invalide : {valeur}, format YYYY-MM attendu")
+        if valeur < minimum:
+            raise ValueError(f"mois {valeur} exclu : minimum {minimum}, "
+                             "pour eviter le corpus de preentrainement")
 
 
 def _cmd_extract(args) -> None:
@@ -671,13 +733,16 @@ def _cmd_screen(args) -> None:
         store = AnnotationStore(dossier, _config_store(identite))
         a_cribler = [position for position in candidats
                      if store.get(cle_criblage(position)) is None]
+        deja = len(candidats) - len(a_cribler)
+        print(f"  criblage : {deja} positions deja en cache, "
+              f"{len(a_cribler)} a analyser", flush=True)
         _en_parallele(
             moteurs, a_cribler,
             lambda moteur, position: screen_position(moteur, position),
             a_reception=lambda position, note: store.put(
                 cle_criblage(position), note),
             reouvrir_moteur=lambda: _ouvrir_stockfish(args, identite)[0],
-            progress=_barre_suivi("criblage",
+            progress=_barre_suivi("criblage", reprises=deja,
                                   fichier=dossier / "criblage.progress"))
         enrichis = [
             {**candidat,

@@ -163,6 +163,14 @@ agreement with Stockfish on external positions; it is not an Elo rating. The
 periodic Stockfish match is no longer started by the training loop;
 `stockfish_player.py` remains the manual anchor tool.
 
+If a reserve or final selection cannot satisfy its quotas, `build` automatically
+adds the preceding archive month and retries, keeping all selection constraints.
+It never goes earlier than March 2026, to avoid the pretraining corpus. Effective
+months are saved in `build_months.json` so `--resume` with the same initial months
+also resumes an automatically extended build. Keep the entire work directory:
+per-month candidates and the Stockfish SQLite cache are reused, and only missing
+analyses are run. Use the same Stockfish binary and analysis configuration.
+
 ## Testing
 
 `chess_perft` validates the move generator against the six standard perft
