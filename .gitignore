@@ -18,6 +18,11 @@ __pycache__/
 # Resultats rapatries du PC de calcul (logs, shards, runs wandb hors ligne).
 sim_results/
 
+# Banc externe de positions : archives, annotations et resultats locaux hors
+# Git. Le dataset publie sous data/position_bench/v1/ reste versionne.
+data/position_bench_work/
+/position_bench_results/
+
 # Checkpoint iter436, modele courant (42 Mio) : poids distribues hors depot,
 # comme les ONNX de checkpoints_onnx. Les checkpoints anterieurs restent suivis.
 python_src/checkpoints/2026_04_30_09h53_iter436_unsupervised.pt
