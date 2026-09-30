@@ -546,6 +546,7 @@ def _ouvrir_moteurs(args):
     for _ in range(max(1, args.workers)):
         moteur, identite = _ouvrir_stockfish(args, identite)
         moteurs.append(moteur)
+    assert identite is not None
     return moteurs, identite
 
 
@@ -753,25 +754,39 @@ def _finalize_final(args, dossier: Path) -> None:
             "selection incomplete, ajouter le mois precedent : "
             + json.dumps(rapport["manquants"], sort_keys=True))
 
-    moteur, identite = _ouvrir_stockfish(args)
+    ids_audit = select_audit_ids(selection)
+    par_id = {position["position_id"]: position for position in annotes}
+    moteurs, identite = _ouvrir_moteurs(args)
+    store = AnnotationStore(dossier, _config_store(identite))
+    resultats: dict = {}
+    a_faire = []
     try:
-        store = AnnotationStore(dossier, _config_store(identite))
-        par_id = {position["position_id"]: position for position in annotes}
-        profonds = []
-        try:
-            for position_id in select_audit_ids(selection):
-                position = par_id[position_id]
-                cle = cle_position(position, NODES_AUDIT)
-                enregistre = store.get(cle)
-                if enregistre is None:
-                    enregistre = annotate_position(moteur, position,
-                                                   NODES_AUDIT)
-                    store.put(cle, enregistre)
-                profonds.append(enregistre)
-        finally:
-            store.close()
+        for position_id in ids_audit:
+            enregistre = store.get(cle_position(par_id[position_id],
+                                                NODES_AUDIT))
+            if enregistre is None:
+                a_faire.append(position_id)
+            else:
+                resultats[position_id] = enregistre
+
+        def reception(position_id: str, annotee) -> None:
+            store.put(cle_position(par_id[position_id], NODES_AUDIT),
+                      annotee)
+            resultats[position_id] = annotee
+
+        _en_parallele(
+            moteurs, a_faire,
+            lambda moteur, position_id: annotate_position(
+                moteur, par_id[position_id], NODES_AUDIT),
+            a_reception=reception,
+            progress=_barre_suivi(
+                "audit", reprises=len(ids_audit) - len(a_faire),
+                fichier=dossier / "audit.progress"))
     finally:
-        moteur.quit()
+        store.close()
+        for moteur in moteurs:
+            moteur.quit()
+    profonds = [resultats[position_id] for position_id in ids_audit]
 
     search_ids, audit = finaliser(selection, profonds)
     sources = json.loads(
