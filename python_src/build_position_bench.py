@@ -77,22 +77,22 @@ EVENT_CAP = 100
 PLAYER_CAP = 20
 AUDIT_COUNT = 500
 ZSTD_NIVEAU = 19
-BUILDER_REVISION = "lapzero-position-bench-builder-v1"
+BUILDER_REVISION = "lapzero-position-bench-builder-v1-quotas-20261001"
 
 PHASES = ("ouverture", "milieu", "finale")
 BUCKETS = ("disputee", "avantage", "decisive")
 CELLULES = tuple((phase, bucket) for phase in PHASES for bucket in BUCKETS)
 
 QUOTAS = {
-    ("ouverture", "disputee"): 1000,
-    ("ouverture", "avantage"): 600,
+    ("ouverture", "disputee"): 1100,
+    ("ouverture", "avantage"): 500,
     ("ouverture", "decisive"): 400,
-    ("milieu", "disputee"): 3000,
-    ("milieu", "avantage"): 1800,
-    ("milieu", "decisive"): 1200,
-    ("finale", "disputee"): 1000,
-    ("finale", "avantage"): 600,
-    ("finale", "decisive"): 400,
+    ("milieu", "disputee"): 3600,
+    ("milieu", "avantage"): 1000,
+    ("milieu", "decisive"): 1400,
+    ("finale", "disputee"): 1250,
+    ("finale", "avantage"): 250,
+    ("finale", "decisive"): 500,
 }
 
 SEL_FINAL = "lapzero-position-bench-v1-final"

@@ -171,6 +171,32 @@ also resumes an automatically extended build. Keep the entire work directory:
 per-month candidates and the Stockfish SQLite cache are reused, and only missing
 analyses are run. Use the same Stockfish binary and analysis configuration.
 
+The quotas approved on October 1, 2026, before the first `v1` publication are:
+
+| Phase | Contested | Advantage | Decisive | Total |
+|---|---:|---:|---:|---:|
+| Opening | 1,100 | 500 | 400 | 2,000 |
+| Middlegame | 3,600 | 1,000 | 1,400 | 6,000 |
+| Endgame | 1,250 | 250 | 500 | 2,000 |
+
+If the full reserve is already in `annotated.jsonl.zst`, finish directly with
+the following command. This reuses its annotations and runs the 500-position
+audit before publication; `build` would instead reconstruct the reserve.
+
+```bash
+uv run python python_src/build_position_bench.py finalize --stage final --stockfish <stockfish.exe> --workers 8 --work-dir data/position_bench_work --output data/position_bench/v1 --resume
+```
+
+On a Windows SSH host, `python_src/dev_tools/run_position_bench_finalize.ps1`
+can supervise this command with explicit `-Root`, `-Python`, `-Stockfish` and
+`-JobDirectory` absolute paths. Launch the supervisor through a one-off Windows
+Task Scheduler task without a recurring trigger. A plain `Start-Process` from
+SSH may be killed when that SSH connection closes. The supervisor records
+`status.json` (Python PID and exit code),
+`stdout.log` and `stderr.log` in a new job directory. Progress is also written
+to `data/position_bench_work/audit.progress`. A completed audit is not sufficient
+by itself: check the supervisor's exit code and the published manifest.
+
 ## Testing
 
 `chess_perft` validates the move generator against the six standard perft

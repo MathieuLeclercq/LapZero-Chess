@@ -231,10 +231,27 @@ Les quotas exacts sont :
 
 | Phase | Disputée | Avantage | Décisive | Total |
 |---|---:|---:|---:|---:|
-| Ouverture | 1 000 | 600 | 400 | 2 000 |
-| Milieu | 3 000 | 1 800 | 1 200 | 6 000 |
-| Finale | 1 000 | 600 | 400 | 2 000 |
-| Total | 5 000 | 3 000 | 2 000 | 10 000 |
+| Ouverture | 1 100 | 500 | 400 | 2 000 |
+| Milieu | 3 600 | 1 000 | 1 400 | 6 000 |
+| Finale | 1 250 | 250 | 500 | 2 000 |
+| Total | 5 950 | 1 750 | 2 300 | 10 000 |
+
+Cette répartition a été approuvée le 1er octobre 2026, avant la première
+publication de `v1`. Elle remplace les quotas initiaux : après l'annotation
+complète de la réserve, certaines positions changent de catégorie WDL et les
+positions « avantage » sont moins nombreuses que prévu au criblage. Les nouveaux
+quotas permettent de sélectionner 10 000 positions dans les 12 500 déjà
+annotées, sans relâcher les seuils WDL ni les contraintes de diversité. Les
+totaux par phase restent inchangés. Les quotas du sous-banc MCTS de 256 positions
+sont recalculés à partir de cette répartition.
+
+Pour terminer un travail dont `annotated.jsonl.zst` contient déjà la réserve
+complètement annotée, utiliser directement `finalize --stage final --resume`,
+avec le même dossier de travail et le même Stockfish. Cette commande réutilise
+les annotations, effectue l'audit à budget doublé sur 500 positions, puis publie
+le banc si l'audit réussit. Ne pas relancer `build` pour cette transition : il
+recalculerait la réserve selon les nouveaux quotas et pourrait lancer de
+nouvelles annotations inutiles.
 
 Dans chaque case, les positions sont ordonnées par le SHA-256 de
 `position_id | lapzero-position-bench-v1-final` et retenues dans cet ordre, sous
@@ -264,8 +281,9 @@ Le banc vit dans `data/position_bench/v1/` :
 
 Le manifeste contient aussi le SHA-256 du fichier compressé. Le chargeur vérifie
 le schéma, les comptes, le hash et les paramètres du sous-banc avant toute
-inférence. Le dataset `v1` est immuable. Toute modification de source, de filtre,
-de budget Stockfish ou de quota crée `v2` et une nouvelle série W&B.
+inférence. Une fois publié, le dataset `v1` est immuable. Toute modification de
+source, de filtre, de budget Stockfish ou de quota crée `v2` et une nouvelle
+série W&B.
 
 Les archives PGN et les fichiers de travail d'annotation restent hors de Git. Le
 banc dérivé et son manifeste sont committés s'ils restent sous la limite Git de

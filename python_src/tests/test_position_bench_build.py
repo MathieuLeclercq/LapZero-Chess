@@ -133,6 +133,33 @@ def test_selection_respecte_les_neuf_quotas_et_les_couleurs():
     assert len({p["game_fingerprint"] for p in selection}) == len(selection)
 
 
+def test_selection_production_applique_la_repartition_approuvee():
+    attendus = {
+        ("ouverture", "disputee"): 1100,
+        ("ouverture", "avantage"): 500,
+        ("ouverture", "decisive"): 400,
+        ("milieu", "disputee"): 3600,
+        ("milieu", "avantage"): 1000,
+        ("milieu", "decisive"): 1400,
+        ("finale", "disputee"): 1250,
+        ("finale", "avantage"): 250,
+        ("finale", "decisive"): 500,
+    }
+    rapport = {}
+
+    selection = select_positions(
+        _vivier(candidats_par_case=4000), build_position_bench.QUOTAS,
+        salt=SEL_FINAL, event_cap=100, player_cap=20, rapport=rapport)
+
+    comptes = collections.Counter(
+        (p["phase"], p["wdl_bucket"]) for p in selection)
+    assert comptes == attendus
+    assert len(selection) == TAILLE_BANC == 10_000
+    assert len({p["game_fingerprint"] for p in selection}) == 10_000
+    assert rapport["complet"] is True
+    assert 4500 <= rapport["couleurs"]["blancs"] <= 5500
+
+
 def test_selection_refuse_un_evenement_au_dela_du_plafond():
     vivier = []
     for i in range(6):
@@ -203,15 +230,15 @@ def test_les_quotas_du_sous_banc_sont_arrondis_par_plus_grands_restes():
     quotas = quotas_sous_banc()
 
     assert sum(quotas.values()) == TAILLE_SOUS_BANC
-    assert quotas[("ouverture", "disputee")] == 26
-    assert quotas[("ouverture", "avantage")] == 15
+    assert quotas[("ouverture", "disputee")] == 28
+    assert quotas[("ouverture", "avantage")] == 13
     assert quotas[("ouverture", "decisive")] == 10
-    assert quotas[("milieu", "disputee")] == 77
-    assert quotas[("milieu", "avantage")] == 46
-    assert quotas[("milieu", "decisive")] == 31
-    assert quotas[("finale", "disputee")] == 26
-    assert quotas[("finale", "avantage")] == 15
-    assert quotas[("finale", "decisive")] == 10
+    assert quotas[("milieu", "disputee")] == 92
+    assert quotas[("milieu", "avantage")] == 26
+    assert quotas[("milieu", "decisive")] == 36
+    assert quotas[("finale", "disputee")] == 32
+    assert quotas[("finale", "avantage")] == 6
+    assert quotas[("finale", "decisive")] == 13
 
 
 def test_le_sous_banc_a_256_identifiants_et_ses_proportions():
