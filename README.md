@@ -187,6 +187,25 @@ audit before publication; `build` would instead reconstruct the reserve.
 uv run python python_src/build_position_bench.py finalize --stage final --stockfish <stockfish.exe> --workers 8 --work-dir data/position_bench_work --output data/position_bench/v1 --resume
 ```
 
+The first published `v1` explicitly accepts the original audit warning
+(94.2% acceptable best-move regrets, mean score variation 0.02036). Its manifest
+keeps `audit.passed = false` and `audit.accepted_with_warning = true`. The 500
+cached 400,000-node analyses were promoted before reselecting the dataset;
+497 remain in the final 10,000 positions. All 256 MCTS reference positions are
+selected by the usual stratified hash from those 497. This does not change
+LapZero's 384-simulation search budget. No independent post-repair audit is
+claimed, and the original reserve remains untouched.
+
+To reproduce that explicitly approved publication from a complete audit cache:
+
+```bash
+uv run python python_src/build_position_bench.py finalize --stage final --repair-from-cached-audit --stockfish <stockfish.exe> --work-dir data/position_bench_work --output data/position_bench/v1 --resume
+```
+
+This mode refuses missing audit entries instead of launching new analyses.
+`annotation_budget_nodes` records each published position's requested teacher
+budget; each move's `nodes` field records the nodes actually examined.
+
 On a Windows SSH host, `python_src/dev_tools/run_position_bench_finalize.ps1`
 can supervise this command with explicit `-Root`, `-Python`, `-Stockfish` and
 `-JobDirectory` absolute paths. Launch the supervisor through a one-off Windows

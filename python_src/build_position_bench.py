@@ -77,7 +77,7 @@ EVENT_CAP = 100
 PLAYER_CAP = 20
 AUDIT_COUNT = 500
 ZSTD_NIVEAU = 19
-BUILDER_REVISION = "lapzero-position-bench-builder-v1-quotas-20261001"
+BUILDER_REVISION = "lapzero-position-bench-builder-v1-cached-audit-repair-20261001"
 
 PHASES = ("ouverture", "milieu", "finale")
 BUCKETS = ("disputee", "avantage", "decisive")
@@ -292,6 +292,70 @@ def assembler_manifeste(*, dataset_version: str, sources, selection,
     }
 
 
+def _selection_complete(records) -> list:
+    rapport: dict = {}
+    selection = select_positions(records, QUOTAS, salt=SEL_FINAL,
+                                 event_cap=EVENT_CAP, player_cap=PLAYER_CAP,
+                                 rapport=rapport)
+    if not rapport["complet"]:
+        raise SelectionIncomplete(
+            "selection incomplete : "
+            + json.dumps(rapport["manquants"], sort_keys=True))
+    return selection
+
+
+def finaliser_depuis_audit(records, deeper) -> tuple[list, list, dict]:
+    """Promeut l'audit existant sans le presenter comme un nouvel audit reussi.
+
+    Les scores d'origine servent au rapport de stabilite. La selection finale
+    est ensuite recalculee avec les annotations profondes, et le sous-banc de
+    recherche est stratifie uniquement dans les positions ainsi corrigees.
+    Les listes fournies ne sont pas modifiees.
+    """
+    base = _selection_complete(records)
+    ids_audit = select_audit_ids(base, AUDIT_COUNT)
+    profonds = {position["position_id"]: position for position in deeper}
+    if (len(ids_audit) != AUDIT_COUNT or len(profonds) != len(deeper)
+            or set(profonds) != set(ids_audit)):
+        raise ValueError("reparation : audit incomplet, duplique ou incompatible")
+    par_id = {position["position_id"]: position for position in base}
+    champs_annotation = {"labels", "s_best", "wdl_bucket", "annotation_budget_nodes"}
+    for position_id in ids_audit:
+        reference = par_id[position_id]
+        profonde = profonds[position_id]
+        for cle, valeur in reference.items():
+            if cle not in champs_annotation and profonde.get(cle) != valeur:
+                raise ValueError(f"reparation : provenance differente ({cle})")
+
+    # Ne pas comparer les etiquettes corrigees avec elles-memes : ce rapport
+    # reste celui du controle independant effectue AVANT leur promotion.
+    audit = audit_labels([par_id[i] for i in ids_audit],
+                         [profonds[i] for i in ids_audit])
+    enrichis = [dict(profonds.get(position["position_id"], position),
+                     annotation_budget_nodes=(
+                         NODES_AUDIT if position["position_id"] in profonds
+                         else NODES_ANNOTATION))
+                for position in records]
+    selection = _selection_complete(enrichis)
+    pool = [position for position in selection
+            if position["position_id"] in profonds]
+    search_ids = select_search_ids(pool)
+    audit.update({
+        "accepted_with_warning": not audit["passed"],
+        "acceptance_reason": "explicit_cached_audit_repair",
+        "comparison": "original_labels_vs_cached_audit",
+        "post_repair_stability_verified": False,
+        "original_audit_ids": ids_audit,
+        "source_annotation_nodes": NODES_ANNOTATION,
+        "audit_nodes": NODES_AUDIT,
+        "repaired_positions": len(profonds),
+        "repaired_positions_in_dataset": len(pool),
+        "search_reference_nodes": NODES_AUDIT,
+        "search_pool_count": len(pool),
+    })
+    return selection, search_ids, audit
+
+
 def _quotas_json(quotas) -> dict:
     return {f"{phase}/{bucket}": quotas[(phase, bucket)]
             for phase, bucket in CELLULES}
@@ -335,6 +399,20 @@ def lire_jsonl_zst(chemin) -> list:
 
 def _readme(manifeste) -> str:
     sources = ", ".join(source["source_id"] for source in manifeste["sources"])
+    audit = manifeste["audit"]
+    avertissement = ""
+    if audit.get("acceptance_reason") == "explicit_cached_audit_repair":
+        avertissement = (
+            "\n## Reparation depuis l'audit en cache\n\n"
+            "Le rapport d'audit conserve les mesures sur les etiquettes "
+            "d'origine, avant correction. Son champ `passed` n'est pas "
+            "falsifie : un echec est accepte explicitement avec avertissement. "
+            "Aucun nouvel audit independant apres correction n'a ete execute.\n\n"
+            f"- Positions corrigees dans le banc : {audit['repaired_positions_in_dataset']}\n"
+            f"- Budget des references MCTS : {audit['search_reference_nodes']} noeuds par coup legal\n"
+            "- Budget demande par position : `annotation_budget_nodes` ; "
+            "les `nodes` des coups sont les nombres de noeuds effectivement examines.\n"
+        )
     return (
         "# Banc externe de positions, "
         f"{manifeste['dataset_version']}\n\n"
@@ -351,7 +429,7 @@ def _readme(manifeste) -> str:
         "Les identifiants de recherche sont la liste explicite du manifeste ; "
         "l'ordre des positions du fichier est celui des `position_id` "
         "croissants.\n"
-    )
+    ) + avertissement
 
 
 def write_dataset(records, manifest, output) -> Path:
@@ -404,12 +482,21 @@ def _parseur() -> argparse.ArgumentParser:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--pilot-count", type=int, default=0)
     parser.add_argument("--stage", choices=["reserve", "final"], default="final")
+    parser.add_argument(
+        "--repair-from-cached-audit", action="store_true",
+        help="finalize --stage final uniquement : reutiliser l'audit complet "
+             "en cache, accepter explicitement son avertissement et choisir "
+             "le sous-banc MCTS dans les positions corrigees ; aucune recherche")
     return parser
 
 
 def main(argv=None) -> int:
     args = _parseur().parse_args(argv)
     try:
+        if args.repair_from_cached_audit and (
+                args.commande != "finalize" or args.stage != "final"):
+            raise ValueError(
+                "--repair-from-cached-audit exige finalize --stage final")
         if args.commande == "extract":
             _cmd_extract(args)
         elif args.commande == "screen":
@@ -865,10 +952,47 @@ def annoter_positions(moteurs, positions, nodes: int, store, sortie, *,
 
 def _cmd_finalize(args) -> None:
     dossier = Path(args.work_dir)
-    if args.stage == "reserve":
+    if getattr(args, "repair_from_cached_audit", False):
+        _finalize_cached_audit(args, dossier)
+    elif args.stage == "reserve":
         _finalize_reserve(dossier)
     else:
         _finalize_final(args, dossier)
+
+
+def _finalize_cached_audit(args, dossier: Path) -> None:
+    """Lit uniquement les analyses existantes et refuse toute analyse manquante."""
+    annotes = lire_jsonl_zst(dossier / "annotated.jsonl.zst")
+    base = _selection_complete(annotes)
+    ids_audit = select_audit_ids(base, AUDIT_COUNT)
+    par_id = {position["position_id"]: position for position in base}
+    if not (dossier / "annotations.sqlite").is_file():
+        raise ValueError("cache d'audit absent ; aucune recherche lancee")
+    # Un seul moteur pour son identification (binaire et NNUE), sans analyse.
+    # Le fingerprint du cache doit toujours correspondre a ce moteur.
+    moteur, identite = _ouvrir_stockfish(args)
+    _fermer_moteur(moteur)
+    profonds = []
+    with AnnotationStore(dossier, _config_store(identite)) as store:
+        for position_id in ids_audit:
+            annotee = store.get(cle_position(par_id[position_id], NODES_AUDIT))
+            if annotee is None:
+                raise ValueError(
+                    f"audit en cache incomplet : {position_id} ; "
+                    "aucune recherche lancee")
+            profonds.append(annotee)
+    selection, search_ids, audit = finaliser_depuis_audit(annotes, profonds)
+    sources = json.loads((dossier / "sources.json").read_text(encoding="utf-8"))
+    manifeste = assembler_manifeste(
+        dataset_version=args.version, sources=sources, selection=selection,
+        search_ids=search_ids, stockfish=identite, audit=audit)
+    chemin = write_dataset(selection, manifeste, args.output)
+    print(json.dumps({"published": str(chemin), "positions": len(selection),
+                      "search": len(search_ids),
+                      "repaired_positions": audit["repaired_positions_in_dataset"],
+                      "original_audit_passed": audit["passed"],
+                      "accepted_with_warning": audit["accepted_with_warning"]},
+                     sort_keys=True))
 
 
 def _finalize_reserve(dossier: Path) -> None:

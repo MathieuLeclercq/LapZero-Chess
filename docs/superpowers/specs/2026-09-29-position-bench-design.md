@@ -210,11 +210,37 @@ noeuds par coup légal. Les étiquettes à 200 000 noeuds sont acceptées si :
   un regret inférieur ou égal à 0,02 selon l'analyse à 400 000 noeuds ;
 - la moyenne des variations absolues de `S*` est inférieure ou égale à 0,01.
 
-Si une condition échoue, toute la seconde passe est reconstruite à 400 000 noeuds
-par coup, la sélection est recalculée et un nouvel audit est effectué à 800 000
-noeuds avec les mêmes critères. Si ce deuxième audit échoue, la publication est
-arrêtée pour examiner les annotations. Le budget retenu et les résultats des
-audits figurent dans le manifeste.
+Par défaut, un échec bloque la publication. L'escalade générale envisagée
+initialement (réannoter toute la réserve à 400 000 puis auditer à 800 000 noeuds)
+ne fait pas partie du protocole retenu pour la première publication de `v1`.
+
+Le 1er octobre 2026, le contrôle réel de 500 positions a obtenu une fraction de
+regrets acceptables de 0,942 et une variation moyenne de 0,02036. Pour l'objectif
+de comparaison répétable entre checkpoints, une réparation ciblée a été
+explicitement approuvée :
+
+- réutiliser les 500 annotations à 400 000 noeuds déjà présentes dans le cache,
+  sans nouvelle recherche Stockfish ;
+- remplacer leurs étiquettes dans la réserve en mémoire, puis recalculer la
+  sélection et les catégories sans modifier les seuils ni les quotas ;
+- accepter l'avertissement de stabilité, tout en conservant le rapport initial
+  et `audit.passed = false` dans le manifeste. Le champ
+  `audit.accepted_with_warning = true` rend cette décision explicite ;
+- ne pas présenter une comparaison des annotations corrigées avec elles-mêmes
+  comme un nouvel audit indépendant réussi.
+
+La commande dédiée est `finalize --stage final --repair-from-cached-audit`.
+Elle refuse un audit en cache incomplet et ne lance aucune analyse manquante.
+Stockfish n'est ouvert que pour vérifier l'identité de son binaire et de ses
+réseaux NNUE contre la configuration du cache. La réserve originale est
+conservée. Après sélection, 497 positions corrigées restent dans le banc, les
+9 503 autres conservent les annotations à 200 000 noeuds.
+
+Chaque position publiée porte `annotation_budget_nodes`, le budget demandé par
+coup légal. Le champ `nodes` de chaque coup est le nombre effectivement examiné,
+qui peut différer du budget (par exemple si la recherche se termine sur un mat).
+Le manifeste conserve les identifiants de l'échantillon d'audit original et
+précise qu'aucun nouvel audit de stabilité après réparation n'a été effectué.
 
 ## 5. Composition du banc figé
 
@@ -267,7 +293,11 @@ recommence la sélection. Il ne relâche silencieusement aucun filtre.
 Le sous-banc MCTS contient 256 positions prises dans ces 10 000. Il reprend au
 plus près les proportions de phase et de WDL, avec une sélection par hachage
 indépendante. Il est stocké comme une liste d'identifiants dans le manifeste et ne
-change pas entre les checkpoints.
+change pas entre les checkpoints. Pour la première publication de `v1`, les
+256 positions sont sélectionnées uniquement parmi les 497 positions corrigées
+à 400 000 noeuds présentes dans le banc. Les neuf quotas du sous-banc restent
+inchangés, et le hachage n'utilise aucune performance de LapZero pour choisir
+ces positions. Le MCTS de LapZero garde son propre budget de 384 simulations.
 
 ## 6. Format et versionnement
 
@@ -572,7 +602,8 @@ L'implémentation est acceptée lorsque :
    256 identifiants ;
 3. chaque coup légal de chaque position possède une WDL Stockfish et un score en
    centipions ou en mat ;
-4. l'audit de stabilité de la section 4.3 passe ;
+4. l'audit de stabilité de la section 4.3 passe, ou l'acceptation explicite après
+   réparation depuis le cache est documentée sans falsifier son résultat initial ;
 5. deux passages policy sur le même modèle produisent les mêmes métriques ;
 6. trois évaluations complètes consécutives sont chronométrées sur la machine
    d'entraînement de référence ; leur durée vise environ cinq minutes, avec les
